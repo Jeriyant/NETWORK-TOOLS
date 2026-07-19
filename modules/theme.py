@@ -62,6 +62,20 @@ MODE_LABELS = {
     "neon_magenta": "Tema: Neon Magenta",
 }
 
+# Urutan di dropdown
+THEME_MODES = ["system", "light", "dark", "neon_magenta"]
+
+
+def theme_dropdown_values() -> list[str]:
+    return [MODE_LABELS[m] for m in THEME_MODES if m in MODE_LABELS]
+
+
+def mode_from_label(label: str) -> str:
+    for mode, text in MODE_LABELS.items():
+        if text == label:
+            return mode
+    return "system"
+
 
 def windows_prefers_light() -> bool:
     """Read Windows AppsUseLightTheme (1=light, 0=dark)."""
@@ -86,7 +100,7 @@ def resolve_theme(mode: str) -> str:
 
 
 def next_mode(mode: str) -> str:
-    order = ["system", "light", "dark", "neon_magenta"]
+    order = list(THEME_MODES)
     mode = (mode or "system").lower()
     if mode not in order:
         return "light"

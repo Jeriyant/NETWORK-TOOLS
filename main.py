@@ -30,11 +30,20 @@ from modules.settings import (
     resolve_target_ip,
 )
 from modules.telegram_share import capture_window_region, send_via_telegram
-from modules.theme import MODE_LABELS, THEMES, next_mode, resolve_theme
+from modules.theme import (
+    MODE_LABELS,
+    THEMES,
+    mode_from_label,
+    next_mode,
+    resolve_theme,
+    theme_dropdown_values,
+)
 from modules.traceroute_runner import TracerouteRunner
 
 # Tools that require Administrator (UAC)
 ADMIN_TOOLS = frozenset({"refresh", "cache", "printer"})
+# Langsung jalan saat menu dibuka (tanpa tombol Jalankan)
+AUTO_RUN_TOOLS = frozenset({"refresh", "cache", "printer"})
 
 # Active palette (updated when theme changes)
 COLORS: dict[str, str] = dict(THEMES["light"])
@@ -44,9 +53,9 @@ TOOLS = [
     ("traceroute", "Traceroute", "↗", "tracert -d ke alamat IP/host"),
     ("dns", "DNS Test", "◎", "Uji DNS & deteksi leak"),
     ("speedtest", "Speedtest", "⚡", "Speedtest di browser bawaan aplikasi"),
-    ("refresh", "Refresh Network", "↻", "Disable/enable NIC & renew DHCP"),
-    ("printer", "Fix Printer", "🖨", "Clear spooler antrian printer"),
-    ("cache", "Clear Cache", "⌫", "Hapus TEMP & folder RDP6"),
+    ("refresh", "Refresh Network", "↻", "Otomatis renew DHCP (Admin)"),
+    ("printer", "Fix Printer", "🖨", "Otomatis clear spooler (Admin)"),
+    ("cache", "Clear Cache", "⌫", "Otomatis hapus TEMP & RDP6 (Admin)"),
     ("anydesk", "Anydesk", "⌨", "Buka AnyDesk, salin ID, kirim ke Telegram"),
 ]
 
@@ -142,14 +151,7 @@ class NetworkToolsApp(ctk.CTk):
         if not is_admin():
             return
         self.open_tool(key)
-        starters = {
-            "refresh": self._start_refresh,
-            "cache": self._start_cache,
-            "printer": self._start_printer,
-        }
-        fn = starters.get(key)
-        if fn:
-            self.after(400, fn)
+        # AUTO_RUN_TOOLS sudah dijalankan dari open_tool
 
     def _check_update_on_startup(self) -> None:
         """Cek update ke GitHub setiap kali aplikasi dijalankan."""
@@ -391,22 +393,34 @@ class NetworkToolsApp(ctk.CTk):
         self.theme_mode = next_mode(self.theme_mode)
         self._apply_palette(refresh_ui=True)
 
+    def _on_theme_dropdown(self, choice: str) -> None:
+        mode = mode_from_label(choice)
+        if mode == self.theme_mode:
+            return
+        self.theme_mode = mode
+        self._apply_palette(refresh_ui=True)
+
     def _header_actions(self, parent: ctk.CTkFrame | None = None) -> None:
         host = parent if parent is not None else self._header
         actions = ctk.CTkFrame(host, fg_color="transparent")
         actions.pack(side="right", pady=4)
-        ctk.CTkButton(
+        values = theme_dropdown_values()
+        current = MODE_LABELS.get(self.theme_mode, values[0])
+        combo = ctk.CTkOptionMenu(
             actions,
-            text=MODE_LABELS.get(self.theme_mode, "Tema"),
-            width=130,
+            values=values,
+            width=180,
             height=34,
             fg_color=COLORS["tile"],
-            hover_color=COLORS["tile_hover"],
+            button_color=COLORS["accent"],
+            button_hover_color=COLORS["accent_dim"],
+            dropdown_fg_color=COLORS["panel"],
+            dropdown_hover_color=COLORS["tile_hover"],
             text_color=COLORS["text"],
-            border_width=1,
-            border_color=COLORS["border"],
-            command=self._cycle_theme,
-        ).pack(side="right")
+            command=self._on_theme_dropdown,
+        )
+        combo.set(current if current in values else values[0])
+        combo.pack(side="right")
 
     def _build_sysinfo_bar(self, parent: ctk.CTkFrame) -> None:
         """Fluent status strip: label kecil + nilai tegas, dipisah garis halus."""
@@ -737,6 +751,17 @@ class NetworkToolsApp(ctk.CTk):
             ).pack(side="right")
 
         self._seed_console(key)
+
+        if key in AUTO_RUN_TOOLS:
+            # Langsung jalan setelah UI siap (tanpa tombol Jalankan)
+            starters = {
+                "refresh": self._start_refresh,
+                "printer": self._start_printer,
+                "cache": self._start_cache,
+            }
+            fn = starters.get(key)
+            if fn:
+                self.after(150, fn)
 
     def _open_speedtest_view(self) -> None:
         """Show Speedtest inside embedded Edge WebView2 (no external browser)."""
@@ -1161,16 +1186,16 @@ class NetworkToolsApp(ctk.CTk):
             "dns": "Klik Jalankan untuk uji DNS mirip leak test.",
             "speedtest": "Speedtest berjalan di browser bawaan aplikasi.",
             "refresh": (
-                "Klik Jalankan untuk disable/enable adapter & renew DHCP.\n"
+                "Menjalankan otomatis: disable/enable adapter & renew DHCP.\n"
                 "Fitur ini meminta Run as Administrator (UAC)."
             ),
             "printer": (
-                "Klik Jalankan untuk clear spooler printer:\n"
-                "net stop spooler → hapus antrian → net start spooler.\n"
+                "Menjalankan otomatis: clear spooler printer\n"
+                "(net stop spooler → hapus antrian → net start spooler).\n"
                 "Meminta Run as Administrator (UAC)."
             ),
             "cache": (
-                "Klik Jalankan untuk hapus TEMP & folder RDP6.\n"
+                "Menjalankan otomatis: hapus TEMP & folder RDP6.\n"
                 "Fitur ini meminta Run as Administrator (UAC)."
             ),
             "anydesk": (
@@ -1197,36 +1222,13 @@ class NetworkToolsApp(ctk.CTk):
                 text_color=COLORS["on_accent"],
                 command=self._start_dns,
             ).pack(side="left")
-        elif key == "refresh":
-            ctk.CTkButton(
+        elif key in AUTO_RUN_TOOLS:
+            ctk.CTkLabel(
                 parent,
-                text="Jalankan",
-                width=120,
-                fg_color=COLORS["accent"],
-                hover_color=COLORS["accent_dim"],
-                text_color=COLORS["on_accent"],
-                command=self._start_refresh,
-            ).pack(side="left")
-        elif key == "printer":
-            ctk.CTkButton(
-                parent,
-                text="Jalankan",
-                width=120,
-                fg_color=COLORS["accent"],
-                hover_color=COLORS["accent_dim"],
-                text_color=COLORS["on_accent"],
-                command=self._start_printer,
-            ).pack(side="left")
-        elif key == "cache":
-            ctk.CTkButton(
-                parent,
-                text="Jalankan",
-                width=120,
-                fg_color=COLORS["accent"],
-                hover_color=COLORS["accent_dim"],
-                text_color=COLORS["on_accent"],
-                command=self._start_cache,
-            ).pack(side="left")
+                text="Berjalan otomatis…",
+                font=ctk.CTkFont(family="Segoe UI", size=13),
+                text_color=COLORS["muted"],
+            ).pack(side="left", pady=4)
         elif key == "anydesk":
             ctk.CTkButton(
                 parent,
