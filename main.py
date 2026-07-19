@@ -371,7 +371,7 @@ class NetworkToolsApp(ctk.CTk):
 
         ctk.CTkButton(
             card,
-            text="OK — Perbarui Sekarang",
+            text="Update Sekarang",
             font=ctk.CTkFont(family="Segoe UI Semibold", size=15),
             height=48,
             corner_radius=12,
