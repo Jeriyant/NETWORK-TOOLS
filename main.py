@@ -176,55 +176,220 @@ class NetworkToolsApp(ctk.CTk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _prompt_update(self, info: Any) -> None:
+        """Update wajib: dialog kustom, hanya OK — tanpa update app tidak bisa dipakai."""
         import sys
         import tempfile
-        import threading
         import webbrowser
         from pathlib import Path
 
         from modules.updater import is_direct_exe_url
 
-        ver = getattr(info, "version", "?")
+        ver = str(getattr(info, "version", "?") or "?")
         notes = (getattr(info, "changelog", "") or "").strip()
-        if len(notes) > 400:
-            notes = notes[:400] + "…"
-        body = (
-            f"Versi baru tersedia: v{ver}\n"
-            f"Versi saat ini: v{APP_VERSION}\n\n"
+        if len(notes) > 600:
+            notes = notes[:600] + "…"
+
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("Update Wajib — Network Tools")
+        dlg.geometry("520x520")
+        dlg.minsize(480, 460)
+        dlg.resizable(False, False)
+        dlg.transient(self)
+        dlg.attributes("-topmost", True)
+        dlg.configure(fg_color=COLORS["bg"])
+        dlg.grab_set()
+        dlg.focus_force()
+
+        self.update_idletasks()
+        px = self.winfo_rootx() + (self.winfo_width() - 520) // 2
+        py = self.winfo_rooty() + (self.winfo_height() - 520) // 2
+        dlg.geometry(f"520x520+{max(px, 40)}+{max(py, 40)}")
+
+        state = {"accepted": False}
+
+        def force_exit() -> None:
+            import os
+
+            if state["accepted"]:
+                return
+            try:
+                dlg.grab_release()
+            except Exception:
+                pass
+            os._exit(0)
+
+        dlg.protocol("WM_DELETE_WINDOW", force_exit)
+
+        # Kartu utama
+        card = ctk.CTkFrame(
+            dlg,
+            fg_color=COLORS["panel"],
+            corner_radius=16,
+            border_width=1,
+            border_color=COLORS["border"],
         )
-        if notes:
-            body += f"Catatan:\n{notes}\n\n"
-        body += f"Sumber: {UPDATE_REPO}\n\nUnduh dan pasang sekarang?"
+        card.pack(fill="both", expand=True, padx=18, pady=18)
 
-        if not messagebox.askyesno("Update Network Tools", body, parent=self):
-            if getattr(info, "mandatory", False):
-                messagebox.showwarning(
-                    "Update wajib",
-                    "Update ini bersifat wajib. Aplikasi akan ditutup.",
-                    parent=self,
-                )
-                self.destroy()
-            return
+        # Header accent
+        header = ctk.CTkFrame(card, fg_color=COLORS["accent"], corner_radius=14, height=88)
+        header.pack(fill="x", padx=14, pady=(14, 0))
+        header.pack_propagate(False)
 
-        url = str(getattr(info, "download_url", "") or "")
-        if not url:
-            webbrowser.open(UPDATE_REPO)
-            return
+        ctk.CTkLabel(
+            header,
+            text="UPDATE WAJIB",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=COLORS["on_accent"],
+        ).pack(anchor="w", padx=18, pady=(14, 0))
 
-        # Bukan file .exe langsung / mode dev → buka halaman GitHub
-        if not is_direct_exe_url(url) or not getattr(sys, "frozen", False):
-            webbrowser.open(url if url.startswith("http") else UPDATE_REPO)
-            if not getattr(sys, "frozen", False):
-                messagebox.showinfo(
-                    "Update",
-                    "Mode development: unduh EXE dari GitHub, lalu ganti manual.\n"
-                    "Auto-replace hanya berjalan pada NetworkTools.exe.",
-                    parent=self,
-                )
-            return
+        ctk.CTkLabel(
+            header,
+            text="Versi baru tersedia",
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=22),
+            text_color=COLORS["on_accent"],
+        ).pack(anchor="w", padx=18, pady=(2, 0))
 
-        dest = Path(tempfile.gettempdir()) / f"NetworkTools_update_v{ver}.exe"
-        self._show_download_progress(url, dest, str(ver), info)
+        ctk.CTkLabel(
+            header,
+            text="Aplikasi tidak dapat digunakan sebelum diperbarui.",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color=COLORS["on_accent"],
+        ).pack(anchor="w", padx=18, pady=(2, 12))
+
+        body = ctk.CTkFrame(card, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=18, pady=16)
+
+        # Versi comparison
+        ver_row = ctk.CTkFrame(body, fg_color="transparent")
+        ver_row.pack(fill="x", pady=(0, 14))
+        ver_row.grid_columnconfigure((0, 2), weight=1)
+        ver_row.grid_columnconfigure(1, weight=0)
+
+        def _ver_chip(parent: Any, label: str, value: str, emphasize: bool) -> None:
+            chip = ctk.CTkFrame(
+                parent,
+                fg_color=COLORS["bg"],
+                corner_radius=12,
+                border_width=1,
+                border_color=COLORS["accent"] if emphasize else COLORS["border"],
+            )
+            chip.pack(fill="both", expand=True)
+            ctk.CTkLabel(
+                chip,
+                text=label,
+                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+                text_color=COLORS["muted"],
+            ).pack(anchor="w", padx=14, pady=(10, 0))
+            ctk.CTkLabel(
+                chip,
+                text=value,
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=18),
+                text_color=COLORS["accent"] if emphasize else COLORS["text"],
+            ).pack(anchor="w", padx=14, pady=(2, 12))
+
+        left = ctk.CTkFrame(ver_row, fg_color="transparent")
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        _ver_chip(left, "SAAT INI", f"v{APP_VERSION}", False)
+
+        ctk.CTkLabel(
+            ver_row,
+            text="→",
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=20),
+            text_color=COLORS["accent"],
+        ).grid(row=0, column=1, padx=4)
+
+        right = ctk.CTkFrame(ver_row, fg_color="transparent")
+        right.grid(row=0, column=2, sticky="nsew", padx=(6, 0))
+        _ver_chip(right, "TERBARU", f"v{ver}", True)
+
+        ctk.CTkLabel(
+            body,
+            text="Catatan rilis",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=COLORS["muted"],
+            anchor="w",
+        ).pack(fill="x", pady=(0, 6))
+
+        notes_box = ctk.CTkTextbox(
+            body,
+            height=140,
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            fg_color=COLORS["bg"],
+            text_color=COLORS["text"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=10,
+            wrap="word",
+            activate_scrollbars=True,
+        )
+        notes_box.pack(fill="both", expand=True)
+        notes_box.insert("1.0", notes or "Pembaruan keamanan & perbaikan stabilitas.")
+        notes_box.configure(state="disabled")
+
+        ctk.CTkLabel(
+            body,
+            text="Dengan menekan OK, unduhan & pemasangan akan dimulai.",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=COLORS["muted"],
+            anchor="w",
+        ).pack(fill="x", pady=(10, 0))
+
+        def on_ok() -> None:
+            import os
+
+            state["accepted"] = True
+            try:
+                dlg.grab_release()
+                dlg.destroy()
+            except Exception:
+                pass
+
+            url = str(getattr(info, "download_url", "") or "")
+            if not url:
+                webbrowser.open(UPDATE_REPO)
+                os._exit(0)
+                return
+
+            if not is_direct_exe_url(url) or not getattr(sys, "frozen", False):
+                webbrowser.open(url if url.startswith("http") else UPDATE_REPO)
+                if not getattr(sys, "frozen", False):
+                    messagebox.showinfo(
+                        "Update",
+                        "Mode development: unduh EXE dari GitHub, lalu ganti manual.",
+                        parent=self,
+                    )
+                    return
+                os._exit(0)
+                return
+
+            dest = Path(tempfile.gettempdir()) / f"NetworkTools_update_v{ver}.exe"
+            self._show_download_progress(url, dest, ver, info)
+
+        ctk.CTkButton(
+            card,
+            text="OK — Perbarui Sekarang",
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=15),
+            height=48,
+            corner_radius=12,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+            command=on_ok,
+        ).pack(fill="x", padx=18, pady=(8, 18))
+
+        # Blok interaksi window utama selama dialog terbuka
+        try:
+            self.attributes("-disabled", True)
+        except Exception:
+            pass
+
+        def _restore_main(_: Any = None) -> None:
+            try:
+                self.attributes("-disabled", False)
+            except Exception:
+                pass
+
+        dlg.bind("<Destroy>", _restore_main)
 
     def _show_download_progress(
         self,
@@ -233,15 +398,15 @@ class NetworkToolsApp(ctk.CTk):
         ver: str,
         info: Any,
     ) -> None:
-        """Dialog progress bar saat mengunduh update."""
+        """Dialog progress bar saat mengunduh update (wajib — tidak bisa dibatalkan)."""
         import threading
         import webbrowser
 
         from modules.updater import apply_update_and_restart, download_file
 
         dlg = ctk.CTkToplevel(self)
-        dlg.title(f"Mengunduh v{ver}")
-        dlg.geometry("420x180")
+        dlg.title(f"Memasang v{ver}")
+        dlg.geometry("460x220")
         dlg.resizable(False, False)
         dlg.transient(self)
         dlg.attributes("-topmost", True)
@@ -249,19 +414,38 @@ class NetworkToolsApp(ctk.CTk):
         dlg.grab_set()
 
         self.update_idletasks()
-        px = self.winfo_rootx() + (self.winfo_width() - 420) // 2
-        py = self.winfo_rooty() + (self.winfo_height() - 180) // 2
-        dlg.geometry(f"420x180+{max(px, 40)}+{max(py, 40)}")
+        px = self.winfo_rootx() + (self.winfo_width() - 460) // 2
+        py = self.winfo_rooty() + (self.winfo_height() - 220) // 2
+        dlg.geometry(f"460x220+{max(px, 40)}+{max(py, 40)}")
 
-        frame = ctk.CTkFrame(dlg, fg_color=COLORS["panel"], corner_radius=12)
+        # Tutup window = keluar (update wajib)
+        def block_close() -> None:
+            pass
+
+        dlg.protocol("WM_DELETE_WINDOW", block_close)
+
+        frame = ctk.CTkFrame(
+            dlg,
+            fg_color=COLORS["panel"],
+            corner_radius=14,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
         frame.pack(fill="both", expand=True, padx=14, pady=14)
 
         ctk.CTkLabel(
             frame,
-            text=f"Mengunduh Network Tools v{ver}",
-            font=ctk.CTkFont(family="Segoe UI Semibold", size=15),
+            text=f"Memasang Network Tools v{ver}",
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=16),
             text_color=COLORS["text"],
-        ).pack(anchor="w", padx=16, pady=(14, 4))
+        ).pack(anchor="w", padx=18, pady=(16, 2))
+
+        ctk.CTkLabel(
+            frame,
+            text="Jangan tutup aplikasi selama proses berlangsung.",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color=COLORS["muted"],
+        ).pack(anchor="w", padx=18, pady=(0, 12))
 
         status = ctk.CTkLabel(
             frame,
@@ -269,25 +453,26 @@ class NetworkToolsApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI", size=12),
             text_color=COLORS["muted"],
         )
-        status.pack(anchor="w", padx=16, pady=(0, 10))
+        status.pack(anchor="w", padx=18, pady=(0, 8))
 
         bar = ctk.CTkProgressBar(
             frame,
-            width=360,
-            height=16,
+            width=400,
+            height=18,
             progress_color=COLORS["accent"],
             fg_color=COLORS["border"],
+            corner_radius=8,
         )
-        bar.pack(padx=16, pady=(0, 8))
+        bar.pack(padx=18, pady=(0, 6))
         bar.set(0)
 
         pct = ctk.CTkLabel(
             frame,
             text="0%",
-            font=ctk.CTkFont(family="Segoe UI", size=12),
-            text_color=COLORS["text"],
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=13),
+            text_color=COLORS["accent"],
         )
-        pct.pack(anchor="e", padx=16, pady=(0, 12))
+        pct.pack(anchor="e", padx=18, pady=(0, 16))
 
         state = {"closed": False}
 
@@ -312,7 +497,6 @@ class NetworkToolsApp(ctk.CTk):
                         text=f"Mengunduh... {mb_r:.1f} / {mb_t:.1f} MB"
                     )
                 else:
-                    # Ukuran tidak diketahui — tampilkan MB + isi bar berdenyut
                     mb_r = received / (1024 * 1024)
                     pulse = (received % (8 * 1024 * 1024)) / (8 * 1024 * 1024)
                     bar.set(min(0.95, 0.08 + pulse * 0.85))
@@ -321,60 +505,71 @@ class NetworkToolsApp(ctk.CTk):
 
             self.after(0, lambda: safe_ui(apply))
 
-        def worker() -> None:
-            try:
-                from modules.updater import verify_exe_file
+        def start_download() -> None:
+            def worker() -> None:
+                try:
+                    from modules.updater import verify_exe_file
 
-                expected = getattr(info, "size", None)
-                download_file(
-                    url,
-                    dest,
-                    on_progress=on_progress,
-                    expected_size=expected if isinstance(expected, int) else None,
-                )
-                verify_exe_file(
-                    dest,
-                    expected_size=expected if isinstance(expected, int) else None,
-                )
-                apply_update_and_restart(dest)
-
-                def ok() -> None:
-                    import os
-
-                    state["closed"] = True
-                    try:
-                        dlg.grab_release()
-                        dlg.destroy()
-                    except Exception:
-                        pass
-                    messagebox.showinfo(
-                        "Update",
-                        "Unduhan selesai. Aplikasi akan ditutup.\n"
-                        "Setelah itu muncul dialog — klik OK untuk membuka versi baru.",
-                        parent=self,
+                    expected = getattr(info, "size", None)
+                    download_file(
+                        url,
+                        dest,
+                        on_progress=on_progress,
+                        expected_size=expected if isinstance(expected, int) else None,
                     )
-                    os._exit(0)
-
-                self.after(0, ok)
-            except Exception as exc:
-                def fail() -> None:
-                    state["closed"] = True
-                    try:
-                        dlg.grab_release()
-                        dlg.destroy()
-                    except Exception:
-                        pass
-                    messagebox.showerror(
-                        "Update gagal",
-                        f"Gagal memasang update:\n{exc}\n\n"
-                        "Unduh manual dari GitHub Releases jika perlu.",
-                        parent=self,
+                    verify_exe_file(
+                        dest,
+                        expected_size=expected if isinstance(expected, int) else None,
                     )
-                    webbrowser.open(getattr(info, "html_url", None) or UPDATE_REPO)
+                    apply_update_and_restart(dest)
 
-                self.after(0, fail)
+                    def ok() -> None:
+                        import os
 
-        threading.Thread(target=worker, daemon=True).start()
+                        state["closed"] = True
+                        try:
+                            dlg.grab_release()
+                            dlg.destroy()
+                        except Exception:
+                            pass
+                        messagebox.showinfo(
+                            "Update",
+                            "Unduhan selesai. Aplikasi akan ditutup.\n"
+                            "Setelah itu muncul dialog — klik OK untuk membuka versi baru.",
+                            parent=self,
+                        )
+                        os._exit(0)
+
+                    self.after(0, ok)
+                except Exception as exc:
+                    def fail() -> None:
+                        state["closed"] = True
+                        try:
+                            dlg.grab_release()
+                            dlg.destroy()
+                        except Exception:
+                            pass
+                        retry = messagebox.askretrycancel(
+                            "Update gagal",
+                            f"Gagal memasang update:\n{exc}\n\n"
+                            "Coba lagi? (Cancel = keluar aplikasi)",
+                            parent=self,
+                        )
+                        if retry:
+                            self._show_download_progress(url, dest, ver, info)
+                        else:
+                            webbrowser.open(
+                                getattr(info, "html_url", None) or UPDATE_REPO
+                            )
+                            import os
+
+                            os._exit(0)
+
+                    self.after(0, fail)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        start_download()
 
     def _apply_palette(self, refresh_ui: bool = True) -> None:
         resolved = resolve_theme(self.theme_mode)

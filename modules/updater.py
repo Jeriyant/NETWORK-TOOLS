@@ -109,7 +109,7 @@ def check_github_release(local_version: str) -> UpdateInfo | None:
         version=tag.lstrip("vV"),
         download_url=url,
         changelog=str(data.get("body") or "").strip(),
-        mandatory=False,
+        mandatory=True,
         html_url=str(data.get("html_url") or GITHUB_REPO_URL),
         size=size,
     )
