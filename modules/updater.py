@@ -220,12 +220,10 @@ def _clean_environ() -> dict[str, str]:
 
 def apply_update_and_restart(downloaded_exe: Path, kind: str | None = None) -> None:
     """
-    Pasang update single-file EXE secara andal:
+    Pasang update single-file EXE secara andal (tanpa jendela CMD):
 
-    1. Salin paket baru ke ``NetworkTools.exe.new`` SELAGI app masih jalan
-       (file .exe yang terkunci tidak perlu diganti dulu).
-    2. Jalankan updater ``.cmd`` via ShellExecute (bukan PowerShell detached
-       yang sering mati diam-diam).
+    1. Salin paket baru ke ``NetworkTools.exe.new`` selagi app masih jalan.
+    2. Jalankan updater lewat ``wscript`` (tersembunyi) — bukan cmd terlihat.
     3. Setelah PID keluar: rename exe → .old, .new → exe, lalu start.
     """
     if not getattr(sys, "frozen", False):
@@ -244,7 +242,6 @@ def apply_update_and_restart(downloaded_exe: Path, kind: str | None = None) -> N
     err_log = Path(tempfile.gettempdir()) / "network_tools_update_error.txt"
     ok_log = Path(tempfile.gettempdir()) / "network_tools_update_ok.txt"
 
-    # Stage file baru di samping EXE lama (boleh ditulis meski EXE terkunci)
     try:
         if staged.is_file():
             staged.unlink(missing_ok=True)
@@ -261,10 +258,9 @@ def apply_update_and_restart(downloaded_exe: Path, kind: str | None = None) -> N
     verify_exe_file(staged)
 
     bat = Path(tempfile.gettempdir()) / f"network_tools_apply_update_{pid}.cmd"
-    exe_name = current.name  # NetworkTools.exe
-    # cmd.exe — lebih andal daripada PowerShell DETACHED untuk self-replace.
-    # Penting: hapus _MEIPASS sebelum start agar bootloader tidak warisi folder
-    # extract lama (penyebab popup error DLL meski app akhirnya jalan).
+    vbs = Path(tempfile.gettempdir()) / f"network_tools_apply_update_{pid}.vbs"
+    # Jeda pakai ping (bukan timeout) — timeout sering memunculkan jendela CMD.
+    # Tunggu PID lalu jeda tetap; jangan poll semua NetworkTools.exe (bisa spam lama).
     script = f"""@echo off
 setlocal EnableExtensions
 set "TARGET={current}"
@@ -275,46 +271,31 @@ set "OKLOG={ok_log}"
 set "OLDPID={pid}"
 set "RUNTIMEDIR={runtime_dir}"
 set "TEMPSRC={source}"
-set "EXENAME={exe_name}"
 
-rem Hapus log lama
 del /F /Q "%ERRLOG%" >nul 2>&1
 del /F /Q "%OKLOG%" >nul 2>&1
 
-rem 1) Tunggu proses app (PID) keluar
 set /a TRIES=0
 :waitpid
 tasklist /FI "PID eq %OLDPID%" 2>nul | findstr /R /C:" %OLDPID% " >nul
-if errorlevel 1 goto waitall
+if errorlevel 1 goto waitdone
 set /a TRIES+=1
 if %TRIES% GEQ 90 (
   echo Timeout menunggu PID %OLDPID% keluar.> "%ERRLOG%"
   exit /b 1
 )
-timeout /t 1 /nobreak >nul
+ping 127.0.0.1 -n 2 >nul 2>&1
 goto waitpid
 
-rem 1b) Pastikan tidak ada NetworkTools.exe lain (bootloader parent)
-:waitall
-set /a TRIES=0
-:waitall_loop
-tasklist /FI "IMAGENAME eq %EXENAME%" 2>nul | find /I "%EXENAME%" >nul
-if errorlevel 1 goto waitdone
-set /a TRIES+=1
-if %TRIES% GEQ 90 goto waitdone
-timeout /t 1 /nobreak >nul
-goto waitall_loop
-
 :waitdone
-rem 2) Jeda agar handle file / _MEI lepas sepenuhnya
-timeout /t 5 /nobreak >nul
+rem Jeda agar handle / bootloader PyInstaller lepas
+ping 127.0.0.1 -n 6 >nul 2>&1
 
 if not exist "%STAGED%" (
   echo File staged hilang: %STAGED%> "%ERRLOG%"
   exit /b 2
 )
 
-rem 3) Rename EXE lama → .old (retry jika terkunci)
 set /a TRIES=0
 :trymove
 if exist "%TARGET%.old" del /F /Q "%TARGET%.old" >nul 2>&1
@@ -326,11 +307,10 @@ if %TRIES% GEQ 60 (
   echo Tidak bisa mengunci/me-rename EXE lama.> "%ERRLOG%"
   exit /b 3
 )
-timeout /t 1 /nobreak >nul
+ping 127.0.0.1 -n 2 >nul 2>&1
 goto trymove
 
 :do_swap
-rem 4) .new → EXE aktif
 move /Y "%STAGED%" "%TARGET%" >nul 2>&1
 if not exist "%TARGET%" (
   if exist "%TARGET%.old" move /Y "%TARGET%.old" "%TARGET%" >nul 2>&1
@@ -338,7 +318,6 @@ if not exist "%TARGET%" (
   exit /b 4
 )
 
-rem 5) Verifikasi ukuran kasar
 for %%A in ("%TARGET%") do set SZNEW=%%~zA
 if %SZNEW% LSS 8000000 (
   echo EXE baru terlalu kecil ^(%SZNEW%^).> "%ERRLOG%"
@@ -349,38 +328,46 @@ if %SZNEW% LSS 8000000 (
   exit /b 5
 )
 
-rem 6) Bersihkan runtime extract + file sementara
 if exist "%RUNTIMEDIR%" rd /S /Q "%RUNTIMEDIR%" >nul 2>&1
-timeout /t 2 /nobreak >nul
+ping 127.0.0.1 -n 3 >nul 2>&1
 if exist "%RUNTIMEDIR%" rd /S /Q "%RUNTIMEDIR%" >nul 2>&1
 del /F /Q "%TEMPSRC%" >nul 2>&1
 del /F /Q "%TARGET%.old" >nul 2>&1
 
 echo OK v-swap %SZNEW%> "%OKLOG%"
 
-rem 7) Jalankan EXE baru — buang env PyInstaller agar tidak muncul error DLL palsu
 set "_MEIPASS="
 set "_MEIPASS2="
 set "PYTHONHOME="
 set "PYTHONPATH="
-timeout /t 1 /nobreak >nul
+ping 127.0.0.1 -n 2 >nul 2>&1
 start "" /D "%WORKDIR%" "%TARGET%"
 
-timeout /t 2 /nobreak >nul
-del "%~f0" >nul 2>&1
+ping 127.0.0.1 -n 3 >nul 2>&1
+del /F /Q "{vbs}" >nul 2>&1
+del /F /Q "%~f0" >nul 2>&1
 """
     bat.write_text(script, encoding="utf-8")
 
-    # Utamakan Popen + env bersih (tanpa _MEIPASS) agar start EXE baru tidak error DLL.
-    # ShellExecute sebagai cadangan.
-    launched = False
-    flags = 0
+    # VBS Run ..., 0 = jendela tersembunyi (mencegah spam CMD dari child process)
+    bat_path = str(bat)
+    vbs.write_text(
+        'Set sh = CreateObject("WScript.Shell")\r\n'
+        f'sh.Run "cmd.exe /d /c ""{bat_path}""", 0, False\r\n',
+        encoding="ascii",
+        errors="replace",
+    )
+
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    flags = no_window
     flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
     flags |= getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
     flags |= 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
+
+    launched = False
     try:
         subprocess.Popen(
-            ["cmd.exe", "/c", str(bat)],
+            ["wscript.exe", "//B", "//Nologo", str(vbs)],
             cwd=str(workdir),
             env=_clean_environ(),
             creationflags=flags,
@@ -401,13 +388,30 @@ del "%~f0" >nul 2>&1
                 ctypes.windll.shell32.ShellExecuteW(
                     None,
                     "open",
-                    "cmd.exe",
-                    f'/c call "{bat}"',
+                    "wscript.exe",
+                    f'//B //Nologo "{vbs}"',
                     str(workdir),
                     0,  # SW_HIDE
                 )
             )
             launched = rc > 32
+        except Exception:
+            launched = False
+
+    if not launched:
+        # Cadangan terakhir: cmd tersembunyi langsung
+        try:
+            subprocess.Popen(
+                ["cmd.exe", "/d", "/c", str(bat)],
+                cwd=str(workdir),
+                env=_clean_environ(),
+                creationflags=flags,
+                close_fds=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            launched = True
         except Exception:
             launched = False
 
