@@ -220,12 +220,13 @@ def _clean_environ() -> dict[str, str]:
 
 def apply_update_and_restart(downloaded_exe: Path, kind: str | None = None) -> None:
     """
-    Pasang update single-file EXE secara andal (tanpa jendela CMD):
+    Pasang update: hanya ganti file EXE (tanpa sentuh folder runtime).
 
     1. Salin paket baru ke ``NetworkTools.exe.new`` selagi app masih jalan.
-    2. Jalankan updater lewat ``wscript`` (tersembunyi) — bukan cmd terlihat.
-    3. Setelah PID keluar: rename exe → .old, .new → exe.
-    4. Tidak auto-start — user membuka aplikasi lagi secara manual.
+    2. Setelah PID keluar: rename exe → .old, .new → exe.
+    3. Hapus .old + file unduhan sementara.
+    4. Tidak menghapus runtime/_MEI* (itu penyebab error python312.dll).
+    5. Tidak auto-start — user membuka aplikasi lagi secara manual.
     """
     if not getattr(sys, "frozen", False):
         raise RuntimeError("Auto-replace hanya tersedia pada build .exe")
@@ -235,11 +236,6 @@ def apply_update_and_restart(downloaded_exe: Path, kind: str | None = None) -> N
     workdir = current.parent
     staged = current.with_name(current.name + ".new")  # NetworkTools.exe.new
     pid = os.getpid()
-    runtime_dir = (
-        Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
-        / "NetworkTools"
-        / "runtime"
-    )
     err_log = Path(tempfile.gettempdir()) / "network_tools_update_error.txt"
     ok_log = Path(tempfile.gettempdir()) / "network_tools_update_ok.txt"
 
@@ -260,8 +256,7 @@ def apply_update_and_restart(downloaded_exe: Path, kind: str | None = None) -> N
 
     bat = Path(tempfile.gettempdir()) / f"network_tools_apply_update_{pid}.cmd"
     vbs = Path(tempfile.gettempdir()) / f"network_tools_apply_update_{pid}.vbs"
-    # Jeda pakai ping (bukan timeout) — timeout sering memunculkan jendela CMD.
-    # Tunggu PID lalu jeda tetap; jangan poll semua NetworkTools.exe (bisa spam lama).
+    # Hanya ganti EXE. Jangan hapus %LOCALAPPDATA%\NetworkTools\runtime.
     script = f"""@echo off
 setlocal EnableExtensions
 set "TARGET={current}"
@@ -270,7 +265,6 @@ set "WORKDIR={workdir}"
 set "ERRLOG={err_log}"
 set "OKLOG={ok_log}"
 set "OLDPID={pid}"
-set "RUNTIMEDIR={runtime_dir}"
 set "TEMPSRC={source}"
 
 del /F /Q "%ERRLOG%" >nul 2>&1
@@ -289,8 +283,8 @@ ping 127.0.0.1 -n 2 >nul 2>&1
 goto waitpid
 
 :waitdone
-rem Jeda agar handle / bootloader PyInstaller lepas
-ping 127.0.0.1 -n 6 >nul 2>&1
+rem Jeda agar handle EXE lama lepas
+ping 127.0.0.1 -n 4 >nul 2>&1
 
 if not exist "%STAGED%" (
   echo File staged hilang: %STAGED%> "%ERRLOG%"
@@ -329,20 +323,11 @@ if %SZNEW% LSS 8000000 (
   exit /b 5
 )
 
-if exist "%RUNTIMEDIR%" rd /S /Q "%RUNTIMEDIR%" >nul 2>&1
-ping 127.0.0.1 -n 3 >nul 2>&1
-if exist "%RUNTIMEDIR%" rd /S /Q "%RUNTIMEDIR%" >nul 2>&1
+rem Hanya bersihkan file update — JANGAN hapus folder runtime/_MEI*
 del /F /Q "%TEMPSRC%" >nul 2>&1
 del /F /Q "%TARGET%.old" >nul 2>&1
 
-echo OK v-swap %SZNEW%> "%OKLOG%"
-
-set "_MEIPASS="
-set "_MEIPASS2="
-set "PYTHONHOME="
-set "PYTHONPATH="
-rem Jangan auto-start EXE baru — biarkan user membuka manual (hindari error residual).
-ping 127.0.0.1 -n 2 >nul 2>&1
+echo OK exe-only %SZNEW%> "%OKLOG%"
 
 ping 127.0.0.1 -n 2 >nul 2>&1
 del /F /Q "{vbs}" >nul 2>&1
@@ -431,6 +416,38 @@ def cleanup_update_leftovers() -> None:
                 leftover.unlink(missing_ok=True)
         except Exception:
             pass
+
+    # Bersihkan folder _MEI* yang rusak (tanpa python312.dll) — jangan sentuh _MEIPASS aktif
+    try:
+        runtime = (
+            Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
+            / "NetworkTools"
+            / "runtime"
+        )
+        if not runtime.is_dir():
+            return
+        active = ""
+        try:
+            active = str(Path(getattr(sys, "_MEIPASS", "")).resolve()).lower()
+        except Exception:
+            active = ""
+        for child in runtime.iterdir():
+            if not child.is_dir() or not child.name.startswith("_MEI"):
+                continue
+            try:
+                if active and str(child.resolve()).lower() == active:
+                    continue
+            except Exception:
+                pass
+            dll = child / "python312.dll"
+            # Folder kosong / rusak (DLL hilang) → aman dihapus
+            if not dll.is_file():
+                try:
+                    shutil.rmtree(child, ignore_errors=True)
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 
 def current_executable_path() -> Path:
