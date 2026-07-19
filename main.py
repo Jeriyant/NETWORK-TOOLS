@@ -2486,11 +2486,13 @@ class NetworkToolsApp(ctk.CTk):
         ).pack(side="left")
 
     def _parse_host_choice(self, choice: str) -> tuple[str, str]:
-        """Return (name, ip) from 'Name — IP' dropdown text."""
-        if "—" in choice:
-            name, ip = choice.split("—", 1)
-            return name.strip(), ip.strip()
-        return choice.strip(), choice.strip()
+        """Return (name, ip) from 'Name - IP' dropdown text."""
+        text = (choice or "").strip()
+        for sep in (" - ", " — ", " – ", "—", "–", "â€”", "â€“"):
+            if sep in text:
+                name, ip = text.split(sep, 1)
+                return name.strip(), ip.strip()
+        return text, text
 
     def _start_ping(self) -> None:
         choice = ""

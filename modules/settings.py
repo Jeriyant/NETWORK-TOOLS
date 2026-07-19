@@ -45,7 +45,7 @@ DEFAULT_THEME = "system"
 DEFAULT_LANG = "id"
 
 # App version — naikkan setiap rilis baru (harus cocok dengan tag GitHub Release)
-APP_VERSION = "1.38"
+APP_VERSION = "1.39"
 UPDATE_REPO = "https://github.com/Jeriyant/NETWORK-TOOLS"
 
 
@@ -110,9 +110,9 @@ def host_dropdown_values() -> list[str]:
         name = h["name"]
         ip = h["ip"]
         if ip == "auto":
-            values.append(f"{name} â€” (otomatis cek gateway)")
+            values.append(f"{name} - (otomatis cek gateway)")
         else:
-            values.append(f"{name} â€” {ip}")
+            values.append(f"{name} - {ip}")
     return values
 
 
@@ -123,6 +123,10 @@ def resolve_target_ip(name: str, ip_text: str) -> tuple[str, str | None]:
     """
     name = (name or "").strip()
     ip_text = (ip_text or "").strip()
+    # Bersihkan sisa teks UI / encoding rusak
+    ip_text = ip_text.replace("\u2014", " ").replace("â€”", " ").strip()
+    if ip_text.startswith("("):
+        ip_text = ip_text.strip("()").strip()
     if name.lower() == "gateway" or ip_text == "auto" or "otomatis" in ip_text.lower():
         gw = detect_default_gateway()
         return name or "Gateway", gw
