@@ -1,6 +1,6 @@
 # Network Tools
 
-Aplikasi desktop Windows (single-file `.exe`) untuk IT Networking.
+Aplikasi desktop Windows untuk IT Networking.
 
 ## Build
 
@@ -8,7 +8,9 @@ Aplikasi desktop Windows (single-file `.exe`) untuk IT Networking.
 build.bat
 ```
 
-Hasil: `dist\NetworkTools.exe` (satu file, tanpa `config.json`).
+Hasil:
+- `dist\NetworkTools\NetworkTools.exe` (+ folder `_internal`)
+- `dist\NetworkTools.zip` (untuk GitHub Release)
 
 ## Fitur
 

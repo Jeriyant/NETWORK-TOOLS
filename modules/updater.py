@@ -1,4 +1,13 @@
-"""Auto-update via GitHub Releases."""
+"""Auto-update via GitHub Releases.
+
+Alur update (sesuai permintaan):
+1. Tutup aplikasi
+2. Hapus program di lokasi lama
+3. Ganti dengan paket baru
+4. Jalankan lagi otomatis (via explorer, env bersih)
+
+Build memakai onedir (folder) agar tidak ada extract _MEI/python312.dll.
+"""
 
 from __future__ import annotations
 
@@ -19,10 +28,9 @@ GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest
 GITHUB_REPO_URL = f"https://github.com/{GITHUB_REPO}"
 USER_AGENT = "NetworkTools-Updater/1.0"
 
-# EXE build normal ~20MB+; di bawah ini hampir pasti rusak/bukan paket lengkap
-MIN_EXE_BYTES = 8 * 1024 * 1024
+MIN_EXE_BYTES = 5 * 1024 * 1024
+MIN_ZIP_BYTES = 5 * 1024 * 1024
 
-# Env PyInstaller yang jika diwariskan ke EXE baru → crash python312.dll / _MEI
 _PYI_ENV_KEYS = (
     "_MEIPASS",
     "_MEIPASS2",
@@ -72,9 +80,10 @@ def _http_get_json(url: str, timeout: int = 12) -> dict | list | None:
         return None
 
 
-def _pick_exe_asset(assets: list[dict]) -> tuple[str | None, int | None]:
-    preferred: list[tuple[str, int | None]] = []
-    others: list[tuple[str, int | None]] = []
+def _pick_update_asset(assets: list[dict]) -> tuple[str | None, int | None]:
+    """Prefer NetworkTools.zip (onedir), fallback ke .exe."""
+    zips: list[tuple[str, int | None]] = []
+    exes: list[tuple[str, int | None]] = []
     for asset in assets or []:
         name = str(asset.get("name") or "")
         url = str(asset.get("browser_download_url") or "")
@@ -83,16 +92,19 @@ def _pick_exe_asset(assets: list[dict]) -> tuple[str | None, int | None]:
         size_raw = asset.get("size")
         size = int(size_raw) if isinstance(size_raw, int) else None
         lower = name.lower()
-        if lower.endswith(".exe"):
-            item = (url, size)
-            if "networktools" in lower or "network-tools" in lower:
-                preferred.append(item)
-            else:
-                others.append(item)
-    if preferred:
-        return preferred[0]
-    if others:
-        return others[0]
+        item = (url, size)
+        if lower.endswith(".zip") and ("networktools" in lower or "network-tools" in lower):
+            zips.append(item)
+        elif lower.endswith(".zip"):
+            zips.append(item)
+        elif lower.endswith(".exe") and ("networktools" in lower or "network-tools" in lower):
+            exes.append(item)
+        elif lower.endswith(".exe"):
+            exes.append(item)
+    if zips:
+        return zips[0]
+    if exes:
+        return exes[0]
     return None, None
 
 
@@ -103,7 +115,7 @@ def check_github_release(local_version: str) -> UpdateInfo | None:
     tag = str(data.get("tag_name") or data.get("name") or "").strip()
     if not tag or not is_newer(tag, local_version):
         return None
-    url, size = _pick_exe_asset(list(data.get("assets") or []))
+    url, size = _pick_update_asset(list(data.get("assets") or []))
     if not url:
         url = str(data.get("html_url") or GITHUB_REPO_URL)
     return UpdateInfo(
@@ -117,7 +129,6 @@ def check_github_release(local_version: str) -> UpdateInfo | None:
 
 
 def check_for_update(local_version: str) -> UpdateInfo | None:
-    """Cek versi baru hanya dari GitHub Releases."""
     try:
         return check_github_release(local_version)
     except Exception:
@@ -131,7 +142,6 @@ def download_file(
     on_progress: Callable[[int, int | None], None] | None = None,
     expected_size: int | None = None,
 ) -> int:
-    """Download file. Returns bytes written. Raises if incomplete/invalid."""
     req = urllib.request.Request(
         url,
         headers={
@@ -177,7 +187,6 @@ def download_file(
 
 
 def verify_exe_file(path: Path, expected_size: int | None = None) -> None:
-    """Pastikan file adalah PE (.exe) yang cukup besar, bukan HTML/error page."""
     if not path.is_file():
         raise RuntimeError("File update tidak ditemukan setelah unduhan.")
     size = path.stat().st_size
@@ -197,170 +206,215 @@ def verify_exe_file(path: Path, expected_size: int | None = None) -> None:
         )
 
 
-def is_direct_exe_url(url: str) -> bool:
+def verify_update_file(path: Path, expected_size: int | None = None) -> None:
+    """Validasi paket update (.zip onedir atau .exe)."""
+    if not path.is_file():
+        raise RuntimeError("File update tidak ditemukan setelah unduhan.")
+    size = path.stat().st_size
+    if expected_size is not None and size != expected_size:
+        raise RuntimeError(
+            f"Ukuran file tidak cocok ({size} ≠ {expected_size} byte)."
+        )
+    suffix = path.suffix.lower()
+    if suffix == ".zip":
+        if size < MIN_ZIP_BYTES:
+            raise RuntimeError(
+                f"Paket zip terlalu kecil ({size} byte) — unduhan gagal."
+            )
+        header = path.read_bytes()[:4]
+        if header[:2] != b"PK":
+            raise RuntimeError("File update bukan ZIP valid.")
+        return
+    verify_exe_file(path, expected_size=expected_size)
+
+
+def is_direct_update_url(url: str) -> bool:
     path = url.split("?", 1)[0].lower()
-    return path.endswith(".exe")
+    return path.endswith(".exe") or path.endswith(".zip")
+
+
+def is_direct_exe_url(url: str) -> bool:
+    """Kompatibilitas lama — true untuk exe atau zip langsung."""
+    return is_direct_update_url(url)
 
 
 def _clean_environ() -> dict[str, str]:
-    """Salin env proses tanpa variabel PyInstaller yang merusak restart."""
-    env = {k: v for k, v in os.environ.items() if k.upper() not in {x.upper() for x in _PYI_ENV_KEYS}}
-    # Pastikan benar-benar tidak ada
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k.upper() not in {x.upper() for x in _PYI_ENV_KEYS}
+    }
     for key in list(env):
         if key.upper().startswith("_MEI"):
             env.pop(key, None)
     return env
 
 
-def apply_update_and_restart(downloaded_exe: Path) -> None:
+def apply_update_and_restart(downloaded: Path) -> None:
     """
-    Ganti EXE yang sedang jalan, lalu restart lewat Task Scheduler.
+    Tutup app → hapus program lama di lokasinya → pasang yang baru → jalankan lagi.
 
-    Penyebab crash python312.dll / _MEIxxx:
-    EXE baru mewarisi env ``_MEIPASS`` dari proses lama, sehingga bootloader
-    mencari DLL di folder temp yang sudah dihapus.
-
-    Perbaikan:
-    - Updater dijalankan dengan env bersih (tanpa _MEIPASS)
-    - Setelah swap file, jadwalkan start lewat Task Scheduler (proses mandiri)
-    - cmd start mengosongkan _MEIPASS sebelum menjalankan EXE baru
+    Restart memakai explorer.exe agar tidak mewarisi env _MEIPASS.
     """
     if not getattr(sys, "frozen", False):
         raise RuntimeError("Auto-replace hanya tersedia pada build .exe")
 
     current = Path(sys.executable).resolve()
-    source = downloaded_exe.resolve()
-    workdir = str(current.parent)
+    workdir = current.parent
+    source = downloaded.resolve()
     pid = os.getpid()
     proc_name = current.stem
-    task_name = f"NetworkToolsRestart_{pid}"
+    is_zip = source.suffix.lower() == ".zip"
 
-    ps1 = Path(tempfile.gettempdir()) / f"network_tools_apply_update_{pid}.ps1"
+    bat = Path(tempfile.gettempdir()) / f"network_tools_apply_update_{pid}.bat"
     err_log = Path(tempfile.gettempdir()) / "network_tools_update_error.txt"
+    stage = Path(tempfile.gettempdir()) / f"network_tools_stage_{pid}"
 
-    def _ps_single(s: str) -> str:
-        return s.replace("'", "''")
+    target = str(current)
+    source_s = str(source)
+    workdir_s = str(workdir)
+    err_s = str(err_log)
+    stage_s = str(stage)
+    proc = f"{proc_name}.exe"
 
-    script = f"""$ErrorActionPreference = 'Continue'
-$target = '{_ps_single(str(current))}'
-$source = '{_ps_single(str(source))}'
-$workdir = '{_ps_single(workdir)}'
-$errLog = '{_ps_single(str(err_log))}'
-$oldPid = {pid}
-$procName = '{_ps_single(proc_name)}'
-$taskName = '{_ps_single(task_name)}'
+    def _fill(template: str) -> str:
+        return (
+            template.replace("__TARGET__", target)
+            .replace("__SOURCE__", source_s)
+            .replace("__WORKDIR__", workdir_s)
+            .replace("__STAGE__", stage_s)
+            .replace("__ERRLOG__", err_s)
+            .replace("__PROC__", proc)
+        )
 
-function Fail([string]$msg) {{
-  Set-Content -LiteralPath $errLog -Value $msg -Encoding UTF8
-  exit 1
-}}
+    if is_zip:
+        body = _fill(
+            r"""@echo off
+setlocal EnableExtensions
+set "TARGET=__TARGET__"
+set "SOURCE=__SOURCE__"
+set "WORKDIR=__WORKDIR__"
+set "STAGE=__STAGE__"
+set "ERRLOG=__ERRLOG__"
+set "PROC=__PROC__"
 
-# Hapus env PyInstaller yang diwariskan dari app lama (penyebab utama crash)
-foreach ($k in @('_MEIPASS','_MEIPASS2','PYTHONHOME','PYTHONPATH','PYTHONNOUSERSITE')) {{
-  Remove-Item "Env:$k" -ErrorAction SilentlyContinue
-}}
-Get-ChildItem Env: | Where-Object {{ $_.Name -like '_MEI*' }} | ForEach-Object {{
-  Remove-Item "Env:$($_.Name)" -ErrorAction SilentlyContinue
-}}
+rem Bersihkan env PyInstaller
+set "_MEIPASS="
+set "_MEIPASS2="
+set "PYTHONHOME="
+set "PYTHONPATH="
 
-if (-not (Test-Path -LiteralPath $source)) {{
-  Fail "Source update hilang: $source"
-}}
+:wait
+tasklist /FI "IMAGENAME eq %PROC%" 2>nul | find /I "%PROC%" >nul
+if not errorlevel 1 (
+  timeout /t 1 /nobreak >nul
+  goto wait
+)
 
-# 1) Tunggu proses app (child) keluar
-$tries = 0
-while (Get-Process -Id $oldPid -ErrorAction SilentlyContinue) {{
-  $tries++
-  if ($tries -gt 120) {{ Fail "Timeout menunggu PID $oldPid keluar" }}
-  Start-Sleep -Milliseconds 500
-}}
+timeout /t 3 /nobreak >nul
 
-# 2) Tunggu semua instance (termasuk bootloader induk)
-$tries = 0
-while (Get-Process -Name $procName -ErrorAction SilentlyContinue) {{
-  $tries++
-  if ($tries -gt 120) {{ Fail "Timeout menunggu $procName keluar" }}
-  Start-Sleep -Milliseconds 500
-}}
+if not exist "%SOURCE%" (
+  echo Source hilang> "%ERRLOG%"
+  exit /b 1
+)
 
-# 3) Tunggu file EXE bisa di-rename (= handle bootloader / AV lepas)
-$old = "$target.old"
-$tries = 0
-while ($true) {{
-  try {{
-    if (Test-Path -LiteralPath $old) {{
-      Remove-Item -LiteralPath $old -Force -ErrorAction Stop
-    }}
-    if (Test-Path -LiteralPath $target) {{
-      Move-Item -LiteralPath $target -Destination $old -Force -ErrorAction Stop
-    }}
-    break
-  }} catch {{
-    $tries++
-    if ($tries -gt 90) {{ Fail "Tidak bisa mengunci file lama (masih dipakai)" }}
-    Start-Sleep -Milliseconds 500
-  }}
-}}
+rem Hapus program lama di lokasi
+del /F /Q "%TARGET%" >nul 2>&1
+if exist "%WORKDIR%\_internal" rd /s /q "%WORKDIR%\_internal" >nul 2>&1
+del /F /Q "%TARGET%.old" >nul 2>&1
 
-# 4) Jeda agar folder _MEI lama selesai dibersihkan
-Start-Sleep -Seconds 6
+rem Extract zip
+if exist "%STAGE%" rd /s /q "%STAGE%" >nul 2>&1
+mkdir "%STAGE%" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '%SOURCE%' -DestinationPath '%STAGE%' -Force"
+if errorlevel 1 (
+  echo Expand gagal> "%ERRLOG%"
+  exit /b 2
+)
 
-try {{
-  Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop
-}} catch {{
-  if (Test-Path -LiteralPath $old) {{
-    Move-Item -LiteralPath $old -Destination $target -Force -ErrorAction SilentlyContinue
-  }}
-  Fail "Copy gagal: $($_.Exception.Message)"
-}}
+rem Jika zip berisi folder NetworkTools\, angkat isinya
+set "SRCROOT="
+if exist "%STAGE%\NetworkTools\NetworkTools.exe" set "SRCROOT=%STAGE%\NetworkTools"
+if not defined SRCROOT if exist "%STAGE%\NetworkTools.exe" set "SRCROOT=%STAGE%"
+if not defined SRCROOT (
+  echo Struktur zip tidak dikenali> "%ERRLOG%"
+  exit /b 3
+)
 
-if (-not (Test-Path -LiteralPath $target)) {{
-  Fail "Target hilang setelah copy"
-}}
+xcopy /E /Y /I /Q "%SRCROOT%\*" "%WORKDIR%\" >nul
+if not exist "%TARGET%" (
+  echo Copy gagal, EXE tidak ada> "%ERRLOG%"
+  exit /b 4
+)
 
-$szSrc = (Get-Item -LiteralPath $source).Length
-$szDst = (Get-Item -LiteralPath $target).Length
-if ($szSrc -ne $szDst) {{
-  Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
-  if (Test-Path -LiteralPath $old) {{
-    Move-Item -LiteralPath $old -Destination $target -Force -ErrorAction SilentlyContinue
-  }}
-  Fail "Ukuran setelah copy tidak cocok ($szDst vs $szSrc)"
-}}
+timeout /t 2 /nobreak >nul
 
-# 5) Jeda untuk antivirus / OneDrive settle
-Start-Sleep -Seconds 3
+rem Jalankan lewat explorer (env bersih, di luar process tree)
+explorer.exe "%TARGET%"
 
-# 6) Jadwalkan start lewat Task Scheduler (env bersih, di luar process tree)
-Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-
-# cmd menunggu lalu start dengan _MEIPASS dikosongkan
-$arg = '/c timeout /t 8 /nobreak >nul & set "_MEIPASS=" & set "_MEIPASS2=" & set "PYTHONHOME=" & set "PYTHONPATH=" & start "" /D "' + $workdir + '" "' + $target + '"'
-try {{
-  $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument $arg
-  $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-  $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-  Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
-  Start-ScheduledTask -TaskName $taskName
-}} catch {{
-  # Fallback: start langsung dari cmd dengan env bersih
-  try {{
-    Start-Process -FilePath 'cmd.exe' -ArgumentList $arg -WindowStyle Hidden
-  }} catch {{
-    Fail "Gagal menjadwalkan/menjalankan EXE baru: $($_.Exception.Message)"
-  }}
-}}
-
-Start-Sleep -Seconds 2
-Remove-Item -LiteralPath $source -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
-
-# Hapus task setelah sempat jalan (best-effort)
-Start-Sleep -Seconds 20
-Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+timeout /t 2 /nobreak >nul
+rd /s /q "%STAGE%" >nul 2>&1
+del /F /Q "%SOURCE%" >nul 2>&1
+del "%~f0" >nul 2>&1
 """
-    ps1.write_text(script, encoding="utf-8")
+        )
+    else:
+        body = _fill(
+            r"""@echo off
+setlocal EnableExtensions
+set "TARGET=__TARGET__"
+set "SOURCE=__SOURCE__"
+set "WORKDIR=__WORKDIR__"
+set "ERRLOG=__ERRLOG__"
+set "PROC=__PROC__"
+
+set "_MEIPASS="
+set "_MEIPASS2="
+set "PYTHONHOME="
+set "PYTHONPATH="
+
+:wait
+tasklist /FI "IMAGENAME eq %PROC%" 2>nul | find /I "%PROC%" >nul
+if not errorlevel 1 (
+  timeout /t 1 /nobreak >nul
+  goto wait
+)
+
+timeout /t 3 /nobreak >nul
+
+if not exist "%SOURCE%" (
+  echo Source hilang> "%ERRLOG%"
+  exit /b 1
+)
+
+rem Hapus program lama
+del /F /Q "%TARGET%" >nul 2>&1
+if exist "%TARGET%" (
+  timeout /t 2 /nobreak >nul
+  del /F /Q "%TARGET%" >nul 2>&1
+)
+if exist "%TARGET%" (
+  echo Gagal menghapus EXE lama> "%ERRLOG%"
+  exit /b 2
+)
+
+copy /Y "%SOURCE%" "%TARGET%" >nul
+if not exist "%TARGET%" (
+  echo Copy gagal> "%ERRLOG%"
+  exit /b 3
+)
+
+timeout /t 2 /nobreak >nul
+
+explorer.exe "%TARGET%"
+
+timeout /t 2 /nobreak >nul
+del /F /Q "%SOURCE%" >nul 2>&1
+del "%~f0" >nul 2>&1
+"""
+        )
+
+    bat.write_text(body, encoding="utf-8")
 
     clean_env = _clean_environ()
     flags = 0
@@ -368,19 +422,10 @@ Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
     flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
     flags |= 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
 
-    # Jangan pakai ShellExecute: env _MEIPASS dari app frozen ikut terwariskan.
+    # start /min agar jendela cmd tidak mengganggu; env bersih
     subprocess.Popen(
-        [
-            "powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-WindowStyle",
-            "Hidden",
-            "-File",
-            str(ps1),
-        ],
-        cwd=str(current.parent),
+        ["cmd.exe", "/c", "start", "", "/min", str(bat)],
+        cwd=str(workdir),
         env=clean_env,
         creationflags=flags,
         close_fds=True,
@@ -391,7 +436,6 @@ Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 
 
 def cleanup_update_leftovers() -> None:
-    """Hapus sisa file update (.old / .new) di folder EXE bila ada."""
     if not getattr(sys, "frozen", False):
         return
     current = Path(sys.executable).resolve()

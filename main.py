@@ -211,19 +211,20 @@ class NetworkToolsApp(ctk.CTk):
             webbrowser.open(UPDATE_REPO)
             return
 
-        # Bukan file .exe langsung / mode dev → buka halaman GitHub
+        # Bukan file update langsung / mode dev → buka halaman GitHub
         if not is_direct_exe_url(url) or not getattr(sys, "frozen", False):
             webbrowser.open(url if url.startswith("http") else UPDATE_REPO)
             if not getattr(sys, "frozen", False):
                 messagebox.showinfo(
                     "Update",
-                    "Mode development: unduh EXE dari GitHub, lalu ganti manual.\n"
+                    "Mode development: unduh paket dari GitHub, lalu ganti manual.\n"
                     "Auto-replace hanya berjalan pada NetworkTools.exe.",
                     parent=self,
                 )
             return
 
-        dest = Path(tempfile.gettempdir()) / f"NetworkTools_update_v{ver}.exe"
+        ext = ".zip" if url.split("?", 1)[0].lower().endswith(".zip") else ".exe"
+        dest = Path(tempfile.gettempdir()) / f"NetworkTools_update_v{ver}{ext}"
         self._show_download_progress(url, dest, str(ver), info)
 
     def _show_download_progress(
@@ -323,7 +324,7 @@ class NetworkToolsApp(ctk.CTk):
 
         def worker() -> None:
             try:
-                from modules.updater import verify_exe_file
+                from modules.updater import verify_update_file
 
                 expected = getattr(info, "size", None)
                 download_file(
@@ -332,7 +333,7 @@ class NetworkToolsApp(ctk.CTk):
                     on_progress=on_progress,
                     expected_size=expected if isinstance(expected, int) else None,
                 )
-                verify_exe_file(
+                verify_update_file(
                     dest,
                     expected_size=expected if isinstance(expected, int) else None,
                 )
@@ -349,9 +350,9 @@ class NetworkToolsApp(ctk.CTk):
                         pass
                     messagebox.showinfo(
                         "Update",
-                        "Unduhan selesai. Aplikasi akan ditutup dan diganti otomatis.\n"
-                        "Tunggu sekitar 15–20 detik sampai jendela baru muncul.\n"
-                        "(Jangan buka EXE manual selama proses ini.)",
+                        "Unduhan selesai. Aplikasi akan ditutup.\n"
+                        "File lama dihapus, diganti yang baru, lalu dibuka lagi otomatis.\n"
+                        "Tunggu beberapa detik.",
                         parent=self,
                     )
                     # Hard exit: pastikan bootloader PyInstaller selesai

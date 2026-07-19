@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# Single-file EXE build for Network Tools
+# One-folder build (onedir) — menghindari crash _MEI/python312.dll saat update.
 from PyInstaller.utils.hooks import collect_all
 
 datas = []
@@ -39,20 +39,27 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="NetworkTools",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    name="NetworkTools",
+    strip=False,
+    upx=False,
+    upx_exclude=[],
 )
