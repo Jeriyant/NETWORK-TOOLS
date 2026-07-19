@@ -87,6 +87,58 @@ def get_anydesk_id_cli(exe: Path) -> str | None:
     return None
 
 
+def _anydesk_process_running() -> bool:
+    """True jika ada proses AnyDesk.exe yang masih hidup."""
+    creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        completed = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq AnyDesk.exe", "/NH"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            creationflags=creation,
+        )
+        out = (completed.stdout or "").lower()
+        return "anydesk.exe" in out
+    except Exception:
+        return False
+
+
+def close_all_anydesk() -> tuple[bool, str]:
+    """
+    Tutup semua proses AnyDesk yang berjalan (UI + background).
+    Returns (ada_yang_ditutup_atau_sudah_mati, pesan_log).
+    """
+    creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if not _anydesk_process_running():
+        return False, "Tidak ada AnyDesk yang sedang berjalan."
+
+    try:
+        subprocess.run(
+            ["taskkill", "/F", "/IM", "AnyDesk.exe", "/T"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+            creationflags=creation,
+        )
+    except Exception as exc:
+        return False, f"Gagal menutup AnyDesk: {exc}"
+
+    # Tunggu sampai proses benar-benar hilang
+    for _ in range(20):
+        if not _anydesk_process_running():
+            return True, "Semua proses AnyDesk ditutup."
+        time.sleep(0.25)
+
+    if _anydesk_process_running():
+        return False, "AnyDesk masih berjalan setelah taskkill (mungkin terkunci)."
+    return True, "Semua proses AnyDesk ditutup."
+
+
 class AnydeskRunner:
     def __init__(
         self,
@@ -114,7 +166,15 @@ class AnydeskRunner:
                 return
 
             self.on_line(f"Menemukan: {exe}")
-            self.on_line("Membuka AnyDesk...")
+
+            self.on_line("Menutup AnyDesk yang sedang berjalan...")
+            closed, msg = close_all_anydesk()
+            self.on_line(msg)
+            if closed:
+                # Jeda singkat agar handle/file lepas sebelum buka ulang
+                time.sleep(1.0)
+
+            self.on_line("Membuka AnyDesk baru...")
             try:
                 subprocess.Popen([str(exe)], shell=False)
             except Exception as exc:
@@ -122,7 +182,7 @@ class AnydeskRunner:
                 return
 
             # Tunggu sebentar agar ID / service siap
-            time.sleep(1.5)
+            time.sleep(2.0)
 
             self.on_line("Membaca AnyDesk ID...")
             anydesk_id = get_anydesk_id_cli(exe)

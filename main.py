@@ -56,7 +56,7 @@ TOOLS = [
     ("refresh", "Refresh Network", "↻", "Otomatis renew DHCP (Admin)"),
     ("printer", "Fix Printer", "🖨", "Otomatis clear spooler (Admin)"),
     ("cache", "Clear Cache", "⌫", "Otomatis hapus TEMP & RDP6 (Admin)"),
-    ("anydesk", "Anydesk", "⌨", "Buka AnyDesk, salin ID, kirim ke Telegram"),
+    ("anydesk", "Anydesk", "⌨", "Tutup AnyDesk lama, buka baru, salin ID ke Telegram"),
 ]
 
 SEND_TOOLS = {"ping", "traceroute", "dns", "speedtest"}
@@ -1207,8 +1207,8 @@ class NetworkToolsApp(ctk.CTk):
                 "Fitur ini meminta Run as Administrator (UAC)."
             ),
             "anydesk": (
-                "Klik Jalankan untuk membuka AnyDesk,\n"
-                "menyalin ID ke clipboard, lalu membuka Telegram."
+                "Klik Jalankan untuk menutup semua AnyDesk yang berjalan,\n"
+                "membuka AnyDesk baru, menyalin ID, lalu membuka Telegram."
             ),
         }
         for line in hints.get(key, "").split("\n"):
