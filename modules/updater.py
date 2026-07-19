@@ -220,13 +220,11 @@ def _clean_environ() -> dict[str, str]:
 
 def apply_update_and_restart(downloaded_exe: Path, kind: str | None = None) -> None:
     """
-    Pasang update: hanya ganti file EXE (tanpa sentuh folder runtime).
+    Pasang update cepat: hanya ganti file EXE.
 
-    1. Salin paket baru ke ``NetworkTools.exe.new`` selagi app masih jalan.
-    2. Setelah PID keluar: rename exe → .old, .new → exe.
-    3. Hapus .old + file unduhan sementara.
-    4. Tidak menghapus runtime/_MEI* (itu penyebab error python312.dll).
-    5. Tidak auto-start — user membuka aplikasi lagi secara manual.
+    1. Salin ke ``NetworkTools.exe.new`` selagi app masih jalan.
+    2. Setelah PID keluar: rename exe→.old, .new→exe, hapus .old.
+    3. Tanpa dialog, tanpa auto-start, tanpa hapus folder runtime.
     """
     if not getattr(sys, "frozen", False):
         raise RuntimeError("Auto-replace hanya tersedia pada build .exe")
@@ -256,12 +254,11 @@ def apply_update_and_restart(downloaded_exe: Path, kind: str | None = None) -> N
 
     bat = Path(tempfile.gettempdir()) / f"network_tools_apply_update_{pid}.cmd"
     vbs = Path(tempfile.gettempdir()) / f"network_tools_apply_update_{pid}.vbs"
-    # Hanya ganti EXE. Jangan hapus %LOCALAPPDATA%\NetworkTools\runtime.
+    # Hanya ganti EXE secepat mungkin (tanpa jeda panjang / tanpa hapus runtime).
     script = f"""@echo off
 setlocal EnableExtensions
 set "TARGET={current}"
 set "STAGED={staged}"
-set "WORKDIR={workdir}"
 set "ERRLOG={err_log}"
 set "OKLOG={ok_log}"
 set "OLDPID={pid}"
@@ -273,19 +270,15 @@ del /F /Q "%OKLOG%" >nul 2>&1
 set /a TRIES=0
 :waitpid
 tasklist /FI "PID eq %OLDPID%" 2>nul | findstr /R /C:" %OLDPID% " >nul
-if errorlevel 1 goto waitdone
+if errorlevel 1 goto swap
 set /a TRIES+=1
-if %TRIES% GEQ 90 (
+if %TRIES% GEQ 200 (
   echo Timeout menunggu PID %OLDPID% keluar.> "%ERRLOG%"
   exit /b 1
 )
-ping 127.0.0.1 -n 2 >nul 2>&1
 goto waitpid
 
-:waitdone
-rem Jeda agar handle EXE lama lepas
-ping 127.0.0.1 -n 4 >nul 2>&1
-
+:swap
 if not exist "%STAGED%" (
   echo File staged hilang: %STAGED%> "%ERRLOG%"
   exit /b 2
@@ -294,42 +287,27 @@ if not exist "%STAGED%" (
 set /a TRIES=0
 :trymove
 if exist "%TARGET%.old" del /F /Q "%TARGET%.old" >nul 2>&1
-if not exist "%TARGET%" goto do_swap
+if not exist "%TARGET%" goto do_rename
 move /Y "%TARGET%" "%TARGET%.old" >nul 2>&1
-if exist "%TARGET%.old" if not exist "%TARGET%" goto do_swap
+if exist "%TARGET%.old" if not exist "%TARGET%" goto do_rename
 set /a TRIES+=1
-if %TRIES% GEQ 60 (
-  echo Tidak bisa mengunci/me-rename EXE lama.> "%ERRLOG%"
+if %TRIES% GEQ 100 (
+  echo Tidak bisa me-rename EXE lama.> "%ERRLOG%"
   exit /b 3
 )
-ping 127.0.0.1 -n 2 >nul 2>&1
 goto trymove
 
-:do_swap
+:do_rename
 move /Y "%STAGED%" "%TARGET%" >nul 2>&1
 if not exist "%TARGET%" (
   if exist "%TARGET%.old" move /Y "%TARGET%.old" "%TARGET%" >nul 2>&1
-  echo Gagal memasang EXE baru dari staged.> "%ERRLOG%"
+  echo Gagal rename .new ke EXE.> "%ERRLOG%"
   exit /b 4
 )
 
-for %%A in ("%TARGET%") do set SZNEW=%%~zA
-if %SZNEW% LSS 8000000 (
-  echo EXE baru terlalu kecil ^(%SZNEW%^).> "%ERRLOG%"
-  if exist "%TARGET%.old" (
-    del /F /Q "%TARGET%" >nul 2>&1
-    move /Y "%TARGET%.old" "%TARGET%" >nul 2>&1
-  )
-  exit /b 5
-)
-
-rem Hanya bersihkan file update — JANGAN hapus folder runtime/_MEI*
 del /F /Q "%TEMPSRC%" >nul 2>&1
 del /F /Q "%TARGET%.old" >nul 2>&1
-
-echo OK exe-only %SZNEW%> "%OKLOG%"
-
-ping 127.0.0.1 -n 2 >nul 2>&1
+echo OK> "%OKLOG%"
 del /F /Q "{vbs}" >nul 2>&1
 del /F /Q "%~f0" >nul 2>&1
 """

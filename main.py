@@ -641,24 +641,13 @@ class NetworkToolsApp(ctk.CTk):
                     apply_update_and_restart(dest)
 
                     def ok() -> None:
-                        # Tutup app setelah file .new disiapkan; script updater
-                        # menukar EXE tanpa auto-start (buka manual).
+                        # Tutup langsung — script updater menukar EXE di background.
                         import os
 
                         state["closed"] = True
                         try:
                             dlg.grab_release()
                             dlg.destroy()
-                        except Exception:
-                            pass
-                        try:
-                            messagebox.showinfo(
-                                "Update siap",
-                                "Update siap dipasang.\n\n"
-                                "Aplikasi akan ditutup. Silakan buka Network Tools "
-                                "lagi secara manual.",
-                                parent=self,
-                            )
                         except Exception:
                             pass
                         try:
