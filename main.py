@@ -1919,10 +1919,62 @@ class NetworkToolsApp(ctk.CTk):
             text=t("app.reload"),
             width=110,
             height=32,
-            fg_color=COLORS["tile"],
-            hover_color=COLORS["tile_hover"],
+            fg_color=COLORS["warn"],
+            hover_color=COLORS["warn_hover"],
+            text_color=COLORS["on_warn"],
             command=lambda: self._reload_webview(url),
         ).pack(side="right")
+
+        # Strip loading di atas WebView (Tk selalu terlihat; HWND native tidak menutupinya)
+        loading_wrap = ctk.CTkFrame(
+            self._content,
+            fg_color=COLORS["panel"],
+            corner_radius=0,
+            height=52,
+        )
+        loading_wrap.pack(fill="x")
+        loading_wrap.pack_propagate(False)
+        loading_inner = ctk.CTkFrame(loading_wrap, fg_color="transparent")
+        loading_inner.pack(fill="both", expand=True, padx=16, pady=8)
+        loading_lbl = ctk.CTkLabel(
+            loading_inner,
+            text=t("app.page_loading"),
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color=COLORS["muted"],
+            anchor="w",
+        )
+        loading_lbl.pack(fill="x")
+        loading_bar = ctk.CTkProgressBar(
+            loading_inner,
+            height=8,
+            mode="indeterminate",
+            progress_color=COLORS["accent"],
+            fg_color=COLORS["border"],
+        )
+        loading_bar.pack(fill="x", pady=(6, 0))
+        loading_bar.start()
+        self._webview_loading_wrap = loading_wrap
+        self._webview_loading_bar = loading_bar
+
+        def set_page_loading(active: bool) -> None:
+            wrap = getattr(self, "_webview_loading_wrap", None)
+            bar = getattr(self, "_webview_loading_bar", None)
+            if wrap is None:
+                return
+            try:
+                if active:
+                    if not wrap.winfo_ismapped():
+                        wrap.pack(fill="x", before=host)
+                    if bar is not None:
+                        bar.start()
+                else:
+                    if bar is not None:
+                        bar.stop()
+                    wrap.pack_forget()
+            except Exception:
+                pass
+
+        self._set_webview_loading = set_page_loading
 
         host = tk.Frame(self._content, bg=COLORS["bg"])
         host.pack(fill="both", expand=True)
@@ -1935,7 +1987,14 @@ class NetworkToolsApp(ctk.CTk):
             self.update_idletasks()
             w = max(host.winfo_width(), self._content.winfo_width(), self.winfo_width() - 24, 640)
             h = max(host.winfo_height(), self._content.winfo_height(), self.winfo_height() - 120, 400)
-            self._browser = EmbeddedBrowser(host, w, h, url=url)
+            self._browser = EmbeddedBrowser(
+                host,
+                w,
+                h,
+                url=url,
+                on_loading=set_page_loading,
+                background_color=COLORS["bg"],
+            )
             self._browser.pack(fill="both", expand=True)
             self.after(80, lambda: self._browser._force_stretch() if self._browser else None)
             self.after(300, lambda: self._browser._force_stretch() if self._browser else None)
@@ -1947,6 +2006,7 @@ class NetworkToolsApp(ctk.CTk):
         except Exception as exc:
             embed_err = str(exc)
             self._browser = None
+            set_page_loading(False)
 
         if not embed_ok:
             from modules.speedtest_fallback import open_speedtest_edge_app
@@ -2021,6 +2081,9 @@ class NetworkToolsApp(ctk.CTk):
             self._action_bar.pack_forget()
 
     def _reload_webview(self, url: str) -> None:
+        set_loading = getattr(self, "_set_webview_loading", None)
+        if callable(set_loading):
+            set_loading(True)
         if self._browser is not None:
             self._browser.load_url(url)
             if getattr(self, "_webview_auto_start", False):
@@ -2035,6 +2098,8 @@ class NetworkToolsApp(ctk.CTk):
         from modules.speedtest_fallback import open_speedtest_edge_app
 
         open_speedtest_edge_app(url)
+        if callable(set_loading):
+            set_loading(False)
 
     def _speedtest_auto_start(self) -> None:
         self._speedtest_click_job = None

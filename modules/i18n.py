@@ -24,6 +24,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "app.refresh": {"id": "Refresh", "en": "Refresh"},
     "app.recheck": {"id": "Cek Ulang", "en": "Recheck"},
     "app.reload": {"id": "Muat Ulang", "en": "Reload"},
+    "app.page_loading": {"id": "Memuat halaman…", "en": "Loading page…"},
     "app.start_scan": {"id": "Mulai Scan", "en": "Start Scan"},
     "app.stop": {"id": "Stop", "en": "Stop"},
     "app.run": {"id": "Jalankan", "en": "Run"},

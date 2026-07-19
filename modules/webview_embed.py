@@ -1,4 +1,4 @@
-"""Embedded Edge WebView2 browser for in-app Speedtest."""
+"""Embedded Edge WebView2 browser for in-app Speedtest / DNS Test."""
 
 from __future__ import annotations
 
@@ -104,10 +104,7 @@ FIT_PAGE_JS = """
 
 def _bootstrap_pythonnet() -> None:
     """Load .NET runtime explicitly (critical for PyInstaller frozen exe)."""
-    import sys
-
     os.environ.setdefault("PYTHONNET_RUNTIME", "netfx")
-    # Prefer Framework (.NET Framework) on Windows desktop
     errors: list[str] = []
     try:
         from pythonnet import load
@@ -149,6 +146,15 @@ def _ensure_webview2_refs() -> None:
     clr.AddReference(interop_dll_path("Microsoft.Web.WebView2.WinForms.dll"))
 
 
+def _parse_drawing_color(Color: Any, hex_color: str) -> Any:
+    """Convert #RRGGBB to System.Drawing.Color."""
+    h = (hex_color or "").strip().lstrip("#")
+    if len(h) == 6:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return Color.FromArgb(255, r, g, b)
+    return Color.FromArgb(255, 243, 243, 243)
+
+
 class EmbeddedBrowser(Frame):
     """Tk Frame hosting Microsoft Edge WebView2 (in-process browser)."""
 
@@ -159,18 +165,21 @@ class EmbeddedBrowser(Frame):
         height: int,
         url: str = "",
         on_ready: Callable[[], None] | None = None,
+        on_loading: Callable[[bool], None] | None = None,
         fit_page: bool = True,
+        background_color: str | None = None,
         **kwargs: Any,
     ) -> None:
         Frame.__init__(self, parent, width=width, height=height, **kwargs)
         _ensure_webview2_refs()
 
         from System import Uri
-        from System.Drawing import Size
+        from System.Drawing import Color, Size
         from System.Windows.Forms import Control, DockStyle
         from Microsoft.Web.WebView2.WinForms import CoreWebView2CreationProperties, WebView2
 
         self._on_ready_cb = on_ready
+        self._on_loading_cb = on_loading
         self._url_pending = url
         self._disposed = False
         self._fit_page = fit_page
@@ -186,6 +195,7 @@ class EmbeddedBrowser(Frame):
         self._flag_core_ready = False
         self._flag_nav_done = False
         self._flag_fit = False
+        self._flag_loading: bool | None = True  # tampilkan loading sejak awal
         self._core_ready_handled = False
 
         self._host = Control()
@@ -195,6 +205,12 @@ class EmbeddedBrowser(Frame):
         cache.mkdir(parents=True, exist_ok=True)
         props.UserDataFolder = str(cache)
         self._webview.CreationProperties = props
+        try:
+            self._webview.DefaultBackgroundColor = _parse_drawing_color(
+                Color, background_color or "#F3F3F3"
+            )
+        except Exception:
+            pass
         self._host.Controls.Add(self._webview)
         self._webview.Dock = DockStyle.Fill
         self._webview.BringToFront()
@@ -216,7 +232,6 @@ class EmbeddedBrowser(Frame):
         self._webview.EnsureCoreWebView2Async(None)
 
         self._Uri = Uri
-        # Poll flags on Tk main thread only
         self._poll_job = self.after(50, self._poll_webview_flags)
         self.after(120, self._force_stretch)
         self.after(500, self._force_stretch)
@@ -229,22 +244,36 @@ class EmbeddedBrowser(Frame):
         try:
             core = sender.CoreWebView2
             if core is not None and not self._nav_hooked:
+                core.NavigationStarting += self._on_navigation_starting
                 core.NavigationCompleted += self._on_navigation_completed
                 self._nav_hooked = True
         except Exception:
             pass
         self._flag_core_ready = True
 
+    def _on_navigation_starting(self, _sender: Any = None, _args: Any = None) -> None:
+        self._flag_loading = True
+
     def _on_navigation_completed(self, _sender: Any = None, _args: Any = None) -> None:
         # Runs on WebView2 thread — never call Tk here
         self._flag_nav_done = True
         self._flag_fit = True
+        self._flag_loading = False
 
     def _poll_webview_flags(self) -> None:
         """Tk-thread poller for WebView2 async events."""
         self._poll_job = None
         if self._disposed:
             return
+
+        if self._flag_loading is not None:
+            loading = self._flag_loading
+            self._flag_loading = None
+            if self._on_loading_cb:
+                try:
+                    self._on_loading_cb(loading)
+                except Exception:
+                    pass
 
         if self._flag_core_ready and not self._core_ready_handled:
             self._core_ready_handled = True
@@ -381,6 +410,7 @@ class EmbeddedBrowser(Frame):
     def load_url(self, url: str) -> None:
         if self._disposed:
             return
+        self._flag_loading = True
         try:
             if self._webview.CoreWebView2 is not None:
                 self._webview.Source = self._Uri(url)
@@ -404,7 +434,6 @@ class EmbeddedBrowser(Frame):
         if self._disposed:
             return
         try:
-            # ZoomFactor engine tetap 1; penskalaan lewat CSS zoom di FIT_PAGE_JS
             self._webview.ZoomFactor = 1.0
         except Exception:
             pass
