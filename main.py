@@ -99,6 +99,45 @@ SEND_TOOLS = {"ping", "traceroute", "dns", "ipscan", "speedtest", "apps", "secur
 TEXT_SEND_TOOLS = frozenset({"apps", "ipscan"})
 
 
+def _hide_window_close_button(window: Any) -> None:
+    """Hapus tombol X (Close) dari title bar Windows agar dialog wajib tidak bisa ditutup."""
+    try:
+        import ctypes
+
+        window.update_idletasks()
+        hwnd = int(window.winfo_id())
+        parent = ctypes.windll.user32.GetParent(hwnd)
+        if parent:
+            hwnd = int(parent)
+
+        gwl_style = -16
+        ws_sysmenu = 0x00080000
+        get_long = getattr(ctypes.windll.user32, "GetWindowLongPtrW", None)
+        set_long = getattr(ctypes.windll.user32, "SetWindowLongPtrW", None)
+        if get_long is None or set_long is None:
+            get_long = ctypes.windll.user32.GetWindowLongW
+            set_long = ctypes.windll.user32.SetWindowLongW
+
+        style = int(get_long(hwnd, gwl_style))
+        set_long(hwnd, gwl_style, style & ~ws_sysmenu)
+
+        swp_nosize = 0x0001
+        swp_nomove = 0x0002
+        swp_nozorder = 0x0004
+        swp_framechanged = 0x0020
+        ctypes.windll.user32.SetWindowPos(
+            hwnd,
+            0,
+            0,
+            0,
+            0,
+            0,
+            swp_nomove | swp_nosize | swp_nozorder | swp_framechanged,
+        )
+    except Exception:
+        pass
+
+
 class ConsoleView(ctk.CTkFrame):
     def __init__(self, master: Any, **kwargs: Any) -> None:
         super().__init__(master, fg_color=COLORS["console_bg"], **kwargs)
@@ -283,18 +322,12 @@ class NetworkToolsApp(ctk.CTk):
 
         state = {"accepted": False}
 
-        def force_exit() -> None:
-            import os
+        # Update wajib: tanpa tombol X; Alt+F4 juga diabaikan
+        def block_close() -> None:
+            pass
 
-            if state["accepted"]:
-                return
-            try:
-                dlg.grab_release()
-            except Exception:
-                pass
-            os._exit(0)
-
-        dlg.protocol("WM_DELETE_WINDOW", force_exit)
+        dlg.protocol("WM_DELETE_WINDOW", block_close)
+        dlg.after(50, lambda: _hide_window_close_button(dlg))
 
         card = ctk.CTkFrame(
             dlg,
@@ -501,11 +534,12 @@ class NetworkToolsApp(ctk.CTk):
         py = self.winfo_rooty() + (self.winfo_height() - 220) // 2
         dlg.geometry(f"460x220+{max(px, 40)}+{max(py, 40)}")
 
-        # Tutup window = keluar (update wajib)
+        # Update wajib: tanpa tombol X; Alt+F4 diabaikan
         def block_close() -> None:
             pass
 
         dlg.protocol("WM_DELETE_WINDOW", block_close)
+        dlg.after(50, lambda: _hide_window_close_button(dlg))
 
         frame = ctk.CTkFrame(
             dlg,
