@@ -104,8 +104,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     },
     "tool.anydesk.title": {"id": "Anydesk", "en": "Anydesk"},
     "tool.anydesk.desc": {
-        "id": "Tutup AnyDesk lama, buka baru, salin ID ke Telegram",
-        "en": "Kill old AnyDesk, open new, copy ID to Telegram",
+        "id": "Otomatis tutup/buka AnyDesk + salin ID ke Telegram",
+        "en": "Auto restart AnyDesk and copy ID to Telegram",
     },
     # Apps list
     "apps.loading": {"id": "Memuat daftar aplikasi…", "en": "Loading application list…"},

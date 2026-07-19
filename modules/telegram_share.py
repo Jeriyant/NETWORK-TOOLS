@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from PIL import Image, ImageGrab
 
@@ -131,41 +132,109 @@ def copy_image_powershell(path: Path) -> bool:
         return False
 
 
-def copy_text_to_clipboard(text: str) -> bool:
-    """Copy plain text (AnyDesk ID, etc.) to Windows clipboard."""
+def copy_text_to_clipboard(text: str, root: Any | None = None) -> bool:
+    """Copy plain text to Windows clipboard (Tk → Win32 → PowerShell)."""
+    payload = text or ""
+    if not payload:
+        return False
+
+    # 1) Tkinter clipboard — paling andal saat app Tk masih hidup
+    if root is not None:
+        try:
+            root.clipboard_clear()
+            root.clipboard_append(payload)
+            root.update_idletasks()
+            # Pastikan isi masih ada
+            try:
+                got = root.clipboard_get()
+                if got == payload or (got and len(got) == len(payload)):
+                    return True
+            except Exception:
+                return True  # append sukses, get kadang gagal di beberapa theme
+        except Exception:
+            pass
+
+    # 2) Win32 CF_UNICODETEXT + retry OpenClipboard
     try:
         import ctypes
+        from ctypes import wintypes
 
         CF_UNICODETEXT = 13
         GMEM_MOVEABLE = 0x0002
 
-        kernel32 = ctypes.windll.kernel32
         user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        user32.OpenClipboard.argtypes = [wintypes.HWND]
+        user32.OpenClipboard.restype = wintypes.BOOL
+        user32.EmptyClipboard.restype = wintypes.BOOL
+        user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+        user32.SetClipboardData.restype = wintypes.HANDLE
+        user32.CloseClipboard.restype = wintypes.BOOL
+        kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+        kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+        kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+        kernel32.GlobalLock.restype = ctypes.c_void_p
+        kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+        kernel32.GlobalFree.argtypes = [wintypes.HGLOBAL]
 
-        data = (text or "").encode("utf-16-le") + b"\x00\x00"
-        h_global = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
-        if not h_global:
-            return False
-        locked = kernel32.GlobalLock(h_global)
-        if not locked:
-            kernel32.GlobalFree(h_global)
-            return False
-        ctypes.memmove(locked, data, len(data))
-        kernel32.GlobalUnlock(h_global)
+        data = payload.encode("utf-16-le") + b"\x00\x00"
+        opened = False
+        for _ in range(20):
+            if user32.OpenClipboard(None):
+                opened = True
+                break
+            try:
+                import time
 
-        if not user32.OpenClipboard(None):
-            kernel32.GlobalFree(h_global)
-            return False
+                time.sleep(0.05)
+            except Exception:
+                pass
+        if not opened:
+            raise OSError("OpenClipboard failed")
+
         try:
             user32.EmptyClipboard()
+            h_global = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
+            if not h_global:
+                return False
+            locked = kernel32.GlobalLock(h_global)
+            if not locked:
+                kernel32.GlobalFree(h_global)
+                return False
+            ctypes.memmove(locked, data, len(data))
+            kernel32.GlobalUnlock(h_global)
             if not user32.SetClipboardData(CF_UNICODETEXT, h_global):
                 kernel32.GlobalFree(h_global)
                 return False
-            # Ownership transferred to clipboard on success
-            h_global = None
             return True
         finally:
             user32.CloseClipboard()
+    except Exception:
+        pass
+
+    # 3) PowerShell Set-Clipboard (file temp — aman untuk teks panjang)
+    return copy_text_powershell(payload)
+
+
+def copy_text_powershell(text: str) -> bool:
+    """Fallback: Set-Clipboard via PowerShell using a UTF-8 temp file."""
+    creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        tmp = Path(tempfile.gettempdir()) / "network_tools_clipboard.txt"
+        tmp.write_text(text or "", encoding="utf-8")
+        safe = str(tmp).replace("'", "''")
+        ps = (
+            f"$t = Get-Content -LiteralPath '{safe}' -Raw -Encoding UTF8; "
+            "Set-Clipboard -Value $t"
+        )
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+            capture_output=True,
+            text=True,
+            creationflags=creation,
+            timeout=30,
+        )
+        return completed.returncode == 0
     except Exception:
         return False
 
@@ -214,10 +283,11 @@ def send_via_telegram(
 def send_text_via_telegram(
     text: str,
     telegram_exe: str = "",
+    root: Any | None = None,
 ) -> tuple[bool, list[str]]:
     """Copy plain text to clipboard and open Telegram."""
     tips: list[str] = []
-    copied = copy_text_to_clipboard(text or "")
+    copied = copy_text_to_clipboard(text or "", root=root)
     if copied:
         tips.append("Teks daftar sudah di clipboard.")
     else:

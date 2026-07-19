@@ -61,7 +61,7 @@ from modules.traceroute_runner import TracerouteRunner
 # Tools that require Administrator (UAC)
 ADMIN_TOOLS = frozenset({"refresh", "cache", "printer", "fixrdp"})
 # Langsung jalan saat menu dibuka (tanpa tombol Jalankan)
-AUTO_RUN_TOOLS = frozenset({"refresh", "cache", "printer", "fixrdp"})
+AUTO_RUN_TOOLS = frozenset({"refresh", "cache", "printer", "fixrdp", "anydesk"})
 
 # Active palette (updated when theme changes)
 COLORS: dict[str, str] = dict(THEMES["light"])
@@ -95,7 +95,7 @@ def tools_for_ui() -> list[tuple[str, str, str, str]]:
 TOOLS = TOOL_DEFS
 
 SEND_TOOLS = {"ping", "traceroute", "dns", "ipscan", "speedtest", "apps", "security"}
-TEXT_SEND_TOOLS = frozenset({"apps", "security"})
+TEXT_SEND_TOOLS = frozenset({"apps", "ipscan"})
 
 
 class ConsoleView(ctk.CTkFrame):
@@ -1177,6 +1177,7 @@ class NetworkToolsApp(ctk.CTk):
                 "printer": self._start_printer,
                 "cache": self._start_cache,
                 "fixrdp": self._start_fix_rdp,
+                "anydesk": self._start_anydesk,
             }
             fn = starters.get(key)
             if fn:
@@ -1209,8 +1210,9 @@ class NetworkToolsApp(ctk.CTk):
         ).pack(side="right")
 
     def _open_apps_list_view(self) -> None:
-        """Daftar aplikasi terinstall — UI list + Kirim teks ke Telegram."""
+        """Daftar aplikasi terinstall — tabel rapi + Kirim teks ke Telegram."""
         from modules.system_info import hostname as get_hostname
+        from tkinter import ttk
 
         self.console = None
         self._apps_list = []
@@ -1265,89 +1267,88 @@ class NetworkToolsApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        list_wrap.pack(fill="both", expand=True)
+        list_wrap.pack(fill="both", expand=True, padx=0, pady=0)
 
-        cols = ctk.CTkFrame(list_wrap, fg_color=COLORS["bg"], corner_radius=0)
-        cols.pack(fill="x", padx=1, pady=(1, 0))
-        cols.grid_columnconfigure(0, weight=4, minsize=200)
-        cols.grid_columnconfigure(1, weight=2, minsize=100)
-        cols.grid_columnconfigure(2, weight=3, minsize=140)
-        for i, text in enumerate((t("apps.col.name"), t("apps.col.version"), t("apps.col.publisher"))):
-            ctk.CTkLabel(
-                cols,
-                text=text,
-                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-                text_color=COLORS["muted"],
-                anchor="w",
-            ).grid(row=0, column=i, sticky="ew", padx=14, pady=10)
+        table_host = tk.Frame(list_wrap, bg=COLORS["panel"], highlightthickness=0)
+        table_host.pack(fill="both", expand=True, padx=12, pady=12)
 
-        scroll = ctk.CTkScrollableFrame(list_wrap, fg_color="transparent", corner_radius=0)
-        scroll.pack(fill="both", expand=True, padx=4, pady=4)
-
-        empty = ctk.CTkLabel(
-            scroll,
-            text=t("apps.fetching"),
-            font=ctk.CTkFont(family="Segoe UI", size=13),
-            text_color=COLORS["muted"],
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+        style.configure(
+            "Apps.Treeview",
+            background=COLORS["bg"],
+            foreground=COLORS["text"],
+            fieldbackground=COLORS["bg"],
+            borderwidth=0,
+            rowheight=32,
+            font=("Segoe UI", 11),
         )
-        empty.pack(pady=36)
+        style.configure(
+            "Apps.Treeview.Heading",
+            background=COLORS["panel"],
+            foreground=COLORS["muted"],
+            borderwidth=0,
+            relief="flat",
+            font=("Segoe UI Semibold", 10),
+        )
+        style.map(
+            "Apps.Treeview",
+            background=[("selected", COLORS["accent"])],
+            foreground=[("selected", COLORS["on_accent"])],
+        )
+        style.map(
+            "Apps.Treeview.Heading",
+            background=[("active", COLORS["tile_hover"])],
+        )
+
+        cols = ("name", "version", "publisher")
+        tree = ttk.Treeview(
+            table_host,
+            columns=cols,
+            show="headings",
+            style="Apps.Treeview",
+            selectmode="browse",
+        )
+        tree.heading("name", text=t("apps.col.name"), anchor="w")
+        tree.heading("version", text=t("apps.col.version"), anchor="w")
+        tree.heading("publisher", text=t("apps.col.publisher"), anchor="w")
+        tree.column("name", width=360, minwidth=180, anchor="w", stretch=True)
+        tree.column("version", width=120, minwidth=80, anchor="w", stretch=False)
+        tree.column("publisher", width=240, minwidth=120, anchor="w", stretch=True)
+
+        vsb = ttk.Scrollbar(table_host, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        table_host.grid_rowconfigure(0, weight=1)
+        table_host.grid_columnconfigure(0, weight=1)
+
+        tree.tag_configure("odd", background=COLORS["bg"])
+        tree.tag_configure("even", background=COLORS["panel"])
 
         self._pack_tool_action_bar(text_send=True)
-
-        def _clear() -> None:
-            for w in list(scroll.winfo_children()):
-                try:
-                    w.destroy()
-                except Exception:
-                    pass
 
         def _fill(apps: list[dict[str, str]]) -> None:
             self._apps_list = apps
             host = get_hostname()
             self._send_text_payload = format_apps_text(apps, hostname=host)
             count_lbl.configure(text=t("apps.count", n=len(apps)))
-            _clear()
-            if not apps:
-                ctk.CTkLabel(
-                    scroll,
-                    text=t("apps.empty"),
-                    font=ctk.CTkFont(family="Segoe UI", size=13),
-                    text_color=COLORS["muted"],
-                ).pack(pady=36)
-                return
+            tree.delete(*tree.get_children())
             for idx, app in enumerate(apps):
-                row = ctk.CTkFrame(
-                    scroll,
-                    fg_color=COLORS["bg"] if idx % 2 == 0 else "transparent",
-                    corner_radius=8,
-                    height=40,
+                tag = "even" if idx % 2 == 0 else "odd"
+                tree.insert(
+                    "",
+                    "end",
+                    values=(
+                        app.get("name", "—"),
+                        app.get("version", "—"),
+                        app.get("publisher", "—"),
+                    ),
+                    tags=(tag,),
                 )
-                row.pack(fill="x", pady=1, padx=4)
-                row.grid_columnconfigure(0, weight=4, minsize=200)
-                row.grid_columnconfigure(1, weight=2, minsize=100)
-                row.grid_columnconfigure(2, weight=3, minsize=140)
-                row.pack_propagate(False)
-                ctk.CTkLabel(
-                    row,
-                    text=app.get("name", "—"),
-                    font=ctk.CTkFont(family="Segoe UI", size=13),
-                    text_color=COLORS["text"],
-                    anchor="w",
-                ).grid(row=0, column=0, sticky="ew", padx=14)
-                ctk.CTkLabel(
-                    row,
-                    text=app.get("version", "—"),
-                    font=ctk.CTkFont(family="Segoe UI", size=12),
-                    text_color=COLORS["muted"],
-                    anchor="w",
-                ).grid(row=0, column=1, sticky="ew", padx=14)
-                ctk.CTkLabel(
-                    row,
-                    text=app.get("publisher", "—"),
-                    font=ctk.CTkFont(family="Segoe UI", size=12),
-                    text_color=COLORS["muted"],
-                    anchor="w",
-                ).grid(row=0, column=2, sticky="ew", padx=14)
 
         def on_apps(apps: list[dict[str, str]]) -> None:
             self.after(0, lambda: _fill(apps))
@@ -1355,26 +1356,13 @@ class NetworkToolsApp(ctk.CTk):
         def on_error(msg: str) -> None:
             def ui() -> None:
                 count_lbl.configure(text=t("apps.fail"))
-                _clear()
-                ctk.CTkLabel(
-                    scroll,
-                    text=msg,
-                    font=ctk.CTkFont(family="Segoe UI", size=13),
-                    text_color=COLORS["danger"],
-                ).pack(pady=36)
+                tree.delete(*tree.get_children())
 
             self.after(0, ui)
 
         def load() -> None:
             count_lbl.configure(text=t("apps.loading"))
-            _clear()
-            empty_lbl = ctk.CTkLabel(
-                scroll,
-                text=t("apps.fetching"),
-                font=ctk.CTkFont(family="Segoe UI", size=13),
-                text_color=COLORS["muted"],
-            )
-            empty_lbl.pack(pady=36)
+            tree.delete(*tree.get_children())
             InstalledAppsRunner(on_apps=on_apps, on_error=on_error).start()
 
         btn_refresh.configure(command=load)
@@ -1423,14 +1411,15 @@ class NetworkToolsApp(ctk.CTk):
         cards = ctk.CTkFrame(self._content, fg_color="transparent")
         cards.pack(fill="both", expand=True)
 
-        self._pack_tool_action_bar(text_send=True)
+        self._pack_tool_action_bar(text_send=False)
 
-        def _status_color(ok: bool, status: str) -> str:
-            if ok:
-                return COLORS["accent"]
-            if status.upper() in {"PARTIAL", "READY", "PENDING"}:
-                return COLORS["muted"]
-            return COLORS["danger"]
+        def _status_color(ok: bool, status: str) -> tuple[str, str]:
+            st = (status or "").upper()
+            if ok or st in {"ON", "READY", "RUNNING", "ONLINE"}:
+                return COLORS.get("ok", "#12B76A"), COLORS.get("on_ok", "#FFFFFF")
+            if st in {"PARTIAL", "PENDING"}:
+                return COLORS["muted"], COLORS["on_accent"]
+            return COLORS["danger"], COLORS["on_accent"]
 
         def _render(items: list[Any]) -> None:
             self._security_items = items
@@ -1472,12 +1461,13 @@ class NetworkToolsApp(ctk.CTk):
                 ).pack(side="left")
 
                 st = str(item.get("status", "UNKNOWN"))
+                fg, on = _status_color(bool(item.get("ok")), st)
                 badge = ctk.CTkLabel(
                     head,
                     text=f"  {st}  ",
                     font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-                    text_color=COLORS["on_accent"],
-                    fg_color=_status_color(bool(item.get("ok")), st),
+                    text_color=on,
+                    fg_color=fg,
                     corner_radius=6,
                 )
                 badge.pack(side="right")
@@ -1672,27 +1662,29 @@ class NetworkToolsApp(ctk.CTk):
         )
         empty.pack(pady=36)
 
-        # Action bar
-        self._action_bar.pack(fill="x", padx=24, pady=(0, 8), before=self._footer)
-        ctk.CTkButton(
-            self._action_bar,
-            text=t("app.back"),
-            width=120,
-            height=36,
-            fg_color=COLORS["danger"],
-            hover_color=COLORS["danger_hover"],
-            command=self._cancel_to_dashboard,
-        ).pack(side="right", padx=(8, 0))
-        ctk.CTkButton(
-            self._action_bar,
-            text=t("app.send"),
-            width=120,
-            height=36,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_dim"],
-            text_color=COLORS["on_accent"],
-            command=self._send_screenshot,
-        ).pack(side="right")
+        self._ipscan_found: list[tuple[str, str, bool]] = []
+        self._ipscan_meta: dict[str, str] = {}
+        self._send_text_payload = ""
+        self._pack_tool_action_bar(text_send=True)
+
+        def _rebuild_payload() -> None:
+            from modules.system_info import hostname as get_hostname
+
+            lines = [
+                "=== IP SCANNER ===",
+                f"PC: {get_hostname()}",
+                f"IP lokal: {self._ipscan_meta.get('ip', '—')}",
+                f"Subnet: {self._ipscan_meta.get('network', '—')}",
+                f"Host hidup: {len(self._ipscan_found)}",
+                "",
+            ]
+            for idx, (ip, host, is_self) in enumerate(
+                sorted(self._ipscan_found, key=lambda x: tuple(int(p) for p in x[0].split("."))),
+                1,
+            ):
+                mark = " *" if is_self else ""
+                lines.append(f"{idx}. {ip:<15}  {host or '—'}{mark}")
+            self._send_text_payload = "\n".join(lines)
 
         def _clear_rows() -> None:
             for w in list(scroll.winfo_children()):
@@ -1701,6 +1693,8 @@ class NetworkToolsApp(ctk.CTk):
                 except Exception:
                     pass
             self._ipscan_rows = []
+            self._ipscan_found = []
+            self._send_text_payload = ""
 
         def _add_row(ip: str, hostname: str, is_self: bool) -> None:
             if empty.winfo_exists():
@@ -1730,25 +1724,27 @@ class NetworkToolsApp(ctk.CTk):
 
             host_text = hostname if hostname and hostname != "-" else "—"
             if is_self:
-                host_text = f"{host_text}  ·  PC ini"
+                host_text = f"{host_text}  ·  {t('ipscan.this_pc')}"
             ctk.CTkLabel(
                 row,
                 text=host_text,
                 font=ctk.CTkFont(family="Segoe UI", size=13),
-                text_color=COLORS["muted"] if not is_self else COLORS["accent"],
+                text_color=COLORS["muted"] if not is_self else COLORS.get("ok", COLORS["accent"]),
                 anchor="w",
             ).grid(row=0, column=1, sticky="ew", padx=14)
 
             badge = ctk.CTkLabel(
                 row,
-                text="  Online  ",
+                text=f"  {t('ipscan.online')}  ",
                 font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-                text_color=COLORS["on_accent"],
-                fg_color=COLORS["accent"],
+                text_color=COLORS.get("on_ok", "#FFFFFF"),
+                fg_color=COLORS.get("ok", "#12B76A"),
                 corner_radius=6,
             )
             badge.grid(row=0, column=2, sticky="e", padx=14, pady=8)
             self._ipscan_rows.append(row)
+            self._ipscan_found.append((ip, hostname, is_self))
+            _rebuild_payload()
 
         def _set_scanning(active: bool) -> None:
             self._ipscan_running = active
@@ -1757,6 +1753,7 @@ class NetworkToolsApp(ctk.CTk):
 
         def on_start(local_ip: str, network: str, total: int) -> None:
             def ui() -> None:
+                self._ipscan_meta = {"ip": local_ip, "network": network}
                 lbl_ip.configure(text=local_ip)
                 lbl_net.configure(text=network)
                 lbl_prog.configure(text=f"0 / {total}")
@@ -2263,7 +2260,7 @@ class NetworkToolsApp(ctk.CTk):
             )
             return
         try:
-            _ok, tips = send_text_via_telegram(text)
+            _ok, tips = send_text_via_telegram(text, root=self)
             self._show_kirim_dialog(
                 tips,
                 title="Teks siap dikirim",
@@ -2311,8 +2308,8 @@ class NetworkToolsApp(ctk.CTk):
                 "Fitur ini meminta Run as Administrator (UAC)."
             ),
             "anydesk": (
-                "Klik Jalankan untuk menutup semua AnyDesk yang berjalan,\n"
-                "membuka AnyDesk baru, menyalin ID, lalu membuka Telegram."
+                "Menjalankan otomatis: tutup AnyDesk lama, buka baru,\n"
+                "salin ID, lalu buka Telegram."
             ),
         }
         for line in hints.get(key, "").split("\n"):
@@ -2327,20 +2324,10 @@ class NetworkToolsApp(ctk.CTk):
         elif key in AUTO_RUN_TOOLS:
             ctk.CTkLabel(
                 parent,
-                text="Berjalan otomatis…",
+                text=t("app.running_auto"),
                 font=ctk.CTkFont(family="Segoe UI", size=13),
                 text_color=COLORS["muted"],
             ).pack(side="left", pady=4)
-        elif key == "anydesk":
-            ctk.CTkButton(
-                parent,
-                text="Jalankan",
-                width=120,
-                fg_color=COLORS["accent"],
-                hover_color=COLORS["accent_dim"],
-                text_color=COLORS["on_accent"],
-                command=self._start_anydesk,
-            ).pack(side="left")
 
     def _build_ping(self, parent: ctk.CTkFrame) -> None:
         panel = ctk.CTkFrame(parent, fg_color=COLORS["panel"], corner_radius=10)
