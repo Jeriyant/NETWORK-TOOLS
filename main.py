@@ -174,11 +174,7 @@ class NetworkToolsApp(ctk.CTk):
         import webbrowser
         from pathlib import Path
 
-        from modules.updater import (
-            apply_update_and_restart,
-            download_file,
-            is_direct_exe_url,
-        )
+        from modules.updater import is_direct_exe_url
 
         ver = getattr(info, "version", "?")
         notes = (getattr(info, "changelog", "") or "").strip()
@@ -220,15 +216,106 @@ class NetworkToolsApp(ctk.CTk):
             return
 
         dest = Path(tempfile.gettempdir()) / f"NetworkTools_update_v{ver}.exe"
-        messagebox.showinfo(
-            "Mengunduh",
-            "Update sedang diunduh di latar belakang.\nJangan tutup aplikasi sampai selesai.",
-            parent=self,
+        self._show_download_progress(url, dest, str(ver), info)
+
+    def _show_download_progress(
+        self,
+        url: str,
+        dest: Path,
+        ver: str,
+        info: Any,
+    ) -> None:
+        """Dialog progress bar saat mengunduh update."""
+        import threading
+        import webbrowser
+
+        from modules.updater import apply_update_and_restart, download_file
+
+        dlg = ctk.CTkToplevel(self)
+        dlg.title(f"Mengunduh v{ver}")
+        dlg.geometry("420x180")
+        dlg.resizable(False, False)
+        dlg.transient(self)
+        dlg.attributes("-topmost", True)
+        dlg.configure(fg_color=COLORS["bg"])
+        dlg.grab_set()
+
+        self.update_idletasks()
+        px = self.winfo_rootx() + (self.winfo_width() - 420) // 2
+        py = self.winfo_rooty() + (self.winfo_height() - 180) // 2
+        dlg.geometry(f"420x180+{max(px, 40)}+{max(py, 40)}")
+
+        frame = ctk.CTkFrame(dlg, fg_color=COLORS["panel"], corner_radius=12)
+        frame.pack(fill="both", expand=True, padx=14, pady=14)
+
+        ctk.CTkLabel(
+            frame,
+            text=f"Mengunduh Network Tools v{ver}",
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=15),
+            text_color=COLORS["text"],
+        ).pack(anchor="w", padx=16, pady=(14, 4))
+
+        status = ctk.CTkLabel(
+            frame,
+            text="Menyiapkan unduhan...",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color=COLORS["muted"],
         )
+        status.pack(anchor="w", padx=16, pady=(0, 10))
+
+        bar = ctk.CTkProgressBar(
+            frame,
+            width=360,
+            height=16,
+            progress_color=COLORS["accent"],
+            fg_color=COLORS["border"],
+        )
+        bar.pack(padx=16, pady=(0, 8))
+        bar.set(0)
+
+        pct = ctk.CTkLabel(
+            frame,
+            text="0%",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color=COLORS["text"],
+        )
+        pct.pack(anchor="e", padx=16, pady=(0, 12))
+
+        state = {"closed": False}
+
+        def safe_ui(fn: Callable[[], None]) -> None:
+            if state["closed"]:
+                return
+            try:
+                if dlg.winfo_exists():
+                    fn()
+            except Exception:
+                pass
+
+        def on_progress(received: int, total: int | None) -> None:
+            def apply() -> None:
+                if total and total > 0:
+                    ratio = min(1.0, received / total)
+                    bar.set(ratio)
+                    mb_r = received / (1024 * 1024)
+                    mb_t = total / (1024 * 1024)
+                    pct.configure(text=f"{ratio * 100:.0f}%")
+                    status.configure(
+                        text=f"Mengunduh... {mb_r:.1f} / {mb_t:.1f} MB"
+                    )
+                else:
+                    # Ukuran tidak diketahui — tampilkan MB + isi bar berdenyut
+                    mb_r = received / (1024 * 1024)
+                    pulse = (received % (8 * 1024 * 1024)) / (8 * 1024 * 1024)
+                    bar.set(min(0.95, 0.08 + pulse * 0.85))
+                    pct.configure(text=f"{mb_r:.1f} MB")
+                    status.configure(text=f"Mengunduh... {mb_r:.1f} MB")
+
+            self.after(0, lambda: safe_ui(apply))
 
         def worker() -> None:
             try:
-                download_file(url, dest)
+                download_file(url, dest, on_progress=on_progress)
                 if dest.stat().st_size < 1_000_000:
                     raise RuntimeError(
                         "File unduhan terlalu kecil — kemungkinan bukan EXE valid."
@@ -236,6 +323,12 @@ class NetworkToolsApp(ctk.CTk):
                 apply_update_and_restart(dest)
 
                 def ok() -> None:
+                    state["closed"] = True
+                    try:
+                        dlg.grab_release()
+                        dlg.destroy()
+                    except Exception:
+                        pass
                     messagebox.showinfo(
                         "Update",
                         "Unduhan selesai. Aplikasi akan ditutup dan diganti otomatis.",
@@ -246,6 +339,12 @@ class NetworkToolsApp(ctk.CTk):
                 self.after(0, ok)
             except Exception as exc:
                 def fail() -> None:
+                    state["closed"] = True
+                    try:
+                        dlg.grab_release()
+                        dlg.destroy()
+                    except Exception:
+                        pass
                     messagebox.showerror(
                         "Update gagal",
                         f"Gagal memasang update:\n{exc}\n\nBuka halaman unduhan di browser.",

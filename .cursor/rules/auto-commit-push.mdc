@@ -1,0 +1,16 @@
+---
+description: Auto commit and push every completed change to GitHub
+alwaysApply: true
+---
+
+# Auto commit & push ke GitHub
+
+Setelah menyelesaikan perubahan kode yang diminta user di repo Network Tools:
+
+1. Buat **git commit** (ikuti protokol commit yang sudah ada: status, diff, log, lalu add + commit).
+2. Langsung **`git push`** ke `origin` (branch aktif, biasanya `main`).
+3. Jangan menunggu user meminta commit/push lagi — ini sudah menjadi permintaan tetap.
+4. Kecuali user secara eksplisit bilang **jangan commit** / **jangan push** untuk tugas itu.
+5. Jangan commit file rahasia (`.env`, credentials, dll.).
+6. Pesan commit singkat, fokus pada *why*.
+7. Di akhir, sebutkan commit hash / bahwa sudah di-push (ringkas).

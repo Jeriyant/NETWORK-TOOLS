@@ -11,6 +11,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 GITHUB_REPO = "Jeriyant/NETWORK-TOOLS"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -133,14 +134,41 @@ def check_for_update(local_version: str) -> UpdateInfo | None:
         return None
 
 
-def download_file(url: str, dest: Path, timeout: int = 180) -> None:
+def download_file(
+    url: str,
+    dest: Path,
+    timeout: int = 180,
+    on_progress: Callable[[int, int | None], None] | None = None,
+) -> None:
+    """Download file. on_progress(bytes_received, total_bytes_or_None)."""
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout) as resp, dest.open("wb") as out:
+        total: int | None = None
+        try:
+            length = resp.headers.get("Content-Length")
+            if length and str(length).isdigit():
+                total = int(length)
+        except Exception:
+            total = None
+
+        received = 0
+        if on_progress:
+            try:
+                on_progress(0, total)
+            except Exception:
+                pass
+
         while True:
-            chunk = resp.read(1024 * 256)
+            chunk = resp.read(1024 * 64)
             if not chunk:
                 break
             out.write(chunk)
+            received += len(chunk)
+            if on_progress:
+                try:
+                    on_progress(received, total)
+                except Exception:
+                    pass
 
 
 def is_direct_exe_url(url: str) -> bool:
