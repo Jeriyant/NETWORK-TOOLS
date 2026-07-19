@@ -1,4 +1,4 @@
-"""Auto-update via GitHub Releases + update.json fallback."""
+"""Auto-update via GitHub Releases."""
 
 from __future__ import annotations
 
@@ -15,9 +15,6 @@ from typing import Callable
 
 GITHUB_REPO = "Jeriyant/NETWORK-TOOLS"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-GITHUB_UPDATE_JSON = (
-    f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/update.json"
-)
 GITHUB_REPO_URL = f"https://github.com/{GITHUB_REPO}"
 USER_AGENT = "NetworkTools-Updater/1.0"
 
@@ -103,33 +100,10 @@ def check_github_release(local_version: str) -> UpdateInfo | None:
     )
 
 
-def check_update_json(local_version: str) -> UpdateInfo | None:
-    data = _http_get_json(GITHUB_UPDATE_JSON)
-    if not isinstance(data, dict):
-        return None
-    remote = str(data.get("version") or "").strip()
-    url = str(data.get("url") or data.get("download_url") or "").strip()
-    if not remote or not url or not is_newer(remote, local_version):
-        return None
-    return UpdateInfo(
-        version=remote.lstrip("vV"),
-        download_url=url,
-        changelog=str(data.get("changelog") or "").strip(),
-        mandatory=bool(data.get("mandatory", False)),
-        html_url=str(data.get("html_url") or GITHUB_REPO_URL),
-    )
-
-
 def check_for_update(local_version: str) -> UpdateInfo | None:
-    """Prefer GitHub Releases, fallback ke update.json di branch main."""
+    """Cek versi baru hanya dari GitHub Releases."""
     try:
-        info = check_github_release(local_version)
-        if info:
-            return info
-    except Exception:
-        pass
-    try:
-        return check_update_json(local_version)
+        return check_github_release(local_version)
     except Exception:
         return None
 

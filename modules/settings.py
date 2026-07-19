@@ -42,7 +42,7 @@ DNS_TEST_DOMAINS = [
 NETWORK_ADAPTER = ""  # empty = auto pick first Up adapter
 DEFAULT_THEME = "system"
 
-# App version — naikkan setiap rilis baru (harus cocok dengan GitHub Release / update.json)
+# App version — naikkan setiap rilis baru (harus cocok dengan tag GitHub Release)
 APP_VERSION = "1.0.2"
 UPDATE_REPO = "https://github.com/Jeriyant/NETWORK-TOOLS"
 

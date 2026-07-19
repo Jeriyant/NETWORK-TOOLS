@@ -30,8 +30,6 @@ TI NETWORKING SOLUTIONS CUSJ
 
 ## Update otomatis
 
-Saat dijalankan, app mengecek:
-1. GitHub Releases: `Jeriyant/NETWORK-TOOLS`
-2. Fallback: `update.json` di branch `main`
+Saat dijalankan, app mengecek **GitHub Releases** di `Jeriyant/NETWORK-TOOLS`.
 
 Lihat `UPDATE.md` untuk cara publish rilis baru.
