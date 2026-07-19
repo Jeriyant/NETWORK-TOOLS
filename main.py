@@ -16,6 +16,8 @@ from modules.clear_cache import ClearCacheRunner
 from modules.dns_test import DnsTestRunner
 from modules.fix_anydesk import AnydeskRunner
 from modules.fix_printer import FixPrinterRunner
+from modules.fix_rdp import FixRdpRunner
+from modules.ip_scanner import IpScannerRunner
 from modules.ping_runner import PingRunner
 from modules.refresh_network import RefreshNetworkRunner
 from modules.settings import (
@@ -41,9 +43,9 @@ from modules.theme import (
 from modules.traceroute_runner import TracerouteRunner
 
 # Tools that require Administrator (UAC)
-ADMIN_TOOLS = frozenset({"refresh", "cache", "printer"})
+ADMIN_TOOLS = frozenset({"refresh", "cache", "printer", "fixrdp"})
 # Langsung jalan saat menu dibuka (tanpa tombol Jalankan)
-AUTO_RUN_TOOLS = frozenset({"refresh", "cache", "printer"})
+AUTO_RUN_TOOLS = frozenset({"refresh", "cache", "printer", "fixrdp"})
 
 # Active palette (updated when theme changes)
 COLORS: dict[str, str] = dict(THEMES["light"])
@@ -52,14 +54,16 @@ TOOLS = [
     ("ping", "Ping", "●", "Ping terus ke host dari daftar"),
     ("traceroute", "Traceroute", "↗", "tracert -d ke alamat IP/host"),
     ("dns", "DNS Test", "◎", "Uji DNS & deteksi leak"),
+    ("ipscan", "IP Scanner", "▦", "Scan host hidup di subnet PC ini"),
     ("speedtest", "Speedtest", "⚡", "Speedtest di browser bawaan aplikasi"),
     ("refresh", "Refresh Network", "↻", "Otomatis renew DHCP (Admin)"),
     ("printer", "Fix Printer", "🖨", "Otomatis clear spooler (Admin)"),
+    ("fixrdp", "Fix RDP", "⧉", "Reset RDP client agar fresh (Admin)"),
     ("cache", "Clear Cache", "⌫", "Otomatis hapus TEMP & RDP6 (Admin)"),
     ("anydesk", "Anydesk", "⌨", "Tutup AnyDesk lama, buka baru, salin ID ke Telegram"),
 ]
 
-SEND_TOOLS = {"ping", "traceroute", "dns", "speedtest"}
+SEND_TOOLS = {"ping", "traceroute", "dns", "ipscan", "speedtest"}
 
 
 class ConsoleView(ctk.CTkFrame):
@@ -200,16 +204,16 @@ class NetworkToolsApp(ctk.CTk):
 
         dlg = ctk.CTkToplevel(self)
         dlg.title("Update Wajib — Network Tools")
-        dlg.geometry("500x480")
-        dlg.minsize(460, 440)
+        dlg.geometry("520x540")
+        dlg.minsize(480, 500)
         dlg.resizable(False, False)
         dlg.transient(self)
         dlg.configure(fg_color=COLORS["bg"])
 
         self.update_idletasks()
-        px = self.winfo_rootx() + max((self.winfo_width() - 500) // 2, 0)
-        py = self.winfo_rooty() + max((self.winfo_height() - 480) // 2, 0)
-        dlg.geometry(f"500x480+{max(px, 40)}+{max(py, 40)}")
+        px = self.winfo_rootx() + max((self.winfo_width() - 520) // 2, 0)
+        py = self.winfo_rooty() + max((self.winfo_height() - 540) // 2, 0)
+        dlg.geometry(f"520x540+{max(px, 40)}+{max(py, 40)}")
 
         state = {"accepted": False}
 
@@ -233,11 +237,11 @@ class NetworkToolsApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        card.pack(fill="both", expand=True, padx=16, pady=16)
+        card.pack(fill="both", expand=True, padx=18, pady=18)
 
-        # Footer dulu (side=bottom) agar tombol selalu rapi & tidak terpotong
+        # Footer dulu agar tombol tidak terpotong
         footer = ctk.CTkFrame(card, fg_color="transparent")
-        footer.pack(side="bottom", fill="x", padx=16, pady=(8, 16))
+        footer.pack(side="bottom", fill="x", padx=18, pady=(4, 18))
 
         def on_ok() -> None:
             import os
@@ -290,37 +294,36 @@ class NetworkToolsApp(ctk.CTk):
             text="Tanpa update, aplikasi tidak dapat digunakan.",
             font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color=COLORS["muted"],
-        ).pack(pady=(8, 0))
+        ).pack(pady=(10, 0))
 
-        # Header accent
-        header = ctk.CTkFrame(card, fg_color=COLORS["accent"], corner_radius=12, height=84)
-        header.pack(fill="x", padx=16, pady=(16, 0))
-        header.pack_propagate(False)
+        # Header — tinggi natural (jangan pack_propagate False agar teks tidak terpotong)
+        header = ctk.CTkFrame(card, fg_color=COLORS["accent"], corner_radius=12)
+        header.pack(fill="x", padx=18, pady=(18, 0))
 
         ctk.CTkLabel(
             header,
             text="UPDATE WAJIB",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             text_color=COLORS["on_accent"],
-        ).pack(anchor="w", padx=16, pady=(12, 0))
+        ).pack(anchor="w", padx=18, pady=(14, 0))
         ctk.CTkLabel(
             header,
             text="Versi baru tersedia",
             font=ctk.CTkFont(family="Segoe UI Semibold", size=20),
             text_color=COLORS["on_accent"],
-        ).pack(anchor="w", padx=16, pady=(2, 0))
+        ).pack(anchor="w", padx=18, pady=(4, 0))
         ctk.CTkLabel(
             header,
             text="Pasang pembaruan untuk melanjutkan.",
             font=ctk.CTkFont(family="Segoe UI", size=12),
             text_color=COLORS["on_accent"],
-        ).pack(anchor="w", padx=16, pady=(2, 10))
+        ).pack(anchor="w", padx=18, pady=(4, 14))
 
         body = ctk.CTkFrame(card, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=16, pady=12)
+        body.pack(fill="both", expand=True, padx=18, pady=(14, 8))
 
         ver_row = ctk.CTkFrame(body, fg_color="transparent")
-        ver_row.pack(fill="x", pady=(0, 12))
+        ver_row.pack(fill="x", pady=(0, 14))
         ver_row.grid_columnconfigure((0, 2), weight=1)
 
         def _ver_chip(parent: Any, label: str, value: str, emphasize: bool) -> None:
@@ -337,16 +340,16 @@ class NetworkToolsApp(ctk.CTk):
                 text=label,
                 font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
                 text_color=COLORS["muted"],
-            ).pack(anchor="w", padx=12, pady=(8, 0))
+            ).pack(anchor="w", padx=14, pady=(10, 0))
             ctk.CTkLabel(
                 chip,
                 text=value,
                 font=ctk.CTkFont(family="Segoe UI Semibold", size=17),
                 text_color=COLORS["accent"] if emphasize else COLORS["text"],
-            ).pack(anchor="w", padx=12, pady=(2, 10))
+            ).pack(anchor="w", padx=14, pady=(4, 12))
 
         left = ctk.CTkFrame(ver_row, fg_color="transparent")
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         _ver_chip(left, "SAAT INI", f"v{APP_VERSION}", False)
 
         ctk.CTkLabel(
@@ -354,10 +357,10 @@ class NetworkToolsApp(ctk.CTk):
             text="→",
             font=ctk.CTkFont(family="Segoe UI Semibold", size=18),
             text_color=COLORS["accent"],
-        ).grid(row=0, column=1, padx=2)
+        ).grid(row=0, column=1, padx=4)
 
         right = ctk.CTkFrame(ver_row, fg_color="transparent")
-        right.grid(row=0, column=2, sticky="nsew", padx=(6, 0))
+        right.grid(row=0, column=2, sticky="nsew", padx=(8, 0))
         _ver_chip(right, "TERBARU", f"v{ver}", True)
 
         ctk.CTkLabel(
@@ -366,21 +369,28 @@ class NetworkToolsApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             text_color=COLORS["muted"],
             anchor="w",
-        ).pack(fill="x", pady=(0, 6))
+        ).pack(fill="x", pady=(0, 8))
 
-        notes_box = ctk.CTkTextbox(
+        notes_wrap = ctk.CTkFrame(
             body,
-            height=110,
-            font=ctk.CTkFont(family="Segoe UI", size=12),
             fg_color=COLORS["bg"],
-            text_color=COLORS["text"],
+            corner_radius=10,
             border_width=1,
             border_color=COLORS["border"],
-            corner_radius=10,
+        )
+        notes_wrap.pack(fill="both", expand=True)
+
+        notes_box = ctk.CTkTextbox(
+            notes_wrap,
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent",
+            text_color=COLORS["text"],
+            border_width=0,
+            corner_radius=0,
             wrap="word",
             activate_scrollbars=True,
         )
-        notes_box.pack(fill="both", expand=True)
+        notes_box.pack(fill="both", expand=True, padx=10, pady=10)
         notes_box.insert("1.0", notes or "Pembaruan keamanan & perbaikan stabilitas.")
         notes_box.configure(state="disabled")
 
@@ -1046,6 +1056,7 @@ class NetworkToolsApp(ctk.CTk):
                 "refresh": self._start_refresh,
                 "printer": self._start_printer,
                 "cache": self._start_cache,
+                "fixrdp": self._start_fix_rdp,
             }
             fn = starters.get(key)
             if fn:
@@ -1472,6 +1483,10 @@ class NetworkToolsApp(ctk.CTk):
             "ping": "Pilih host dari daftar, lalu Mulai Ping. Tekan Kembali untuk ke dashboard.",
             "traceroute": "Pilih host dari dropdown, lalu Mulai. Perintah: tracert -d <alamat>",
             "dns": "Klik Jalankan untuk uji DNS mirip leak test.",
+            "ipscan": (
+                "Klik Mulai Scan untuk memindai host hidup di subnet\n"
+                "jaringan PC ini (ICMP ping). Tekan Kembali untuk menghentikan."
+            ),
             "speedtest": "Speedtest berjalan di browser bawaan aplikasi.",
             "refresh": (
                 "Menjalankan otomatis: disable/enable adapter & renew DHCP.\n"
@@ -1480,6 +1495,11 @@ class NetworkToolsApp(ctk.CTk):
             "printer": (
                 "Menjalankan otomatis: clear spooler printer\n"
                 "(net stop spooler → hapus antrian → net start spooler).\n"
+                "Meminta Run as Administrator (UAC)."
+            ),
+            "fixrdp": (
+                "Menjalankan otomatis: reset RDP client (ConnectionClient,\n"
+                "folder RDP6, registry Terminal Server Client, kredensial TERMSRV).\n"
                 "Meminta Run as Administrator (UAC)."
             ),
             "cache": (
@@ -1509,6 +1529,16 @@ class NetworkToolsApp(ctk.CTk):
                 hover_color=COLORS["accent_dim"],
                 text_color=COLORS["on_accent"],
                 command=self._start_dns,
+            ).pack(side="left")
+        elif key == "ipscan":
+            ctk.CTkButton(
+                parent,
+                text="Mulai Scan",
+                width=140,
+                fg_color=COLORS["accent"],
+                hover_color=COLORS["accent_dim"],
+                text_color=COLORS["on_accent"],
+                command=self._start_ip_scan,
             ).pack(side="left")
         elif key in AUTO_RUN_TOOLS:
             ctk.CTkLabel(
@@ -1656,6 +1686,17 @@ class NetworkToolsApp(ctk.CTk):
         self.set_runner_stop(runner.stop)
         runner.start()
 
+    def _start_ip_scan(self) -> None:
+        self._stop_runner()
+        if self.console:
+            self.console.clear()
+        runner = IpScannerRunner(
+            on_line=self.log,
+            on_done=lambda: self.log("--- IP Scanner selesai ---"),
+        )
+        self.set_runner_stop(runner.stop)
+        runner.start()
+
     def _ensure_admin_for(self, tool_key: str) -> bool:
         """Minta UAC / restart elevated untuk tool yang butuh admin. Return True jika boleh lanjut."""
         if tool_key not in ADMIN_TOOLS:
@@ -1702,6 +1743,14 @@ class NetworkToolsApp(ctk.CTk):
         if self.console:
             self.console.clear()
         ClearCacheRunner(on_line=self.log).start()
+
+    def _start_fix_rdp(self) -> None:
+        if not self._ensure_admin_for("fixrdp"):
+            return
+        self._stop_runner()
+        if self.console:
+            self.console.clear()
+        FixRdpRunner(on_line=self.log).start()
 
     def _start_anydesk(self) -> None:
         self._stop_runner()

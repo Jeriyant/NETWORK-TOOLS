@@ -16,9 +16,11 @@ Hasil: `dist\NetworkTools.exe` (satu file, tanpa `config.json`).
 |------|----------|
 | **Ping / Traceroute** | Host tetap: Internet, Gateway (otomatis), Server-VPN/DB/App1–8 |
 | **DNS Test** | Uji resolusi DNS |
+| **IP Scanner** | Scan host hidup di subnet PC saat ini (ICMP) |
 | **Speedtest** | `https://jeriyant.speedtestcustom.com` (WebView2) |
 | **Refresh Network** | Disable/enable NIC + renew DHCP (minta Administrator) |
 | **Fix Printer** | Clear spooler: stop → hapus antrian → start (minta Administrator) |
+| **Fix RDP** | Reset RDP client: kill ConnectionClient, hapus RDP6/cache, bersihkan registry & kredensial TERMSRV |
 | **Clear Cache** | Hapus TEMP & `RDP6` (minta Administrator) |
 | **Anydesk** | Tutup AnyDesk lama, buka baru, salin ID, buka Telegram |
 
