@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -194,70 +195,184 @@ def is_direct_exe_url(url: str) -> bool:
 
 def apply_update_and_restart(downloaded_exe: Path) -> None:
     """
-    Ganti EXE yang sedang jalan lewat batch terpisah.
+    Ganti EXE yang sedang jalan lewat updater PowerShell terpisah.
 
-    Catatan: jangan pakai CREATE_NO_WINDOW — di Windows sering membuat
-    proses baru gagal extract PyInstaller (_MEI*/python312.dll).
+    PyInstaller onefile punya proses bootloader induk yang baru menghapus
+    folder _MEI setelah child (app) keluar. Jika EXE baru dijalankan terlalu
+    cepat / sebagai anak dari proses lama, Windows sering gagal extract
+    python312.dll. Solusi:
+    - Jalankan updater lewat ShellExecute (bukan child tree Python)
+    - Tunggu PID app + semua instance EXE hilang
+    - Tunggu file EXE bisa di-rename (bootloader selesai)
+    - Jeda ekstra, baru swap + Start-Process mandiri
     """
     if not getattr(sys, "frozen", False):
         raise RuntimeError("Auto-replace hanya tersedia pada build .exe")
 
     current = Path(sys.executable).resolve()
-    bat = Path(tempfile.gettempdir()) / "network_tools_apply_update.bat"
-    cur = str(current)
-    new = str(downloaded_exe.resolve())
-    # Pakai copy + start; tunggu proses lama keluar dulu
-    script = f"""@echo off
-setlocal EnableExtensions
-set "TARGET={cur}"
-set "SOURCE={new}"
+    source = downloaded_exe.resolve()
+    workdir = str(current.parent)
+    pid = os.getpid()
+    # Get-Process -Name memakai nama tanpa ekstensi
+    proc_name = current.stem
 
-rem Tunggu aplikasi lama benar-benar tertutup
-timeout /t 5 /nobreak >nul
+    ps1 = Path(tempfile.gettempdir()) / f"network_tools_apply_update_{pid}.ps1"
+    err_log = Path(tempfile.gettempdir()) / "network_tools_update_error.txt"
 
-set /a TRIES=0
-:waitlock
-set /a TRIES+=1
-del /F /Q "%TARGET%" >nul 2>&1
-if not exist "%TARGET%" goto do_copy
-if %TRIES% GEQ 45 (
-  echo Gagal mengunci file lama. > "%TEMP%\\network_tools_update_error.txt"
-  exit /b 1
-)
-timeout /t 1 /nobreak >nul
-goto waitlock
+    def _ps_single(s: str) -> str:
+        return s.replace("'", "''")
 
-:do_copy
-copy /Y "%SOURCE%" "%TARGET%" >nul
-if errorlevel 1 (
-  echo Copy gagal. > "%TEMP%\\network_tools_update_error.txt"
-  exit /b 2
-)
-if not exist "%TARGET%" (
-  echo Target hilang setelah copy. > "%TEMP%\\network_tools_update_error.txt"
-  exit /b 3
-)
+    script = f"""$ErrorActionPreference = 'Continue'
+$target = '{_ps_single(str(current))}'
+$source = '{_ps_single(str(source))}'
+$workdir = '{_ps_single(workdir)}'
+$errLog = '{_ps_single(str(err_log))}'
+$oldPid = {pid}
+$procName = '{_ps_single(proc_name)}'
 
-timeout /t 1 /nobreak >nul
-start "" "%TARGET%"
-del /F /Q "%SOURCE%" >nul 2>&1
-del "%~f0" >nul 2>&1
+function Fail([string]$msg) {{
+  Set-Content -LiteralPath $errLog -Value $msg -Encoding UTF8
+  exit 1
+}}
+
+if (-not (Test-Path -LiteralPath $source)) {{
+  Fail "Source update hilang: $source"
+}}
+
+# 1) Tunggu proses app (child) keluar
+$tries = 0
+while (Get-Process -Id $oldPid -ErrorAction SilentlyContinue) {{
+  $tries++
+  if ($tries -gt 120) {{ Fail "Timeout menunggu PID $oldPid keluar" }}
+  Start-Sleep -Milliseconds 500
+}}
+
+# 2) Tunggu semua instance (termasuk bootloader induk)
+$tries = 0
+while (Get-Process -Name $procName -ErrorAction SilentlyContinue) {{
+  $tries++
+  if ($tries -gt 120) {{ Fail "Timeout menunggu $procName keluar" }}
+  Start-Sleep -Milliseconds 500
+}}
+
+# 3) Tunggu file EXE bisa di-rename (= handle bootloader / AV lepas)
+$old = "$target.old"
+$tries = 0
+while ($true) {{
+  try {{
+    if (Test-Path -LiteralPath $old) {{
+      Remove-Item -LiteralPath $old -Force -ErrorAction Stop
+    }}
+    if (Test-Path -LiteralPath $target) {{
+      Move-Item -LiteralPath $target -Destination $old -Force -ErrorAction Stop
+    }}
+    break
+  }} catch {{
+    $tries++
+    if ($tries -gt 90) {{ Fail "Tidak bisa mengunci file lama (masih dipakai)" }}
+    Start-Sleep -Milliseconds 500
+  }}
+}}
+
+# 4) Jeda agar folder _MEI lama selesai dibersihkan bootloader
+Start-Sleep -Seconds 4
+
+try {{
+  Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop
+}} catch {{
+  if (Test-Path -LiteralPath $old) {{
+    Move-Item -LiteralPath $old -Destination $target -Force -ErrorAction SilentlyContinue
+  }}
+  Fail "Copy gagal: $($_.Exception.Message)"
+}}
+
+if (-not (Test-Path -LiteralPath $target)) {{
+  Fail "Target hilang setelah copy"
+}}
+
+$szSrc = (Get-Item -LiteralPath $source).Length
+$szDst = (Get-Item -LiteralPath $target).Length
+if ($szSrc -ne $szDst) {{
+  Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+  if (Test-Path -LiteralPath $old) {{
+    Move-Item -LiteralPath $old -Destination $target -Force -ErrorAction SilentlyContinue
+  }}
+  Fail "Ukuran setelah copy tidak cocok ($szDst vs $szSrc)"
+}}
+
+# 5) Jeda singkat untuk antivirus scan
+Start-Sleep -Seconds 2
+
+# 6) Jalankan EXE baru sebagai proses mandiri
+try {{
+  Start-Process -FilePath $target -WorkingDirectory $workdir
+}} catch {{
+  Fail "Gagal menjalankan EXE baru: $($_.Exception.Message)"
+}}
+
+Start-Sleep -Seconds 2
+Remove-Item -LiteralPath $source -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 """
-    bat.write_text(script, encoding="utf-8")
+    ps1.write_text(script, encoding="utf-8")
 
-    # DETACHED agar batch hidup setelah app tutup; tanpa CREATE_NO_WINDOW
-    flags = 0
-    flags |= getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-    flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-    subprocess.Popen(
-        ["cmd.exe", "/c", str(bat)],
-        cwd=str(current.parent),
-        creationflags=flags,
-        close_fds=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+    # ShellExecute memutus relationship dengan proses PyInstaller (penting!)
+    params = (
+        f'-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{ps1}"'
     )
+    try:
+        import ctypes
+
+        rc = int(
+            ctypes.windll.shell32.ShellExecuteW(
+                None,
+                "open",
+                "powershell.exe",
+                params,
+                str(current.parent),
+                0,  # SW_HIDE
+            )
+        )
+        if rc <= 32:
+            raise OSError(f"ShellExecute gagal (kode {rc})")
+    except Exception:
+        flags = 0
+        flags |= getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+        flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+        flags |= 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
+        subprocess.Popen(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-WindowStyle",
+                "Hidden",
+                "-File",
+                str(ps1),
+            ],
+            cwd=str(current.parent),
+            creationflags=flags,
+            close_fds=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+
+def cleanup_update_leftovers() -> None:
+    """Hapus sisa file update (.old / .new) di folder EXE bila ada."""
+    if not getattr(sys, "frozen", False):
+        return
+    current = Path(sys.executable).resolve()
+    for suffix in (".old", ".new"):
+        leftover = current.with_name(current.name + suffix)
+        try:
+            if leftover.is_file():
+                leftover.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def current_executable_path() -> Path:

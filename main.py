@@ -134,6 +134,12 @@ class NetworkToolsApp(ctk.CTk):
         self.show_dashboard()
         self.after(200, self._maybe_resume_elevated_tool)
         self.after(800, self._check_update_on_startup)
+        try:
+            from modules.updater import cleanup_update_leftovers
+
+            cleanup_update_leftovers()
+        except Exception:
+            pass
 
     def _maybe_resume_elevated_tool(self) -> None:
         """Setelah UAC, buka ulang tool & jalankan otomatis."""
@@ -333,6 +339,8 @@ class NetworkToolsApp(ctk.CTk):
                 apply_update_and_restart(dest)
 
                 def ok() -> None:
+                    import os
+
                     state["closed"] = True
                     try:
                         dlg.grab_release()
@@ -345,9 +353,9 @@ class NetworkToolsApp(ctk.CTk):
                         "Tunggu beberapa detik sampai jendela baru muncul.",
                         parent=self,
                     )
-                    self.destroy()
-                    # Pastikan proses benar-benar keluar agar file EXE bisa diganti
-                    self.after(200, lambda: __import__("sys").exit(0))
+                    # Hard exit: pastikan bootloader PyInstaller selesai
+                    # membersihkan _MEI sebelum updater menjalankan EXE baru.
+                    os._exit(0)
 
                 self.after(0, ok)
             except Exception as exc:
