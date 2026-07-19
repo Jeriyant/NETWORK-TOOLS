@@ -1561,6 +1561,7 @@ class NetworkToolsApp(ctk.CTk):
         self.console = None
         self._ipscan_rows: list[Any] = []
         self._ipscan_running = False
+        self._hide_sysinfo_strip()
 
         top = ctk.CTkFrame(self._header, fg_color="transparent")
         top.pack(fill="x")
@@ -1571,9 +1572,8 @@ class NetworkToolsApp(ctk.CTk):
             text_color=COLORS["text"],
         ).pack(side="left")
         self._header_actions(top)
-        self._build_sysinfo_bar(self._sysinfo_strip)
 
-        # Ringkasan subnet
+        # Ringkasan subnet — lebih rapat
         summary = ctk.CTkFrame(
             self._content,
             fg_color=COLORS["panel"],
@@ -1581,30 +1581,35 @@ class NetworkToolsApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        summary.pack(fill="x", pady=(0, 12))
+        summary.pack(fill="x", pady=(0, 10))
 
         stats = ctk.CTkFrame(summary, fg_color="transparent")
-        stats.pack(fill="x", padx=16, pady=14)
+        stats.pack(fill="x", padx=10, pady=(8, 4))
         for col in range(4):
             stats.grid_columnconfigure(col, weight=1)
 
         def _stat(parent: Any, col: int, label: str) -> ctk.CTkLabel:
-            cell = ctk.CTkFrame(parent, fg_color=COLORS["bg"], corner_radius=10)
-            cell.grid(row=0, column=col, sticky="nsew", padx=(0 if col == 0 else 6, 0 if col == 3 else 6))
+            cell = ctk.CTkFrame(parent, fg_color=COLORS["bg"], corner_radius=8)
+            cell.grid(
+                row=0,
+                column=col,
+                sticky="nsew",
+                padx=(0 if col == 0 else 4, 0 if col == 3 else 4),
+            )
             ctk.CTkLabel(
                 cell,
                 text=label,
-                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+                font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
                 text_color=COLORS["muted"],
-            ).pack(anchor="w", padx=12, pady=(10, 0))
+            ).pack(anchor="w", padx=8, pady=(6, 0))
             val = ctk.CTkLabel(
                 cell,
                 text="—",
-                font=ctk.CTkFont(family="Segoe UI Semibold", size=15),
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=13),
                 text_color=COLORS["text"],
                 anchor="w",
             )
-            val.pack(anchor="w", fill="x", padx=12, pady=(4, 12))
+            val.pack(anchor="w", fill="x", padx=8, pady=(2, 6))
             return val
 
         lbl_ip = _stat(stats, 0, "IP LOKAL")
@@ -1613,10 +1618,10 @@ class NetworkToolsApp(ctk.CTk):
         lbl_found = _stat(stats, 3, "HOST HIDUP")
 
         bar_row = ctk.CTkFrame(summary, fg_color="transparent")
-        bar_row.pack(fill="x", padx=16, pady=(0, 14))
+        bar_row.pack(fill="x", padx=10, pady=(0, 8))
         progress = ctk.CTkProgressBar(
             bar_row,
-            height=8,
+            height=6,
             progress_color=COLORS["accent"],
             fg_color=COLORS["bg"],
         )
@@ -1626,11 +1631,11 @@ class NetworkToolsApp(ctk.CTk):
         status_lbl = ctk.CTkLabel(
             bar_row,
             text="Siap memindai subnet PC ini.",
-            font=ctk.CTkFont(family="Segoe UI", size=12),
+            font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color=COLORS["muted"],
             anchor="w",
         )
-        status_lbl.pack(fill="x", pady=(8, 0))
+        status_lbl.pack(fill="x", pady=(6, 0))
 
         # Toolbar
         tools = ctk.CTkFrame(self._content, fg_color="transparent")
@@ -1658,7 +1663,7 @@ class NetworkToolsApp(ctk.CTk):
         )
         btn_stop.pack(side="left", padx=(8, 0))
 
-        # Header kolom + scroll list
+        # Header kolom + scroll list (font sama Daftar Aplikasi)
         list_wrap = ctk.CTkFrame(
             self._content,
             fg_color=COLORS["panel"],
@@ -1678,10 +1683,10 @@ class NetworkToolsApp(ctk.CTk):
             ctk.CTkLabel(
                 cols,
                 text=text,
-                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=10),
                 text_color=COLORS["muted"],
                 anchor="w",
-            ).grid(row=0, column=i, sticky="ew", padx=14, pady=10)
+            ).grid(row=0, column=i, sticky="ew", padx=14, pady=8)
 
         scroll = ctk.CTkScrollableFrame(
             list_wrap,
@@ -1693,7 +1698,7 @@ class NetworkToolsApp(ctk.CTk):
         empty = ctk.CTkLabel(
             scroll,
             text="Belum ada hasil. Klik Mulai Scan.",
-            font=ctk.CTkFont(family="Segoe UI", size=13),
+            font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color=COLORS["muted"],
         )
         empty.pack(pady=36)
@@ -1741,10 +1746,10 @@ class NetworkToolsApp(ctk.CTk):
             row = ctk.CTkFrame(
                 scroll,
                 fg_color=COLORS["bg"] if len(self._ipscan_rows) % 2 == 0 else "transparent",
-                corner_radius=8,
-                height=42,
+                corner_radius=6,
+                height=32,
             )
-            row.pack(fill="x", pady=2, padx=4)
+            row.pack(fill="x", pady=1, padx=4)
             row.grid_columnconfigure(0, weight=2, minsize=140)
             row.grid_columnconfigure(1, weight=4, minsize=180)
             row.grid_columnconfigure(2, weight=1, minsize=90)
@@ -1753,7 +1758,7 @@ class NetworkToolsApp(ctk.CTk):
             ctk.CTkLabel(
                 row,
                 text=ip,
-                font=ctk.CTkFont(family="Segoe UI Semibold", size=13),
+                font=ctk.CTkFont(family="Segoe UI", size=11),
                 text_color=COLORS["text"],
                 anchor="w",
             ).grid(row=0, column=0, sticky="ew", padx=14)
@@ -1764,7 +1769,7 @@ class NetworkToolsApp(ctk.CTk):
             ctk.CTkLabel(
                 row,
                 text=host_text,
-                font=ctk.CTkFont(family="Segoe UI", size=13),
+                font=ctk.CTkFont(family="Segoe UI", size=11),
                 text_color=COLORS["muted"] if not is_self else COLORS.get("ok", COLORS["accent"]),
                 anchor="w",
             ).grid(row=0, column=1, sticky="ew", padx=14)
@@ -1772,12 +1777,12 @@ class NetworkToolsApp(ctk.CTk):
             badge = ctk.CTkLabel(
                 row,
                 text=f"  {t('ipscan.online')}  ",
-                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
                 text_color=COLORS.get("on_ok", "#FFFFFF"),
                 fg_color=COLORS.get("ok", "#12B76A"),
                 corner_radius=6,
             )
-            badge.grid(row=0, column=2, sticky="e", padx=14, pady=8)
+            badge.grid(row=0, column=2, sticky="e", padx=14, pady=4)
             self._ipscan_rows.append(row)
             self._ipscan_found.append((ip, hostname, is_self))
             _rebuild_payload()
