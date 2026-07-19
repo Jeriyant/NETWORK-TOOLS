@@ -14,6 +14,7 @@ from typing import TypedDict
 class SystemInfo(TypedDict):
     hostname: str
     ip: str
+    latency: str
     cpu: str
     ram: str
     uptime: str
@@ -151,10 +152,38 @@ def windows_version() -> str:
     return platform.platform() or "-"
 
 
+def latency_to_dns(host: str = "8.8.8.8") -> str:
+    """Ping sekali ke DNS (default 8.8.8.8), kembalikan latensi seperti '12 ms'."""
+    creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        completed = subprocess.run(
+            ["ping", "-n", "1", "-w", "2000", host],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+            creationflags=creation,
+        )
+        out = (completed.stdout or "") + (completed.stderr or "")
+        lower = out.lower()
+        if "time<1ms" in lower or "waktu<1ms" in lower:
+            return "<1 ms"
+        m = re.search(r"(?:time|waktu)\s*[=<>]\s*(\d+)\s*ms", out, re.IGNORECASE)
+        if m:
+            return f"{m.group(1)} ms"
+        if completed.returncode != 0:
+            return "timeout"
+        return "-"
+    except Exception:
+        return "-"
+
+
 def collect_system_info() -> SystemInfo:
     return {
         "hostname": hostname(),
         "ip": primary_ipv4(),
+        "latency": latency_to_dns("8.8.8.8"),
         "cpu": cpu_name(),
         "ram": ram_summary(),
         "uptime": uptime_summary(),

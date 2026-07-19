@@ -454,6 +454,7 @@ class NetworkToolsApp(ctk.CTk):
         metrics = [
             ("HOST", "…", True),
             ("IP", "…", True),
+            ("LATENSI", "…", True),
             ("CPU", "…", False),
             ("RAM", "…", False),
             ("UPTIME", "…", False),
@@ -489,7 +490,7 @@ class NetworkToolsApp(ctk.CTk):
                 ),
                 text_color=COLORS["accent"] if emphasize else COLORS["text"],
                 anchor="w",
-                wraplength=220 if key in {"CPU", "WINDOWS"} else 0,
+                wraplength=200 if key in {"CPU", "WINDOWS"} else 0,
                 justify="left",
             )
             value.pack(anchor="w", pady=(2, 0))
@@ -502,10 +503,10 @@ class NetworkToolsApp(ctk.CTk):
                     width=1,
                     corner_radius=0,
                 )
-                sep.grid(row=0, column=idx * 2 + 1, sticky="ns", padx=10, pady=2)
+                sep.grid(row=0, column=idx * 2 + 1, sticky="ns", padx=8, pady=2)
 
         self.after(40, self._refresh_sysinfo_async)
-        # Refresh ringan setiap 60 detik (RAM / uptime)
+        # Refresh ringan setiap 60 detik (RAM / uptime / latensi)
         if getattr(self, "_sysinfo_poll_job", None):
             try:
                 self.after_cancel(self._sysinfo_poll_job)
@@ -531,6 +532,7 @@ class NetworkToolsApp(ctk.CTk):
                 info = {
                     "hostname": "-",
                     "ip": "-",
+                    "latency": "-",
                     "cpu": "-",
                     "ram": "-",
                     "uptime": "-",
@@ -547,6 +549,7 @@ class NetworkToolsApp(ctk.CTk):
         mapping = {
             "HOST": info.get("hostname", "-"),
             "IP": info.get("ip", "-"),
+            "LATENSI": info.get("latency", "-"),
             "CPU": info.get("cpu", "-"),
             "RAM": info.get("ram", "-"),
             "UPTIME": info.get("uptime", "-"),
@@ -735,11 +738,11 @@ class NetworkToolsApp(ctk.CTk):
         self.console = ConsoleView(self._content)
         self.console.pack(fill="both", expand=True)
 
-        # Action bar: Kirim + Batal
+        # Action bar: Kirim + Kembali
         self._action_bar.pack(fill="x", padx=24, pady=(0, 8), before=self._footer)
         ctk.CTkButton(
             self._action_bar,
-            text="Batal",
+            text="Kembali",
             width=120,
             height=36,
             fg_color=COLORS["danger"],
@@ -796,7 +799,7 @@ class NetworkToolsApp(ctk.CTk):
         actions.pack(side="right")
         ctk.CTkButton(
             actions,
-            text="Batal",
+            text="Kembali",
             width=100,
             height=32,
             fg_color=COLORS["danger"],
@@ -899,7 +902,7 @@ class NetworkToolsApp(ctk.CTk):
             self._action_bar.pack(fill="x", padx=12, pady=(0, 6), before=self._footer)
             ctk.CTkButton(
                 self._action_bar,
-                text="Batal",
+                text="Kembali",
                 width=120,
                 height=36,
                 fg_color=COLORS["danger"],
@@ -1190,7 +1193,7 @@ class NetworkToolsApp(ctk.CTk):
         if not self.console:
             return
         hints = {
-            "ping": "Pilih host dari daftar, lalu Mulai Ping. Tekan Batal untuk kembali ke dashboard.",
+            "ping": "Pilih host dari daftar, lalu Mulai Ping. Tekan Kembali untuk ke dashboard.",
             "traceroute": "Pilih host dari dropdown, lalu Mulai. Perintah: tracert -d <alamat>",
             "dns": "Klik Jalankan untuk uji DNS mirip leak test.",
             "speedtest": "Speedtest berjalan di browser bawaan aplikasi.",
@@ -1305,7 +1308,7 @@ class NetworkToolsApp(ctk.CTk):
         if self.console:
             self.console.clear()
         self.log(f"Pinging {name} [{ip}] with 32 bytes of data:")
-        self.log("(Tekan Batal untuk menghentikan dan kembali ke dashboard)")
+        self.log("(Tekan Kembali untuk menghentikan dan kembali ke dashboard)")
         self.log("")
         runner = PingRunner(ip, on_line=self.log)
         self.set_runner_stop(runner.stop)
