@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,7 +18,7 @@ from typing import Callable
 GITHUB_REPO = "Jeriyant/NETWORK-TOOLS"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_REPO_URL = f"https://github.com/{GITHUB_REPO}"
-USER_AGENT = "NetworkTools-Updater/1.3"
+USER_AGENT = "NetworkTools-Updater/1.4"
 
 MIN_EXE_BYTES = 8 * 1024 * 1024
 
@@ -219,154 +220,175 @@ def _clean_environ() -> dict[str, str]:
 
 def apply_update_and_restart(downloaded_exe: Path, kind: str | None = None) -> None:
     """
-    Ganti single-file EXE di tempat, lalu minta user klik OK untuk membuka.
+    Pasang update single-file EXE secara andal:
 
-    Tidak auto-start langsung dari process tree lama (itu pemicu crash
-    Failed to load Python DLL / _MEI). Setelah app tutup:
-    1) tunggu proses + file unlock
-    2) ganti EXE
-    3) bersihkan folder runtime LocalAppData lama
-    4) MessageBox → Start-Process dengan env bersih
+    1. Salin paket baru ke ``NetworkTools.exe.new`` SELAGI app masih jalan
+       (file .exe yang terkunci tidak perlu diganti dulu).
+    2. Jalankan updater ``.cmd`` via ShellExecute (bukan PowerShell detached
+       yang sering mati diam-diam).
+    3. Setelah PID keluar: rename exe → .old, .new → exe, lalu start.
     """
     if not getattr(sys, "frozen", False):
         raise RuntimeError("Auto-replace hanya tersedia pada build .exe")
 
     current = Path(sys.executable).resolve()
     source = downloaded_exe.resolve()
-    workdir = str(current.parent)
+    workdir = current.parent
+    staged = current.with_name(current.name + ".new")  # NetworkTools.exe.new
     pid = os.getpid()
-    proc_name = current.stem
     runtime_dir = (
         Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
         / "NetworkTools"
         / "runtime"
     )
-
-    ps1 = Path(tempfile.gettempdir()) / f"network_tools_apply_update_{pid}.ps1"
     err_log = Path(tempfile.gettempdir()) / "network_tools_update_error.txt"
+    ok_log = Path(tempfile.gettempdir()) / "network_tools_update_ok.txt"
 
-    def _ps_single(s: str) -> str:
-        return s.replace("'", "''")
+    # Stage file baru di samping EXE lama (boleh ditulis meski EXE terkunci)
+    try:
+        if staged.is_file():
+            staged.unlink(missing_ok=True)
+    except Exception:
+        pass
+    try:
+        shutil.copy2(source, staged)
+    except Exception as exc:
+        raise RuntimeError(f"Gagal menyiapkan file update (.new): {exc}") from exc
 
-    script = f"""$ErrorActionPreference = 'Continue'
-$target = '{_ps_single(str(current))}'
-$source = '{_ps_single(str(source))}'
-$workdir = '{_ps_single(workdir)}'
-$errLog = '{_ps_single(str(err_log))}'
-$oldPid = {pid}
-$procName = '{_ps_single(proc_name)}'
-$runtimeDir = '{_ps_single(str(runtime_dir))}'
+    if not staged.is_file() or staged.stat().st_size != source.stat().st_size:
+        raise RuntimeError("File .new tidak valid setelah disalin.")
 
-function Fail([string]$msg) {{
-  Set-Content -LiteralPath $errLog -Value $msg -Encoding UTF8
-  exit 1
-}}
+    verify_exe_file(staged)
 
-foreach ($k in @('_MEIPASS','_MEIPASS2','PYTHONHOME','PYTHONPATH','PYTHONNOUSERSITE')) {{
-  Remove-Item "Env:$k" -ErrorAction SilentlyContinue
-}}
-Get-ChildItem Env: | Where-Object {{ $_.Name -like '_MEI*' }} | ForEach-Object {{
-  Remove-Item "Env:$($_.Name)" -ErrorAction SilentlyContinue
-}}
+    bat = Path(tempfile.gettempdir()) / f"network_tools_apply_update_{pid}.cmd"
+    # cmd.exe — lebih andal daripada PowerShell DETACHED untuk self-replace
+    script = f"""@echo off
+setlocal EnableExtensions
+set "TARGET={current}"
+set "STAGED={staged}"
+set "WORKDIR={workdir}"
+set "ERRLOG={err_log}"
+set "OKLOG={ok_log}"
+set "OLDPID={pid}"
+set "RUNTIMEDIR={runtime_dir}"
+set "TEMPSRC={source}"
 
-if (-not (Test-Path -LiteralPath $source)) {{ Fail "Source update hilang: $source" }}
+rem Hapus log lama
+del /F /Q "%ERRLOG%" >nul 2>&1
+del /F /Q "%OKLOG%" >nul 2>&1
 
-$tries = 0
-while (Get-Process -Id $oldPid -ErrorAction SilentlyContinue) {{
-  $tries++; if ($tries -gt 120) {{ Fail "Timeout menunggu PID $oldPid" }}
-  Start-Sleep -Milliseconds 500
-}}
+rem 1) Tunggu proses app (PID) keluar
+set /a TRIES=0
+:waitpid
+tasklist /FI "PID eq %OLDPID%" 2>nul | findstr /R /C:" %OLDPID% " >nul
+if errorlevel 1 goto waitdone
+set /a TRIES+=1
+if %TRIES% GEQ 90 (
+  echo Timeout menunggu PID %OLDPID% keluar.> "%ERRLOG%"
+  exit /b 1
+)
+timeout /t 1 /nobreak >nul
+goto waitpid
 
-$tries = 0
-while (Get-Process -Name $procName -ErrorAction SilentlyContinue) {{
-  $tries++; if ($tries -gt 120) {{ Fail "Timeout menunggu $procName" }}
-  Start-Sleep -Milliseconds 500
-}}
+:waitdone
+rem 2) Jeda agar bootloader / handle file lepas
+timeout /t 3 /nobreak >nul
 
-$old = "$target.old"
-$tries = 0
-while ($true) {{
-  try {{
-    if (Test-Path -LiteralPath $old) {{ Remove-Item -LiteralPath $old -Force -ErrorAction Stop }}
-    if (Test-Path -LiteralPath $target) {{
-      Move-Item -LiteralPath $target -Destination $old -Force -ErrorAction Stop
-    }}
-    break
-  }} catch {{
-    $tries++; if ($tries -gt 90) {{ Fail "Tidak bisa mengunci file lama" }}
-    Start-Sleep -Milliseconds 500
-  }}
-}}
+if not exist "%STAGED%" (
+  echo File staged hilang: %STAGED%> "%ERRLOG%"
+  exit /b 2
+)
 
-Start-Sleep -Seconds 2
+rem 3) Rename EXE lama → .old (retry jika terkunci)
+set /a TRIES=0
+:trymove
+if exist "%TARGET%.old" del /F /Q "%TARGET%.old" >nul 2>&1
+if not exist "%TARGET%" goto do_swap
+move /Y "%TARGET%" "%TARGET%.old" >nul 2>&1
+if exist "%TARGET%.old" if not exist "%TARGET%" goto do_swap
+set /a TRIES+=1
+if %TRIES% GEQ 60 (
+  echo Tidak bisa mengunci/me-rename EXE lama.> "%ERRLOG%"
+  exit /b 3
+)
+timeout /t 1 /nobreak >nul
+goto trymove
 
-try {{
-  Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop
-}} catch {{
-  if (Test-Path -LiteralPath $old) {{
-    Move-Item -LiteralPath $old -Destination $target -Force -ErrorAction SilentlyContinue
-  }}
-  Fail "Copy gagal: $($_.Exception.Message)"
-}}
+:do_swap
+rem 4) .new → EXE aktif
+move /Y "%STAGED%" "%TARGET%" >nul 2>&1
+if not exist "%TARGET%" (
+  if exist "%TARGET%.old" move /Y "%TARGET%.old" "%TARGET%" >nul 2>&1
+  echo Gagal memasang EXE baru dari staged.> "%ERRLOG%"
+  exit /b 4
+)
 
-$szSrc = (Get-Item -LiteralPath $source).Length
-$szDst = (Get-Item -LiteralPath $target).Length
-if ($szSrc -ne $szDst) {{
-  Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
-  if (Test-Path -LiteralPath $old) {{ Move-Item -LiteralPath $old -Destination $target -Force -ErrorAction SilentlyContinue }}
-  Fail "Ukuran setelah copy tidak cocok ($szDst vs $szSrc)"
-}}
+rem 5) Verifikasi ukuran kasar (staged sudah dipindah; bandingkan dengan .old jika ada)
+for %%A in ("%TARGET%") do set SZNEW=%%~zA
+if %SZNEW% LSS 8000000 (
+  echo EXE baru terlalu kecil ^(%SZNEW%^).> "%ERRLOG%"
+  if exist "%TARGET%.old" (
+    del /F /Q "%TARGET%" >nul 2>&1
+    move /Y "%TARGET%.old" "%TARGET%" >nul 2>&1
+  )
+  exit /b 5
+)
 
-# Bersihkan sisa extract runtime versi lama
-if (Test-Path -LiteralPath $runtimeDir) {{
-  Remove-Item -LiteralPath $runtimeDir -Recurse -Force -ErrorAction SilentlyContinue
-}}
+rem 6) Bersihkan
+if exist "%RUNTIMEDIR%" rd /S /Q "%RUNTIMEDIR%" >nul 2>&1
+del /F /Q "%TEMPSRC%" >nul 2>&1
+del /F /Q "%TARGET%.old" >nul 2>&1
 
-Remove-Item -LiteralPath $source -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
+echo OK v-swap %SZNEW%> "%OKLOG%"
 
-# Dialog di proses terpisah — pastikan tidak mewarisi _MEIPASS, lalu buka EXE
-Add-Type -AssemblyName System.Windows.Forms | Out-Null
-[System.Windows.Forms.MessageBox]::Show(
-  "Update Network Tools selesai.`r`n`r`nKlik OK untuk membuka aplikasi.",
-  "Network Tools",
-  [System.Windows.Forms.MessageBoxButtons]::OK,
-  [System.Windows.Forms.MessageBoxIcon]::Information
-) | Out-Null
+rem 7) Jalankan EXE baru (env bersih via cmd baru)
+timeout /t 1 /nobreak >nul
+start "" /D "%WORKDIR%" "%TARGET%"
 
-foreach ($k in @('_MEIPASS','_MEIPASS2','PYTHONHOME','PYTHONPATH','PYTHONNOUSERSITE')) {{
-  Remove-Item "Env:$k" -ErrorAction SilentlyContinue
-}}
-
-Start-Process -FilePath $target -WorkingDirectory $workdir
-Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+timeout /t 2 /nobreak >nul
+del "%~f0" >nul 2>&1
 """
-    ps1.write_text(script, encoding="utf-8")
+    bat.write_text(script, encoding="utf-8")
 
-    flags = 0
-    flags |= getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-    flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-    flags |= 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
+    # ShellExecute memutus tree PyInstaller; cmd lebih stabil daripada PS detached
+    launched = False
+    try:
+        import ctypes
 
-    subprocess.Popen(
-        [
-            "powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-WindowStyle",
-            "Hidden",
-            "-File",
-            str(ps1),
-        ],
-        cwd=workdir,
-        env=_clean_environ(),
-        creationflags=flags,
-        close_fds=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+        rc = int(
+            ctypes.windll.shell32.ShellExecuteW(
+                None,
+                "open",
+                "cmd.exe",
+                f'/c call "{bat}"',
+                str(workdir),
+                0,  # SW_HIDE
+            )
+        )
+        launched = rc > 32
+    except Exception:
+        launched = False
+
+    if not launched:
+        flags = 0
+        flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+        flags |= getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+        flags |= 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
+        # CREATE_NO_WINDOW sering dipakai; untuk updater file-replace lebih aman pakai new group
+        creation = flags
+        if hasattr(subprocess, "CREATE_NO_WINDOW"):
+            # Jangan CREATE_NO_WINDOW di sini — bisa memutus start exe anak
+            pass
+        subprocess.Popen(
+            ["cmd.exe", "/c", str(bat)],
+            cwd=str(workdir),
+            env=_clean_environ(),
+            creationflags=creation,
+            close_fds=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
 
 def cleanup_update_leftovers() -> None:

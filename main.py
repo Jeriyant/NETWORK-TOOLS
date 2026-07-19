@@ -538,8 +538,8 @@ class NetworkToolsApp(ctk.CTk):
                             pass
                         messagebox.showinfo(
                             "Update",
-                            "Unduhan selesai. Aplikasi akan ditutup.\n"
-                            "Setelah itu muncul dialog — klik OK untuk membuka versi baru.",
+                            "Unduhan selesai. Aplikasi akan ditutup dan diganti otomatis.\n"
+                            "Tunggu beberapa detik — jendela versi baru akan terbuka sendiri.",
                             parent=self,
                         )
                         os._exit(0)
