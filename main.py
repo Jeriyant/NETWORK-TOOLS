@@ -48,6 +48,7 @@ from modules.settings import (
 )
 from modules.telegram_share import (
     capture_window_region,
+    send_apps_file_via_telegram,
     send_text_via_telegram,
     send_via_telegram,
 )
@@ -2241,7 +2242,7 @@ class NetworkToolsApp(ctk.CTk):
             self._show_kirim_dialog([f"Gagal kirim screenshot: {exc}"])
 
     def _send_text_payload_to_telegram(self) -> None:
-        """Kirim teks (daftar aplikasi / hasil cek keamanan) ke Telegram via clipboard."""
+        """Kirim teks (IP Scanner) atau file daftar aplikasi ke Telegram."""
         text = (self._send_text_payload or "").strip()
         if not text:
             if self._current_tool == "apps" and self._apps_list:
@@ -2254,17 +2255,31 @@ class NetworkToolsApp(ctk.CTk):
                 text = format_security_text(self._security_items, hostname=get_hostname())
         if not text:
             self._show_kirim_dialog(
-                ["Belum ada data untuk dikirim. Tunggu hingga daftar/hasil selesai dimuat."],
-                title="Belum siap",
-                subtitle="Muat data dulu, lalu klik Kirim.",
+                [t("send.no_data")],
+                title=t("send.not_ready"),
+                subtitle=t("send.not_ready_sub"),
             )
             return
+
+        # Daftar Aplikasi: buat file .txt lalu salin FILE ke clipboard
+        if self._current_tool == "apps":
+            try:
+                _ok, tips, path = send_apps_file_via_telegram(text)
+                self._show_kirim_dialog(
+                    tips,
+                    title="File siap dikirim",
+                    subtitle="Buka chat Telegram, lalu tempel file (Ctrl+V):",
+                )
+            except Exception as exc:
+                self._show_kirim_dialog([f"Gagal kirim file: {exc}"])
+            return
+
         try:
             _ok, tips = send_text_via_telegram(text, root=self)
             self._show_kirim_dialog(
                 tips,
-                title="Teks siap dikirim",
-                subtitle="Buka chat Telegram, lalu tempel teks:",
+                title=t("send.text_ready"),
+                subtitle=t("send.text_sub"),
             )
         except Exception as exc:
             self._show_kirim_dialog([f"Gagal kirim teks: {exc}"])

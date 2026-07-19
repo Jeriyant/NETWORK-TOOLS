@@ -301,3 +301,109 @@ def send_text_via_telegram(
         tips.append("Telegram tidak ditemukan. Teks tetap di clipboard (jika berhasil).")
 
     return copied, tips
+
+
+def _desktop_or_docs() -> Path:
+    desktop = Path.home() / "Desktop"
+    if desktop.is_dir():
+        return desktop
+    docs = Path.home() / "Documents"
+    if docs.is_dir():
+        return docs
+    return Path(tempfile.gettempdir())
+
+
+def write_apps_list_file(text: str, filename: str = "Daftar_Aplikasi.txt") -> Path:
+    """Tulis daftar aplikasi ke file .txt (Desktop bila ada)."""
+    dest = _desktop_or_docs() / filename
+    dest.write_text(text or "", encoding="utf-8")
+    return dest
+
+
+def copy_file_to_clipboard(path: Path) -> bool:
+    """Salin file ke clipboard sebagai file drop (Ctrl+V menempel file, bukan teks)."""
+    path = Path(path).resolve()
+    if not path.is_file():
+        return False
+
+    # PowerShell Set-Clipboard -Path → CF_HDROP (bisa paste ke Telegram)
+    creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    safe = str(path).replace("'", "''")
+    try:
+        completed = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                f"Set-Clipboard -Path '{safe}'",
+            ],
+            capture_output=True,
+            text=True,
+            creationflags=creation,
+            timeout=20,
+        )
+        if completed.returncode == 0:
+            return True
+    except Exception:
+        pass
+
+    # Fallback: System.Windows.Forms FileDropList
+    try:
+        ps = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            f"$c = New-Object System.Collections.Specialized.StringCollection; "
+            f"$c.Add('{safe}') | Out-Null; "
+            "[System.Windows.Forms.Clipboard]::SetFileDropList($c)"
+        )
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+            capture_output=True,
+            text=True,
+            creationflags=creation,
+            timeout=20,
+        )
+        return completed.returncode == 0
+    except Exception:
+        return False
+
+
+def send_apps_file_via_telegram(
+    text: str,
+    telegram_exe: str = "",
+    filename: str = "Daftar_Aplikasi.txt",
+) -> tuple[bool, list[str], Path | None]:
+    """
+    Buat Daftar_Aplikasi.txt, salin FILE ke clipboard, buka Telegram.
+    Paste di chat akan mengirim file (bukan teks biasa).
+    """
+    tips: list[str] = []
+    try:
+        path = write_apps_list_file(text, filename=filename)
+    except Exception as exc:
+        tips.append(f"Gagal membuat file: {exc}")
+        return False, tips, None
+
+    copied = copy_file_to_clipboard(path)
+    if copied:
+        tips.append(f"File dibuat: {path}")
+        tips.append("File sudah di clipboard (bukan teks).")
+    else:
+        tips.append(f"File dibuat: {path}")
+        tips.append("Gagal menyalin file ke clipboard — tempel manual dari folder.")
+        try:
+            subprocess.Popen(["explorer", "/select,", str(path)])
+        except Exception:
+            pass
+
+    telegram = _find_telegram(telegram_exe)
+    if telegram:
+        subprocess.Popen([telegram], shell=False)
+        tips.append("Buka chat Telegram, lalu tempel (Ctrl+V) untuk kirim file.")
+    elif not copied:
+        tips.append("Telegram tidak ditemukan.")
+    else:
+        tips.append("Telegram tidak ditemukan. File tetap di clipboard.")
+
+    return copied, tips, path
