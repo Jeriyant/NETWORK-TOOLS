@@ -2337,12 +2337,16 @@ class NetworkToolsApp(ctk.CTk):
         elif key == "traceroute":
             self._build_traceroute(parent)
         elif key in AUTO_RUN_TOOLS:
-            ctk.CTkLabel(
+            bar = ctk.CTkProgressBar(
                 parent,
-                text=t("app.running_auto"),
-                font=ctk.CTkFont(family="Segoe UI", size=13),
-                text_color=COLORS["muted"],
-            ).pack(side="left", pady=4)
+                width=160,
+                height=8,
+                mode="indeterminate",
+                progress_color=COLORS["accent"],
+                fg_color=COLORS["border"],
+            )
+            bar.pack(side="left", pady=10)
+            bar.start()
 
     def _build_ping(self, parent: ctk.CTkFrame) -> None:
         panel = ctk.CTkFrame(parent, fg_color=COLORS["panel"], corner_radius=10)

@@ -27,7 +27,6 @@ _STRINGS: dict[str, dict[str, str]] = {
     "app.start_scan": {"id": "Mulai Scan", "en": "Start Scan"},
     "app.stop": {"id": "Stop", "en": "Stop"},
     "app.run": {"id": "Jalankan", "en": "Run"},
-    "app.running_auto": {"id": "Berjalan otomatis…", "en": "Running automatically…"},
     "app.select_host": {"id": "Pilih host:", "en": "Select host:"},
     "app.start_ping": {"id": "Mulai Ping", "en": "Start Ping"},
     "app.start_trace": {"id": "Mulai", "en": "Start"},
