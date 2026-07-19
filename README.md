@@ -22,12 +22,7 @@ Hasil: `dist\NetworkTools.exe` (satu file, tanpa `config.json`).
 | **Clear Cache** | Hapus TEMP & `RDP6` (minta Administrator) |
 | **Anydesk** | Buka AnyDesk, salin ID ke clipboard, buka Telegram |
 
-Footer:
-```
-Copyright © {tahun} JERIYANT - BARAMCITY
-TI NETWORKING SOLUTIONS CUSJ
-```
-
+Footer: `Copyright © {tahun} JERIYANT - BARAMCITY`
 ## Update otomatis
 
 Saat dijalankan, app mengecek **GitHub Releases** di `Jeriyant/NETWORK-TOOLS`.

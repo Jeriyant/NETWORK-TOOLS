@@ -1,16 +1,19 @@
 ---
-description: Auto commit and push every completed change to GitHub
+description: Auto version bump, commit, push, and GitHub Release after changes
 alwaysApply: true
 ---
 
-# Auto commit & push ke GitHub
+# Auto commit, push & release ke GitHub
 
 Setelah menyelesaikan perubahan kode yang diminta user di repo Network Tools:
 
-1. Buat **git commit** (ikuti protokol commit yang sudah ada: status, diff, log, lalu add + commit).
-2. Langsung **`git push`** ke `origin` (branch aktif, biasanya `main`).
-3. Jangan menunggu user meminta commit/push lagi — ini sudah menjadi permintaan tetap.
-4. Kecuali user secara eksplisit bilang **jangan commit** / **jangan push** untuk tugas itu.
-5. Jangan commit file rahasia (`.env`, credentials, dll.).
-6. Pesan commit singkat, fokus pada *why*.
-7. Di akhir, sebutkan commit hash / bahwa sudah di-push (ringkas).
+1. **Naikkan versi** di `modules/settings.py` (`APP_VERSION`) — naikkan minor/patch (mis. 1.4 → 1.5, atau 1.5 → 1.5.1 jika hanya hotfix kecil; ikuti permintaan user bila menyebut nomor versi).
+2. Build ulang EXE: `python -m PyInstaller --noconfirm --clean NetworkTools.spec`
+3. Buat **git commit** (protokol commit: status, diff, log, add, commit).
+4. Langsung **`git push`** ke `origin` (branch aktif, biasanya `main`).
+5. Buat **GitHub Release** dengan tag `v{APP_VERSION}`, upload `dist/NetworkTools.exe`, set sebagai latest.
+   - Auth: `gh` dengan `GH_TOKEN` dari `git credential fill` bila perlu (jangan tampilkan token ke user).
+6. Jangan menunggu user meminta commit/push/release — ini permintaan tetap.
+7. Kecuali user eksplisit bilang **jangan commit / jangan push / jangan release**.
+8. Jangan commit file rahasia (`.env`, credentials, dll.) atau folder `dist/`/`build/` (sudah di `.gitignore`; EXE hanya di-upload ke Release).
+9. Pesan commit singkat, fokus pada *why*; di akhir sebutkan versi, commit hash, dan URL release.

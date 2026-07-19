@@ -108,14 +108,14 @@ class NetworkToolsApp(ctk.CTk):
         self._content = ctk.CTkFrame(self, fg_color="transparent")
         self._content.pack(fill="both", expand=True, padx=24, pady=8)
         self._action_bar = ctk.CTkFrame(self, fg_color="transparent")
-        self._footer = ctk.CTkFrame(self, fg_color=COLORS["panel"], height=52, corner_radius=0)
+        self._footer = ctk.CTkFrame(self, fg_color=COLORS["panel"], height=42, corner_radius=0)
         self._footer.pack(fill="x", side="bottom")
         self._footer.pack_propagate(False)
 
         year = datetime.now().year
         self._footer_label = ctk.CTkLabel(
             self._footer,
-            text=f"Copyright © {year} JERIYANT - BARAMCITY\nTI NETWORKING SOLUTIONS CUSJ",
+            text=f"Copyright © {year} JERIYANT - BARAMCITY",
             font=ctk.CTkFont(family="Segoe UI", size=12),
             text_color=COLORS["muted"],
             justify="center",

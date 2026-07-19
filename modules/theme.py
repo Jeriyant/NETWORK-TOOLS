@@ -1,4 +1,4 @@
-"""Windows Fluent–style light/dark theme palettes."""
+"""Windows Fluent–style light/dark + neon magenta theme palettes."""
 
 from __future__ import annotations
 
@@ -37,12 +37,29 @@ THEMES: dict[str, dict[str, str]] = {
         "console_bg": "#0C0C0C",
         "console_fg": "#CCCCCC",
     },
+    "neon_magenta": {
+        "bg": "#0B0014",
+        "panel": "#16021F",
+        "tile": "#1C0828",
+        "tile_hover": "#2A0F3D",
+        "accent": "#FF2BD6",
+        "accent_dim": "#E010B8",
+        "on_accent": "#FFFFFF",
+        "text": "#FFE6FB",
+        "muted": "#C98FBE",
+        "danger": "#FF4D6D",
+        "danger_hover": "#FF2A50",
+        "border": "#5A1A55",
+        "console_bg": "#050008",
+        "console_fg": "#FFB8F0",
+    },
 }
 
 MODE_LABELS = {
     "light": "Tema: Light",
     "dark": "Tema: Dark",
     "system": "Tema: Windows",
+    "neon_magenta": "Tema: Neon Magenta",
 }
 
 
@@ -69,7 +86,7 @@ def resolve_theme(mode: str) -> str:
 
 
 def next_mode(mode: str) -> str:
-    order = ["system", "light", "dark"]
+    order = ["system", "light", "dark", "neon_magenta"]
     mode = (mode or "system").lower()
     if mode not in order:
         return "light"
