@@ -224,7 +224,8 @@ def apply_update_and_restart(downloaded_exe: Path, kind: str | None = None) -> N
 
     1. Salin paket baru ke ``NetworkTools.exe.new`` selagi app masih jalan.
     2. Jalankan updater lewat ``wscript`` (tersembunyi) — bukan cmd terlihat.
-    3. Setelah PID keluar: rename exe → .old, .new → exe, lalu start.
+    3. Setelah PID keluar: rename exe → .old, .new → exe.
+    4. Tidak auto-start — user membuka aplikasi lagi secara manual.
     """
     if not getattr(sys, "frozen", False):
         raise RuntimeError("Auto-replace hanya tersedia pada build .exe")
@@ -340,10 +341,10 @@ set "_MEIPASS="
 set "_MEIPASS2="
 set "PYTHONHOME="
 set "PYTHONPATH="
+rem Jangan auto-start EXE baru — biarkan user membuka manual (hindari error residual).
 ping 127.0.0.1 -n 2 >nul 2>&1
-start "" /D "%WORKDIR%" "%TARGET%"
 
-ping 127.0.0.1 -n 3 >nul 2>&1
+ping 127.0.0.1 -n 2 >nul 2>&1
 del /F /Q "{vbs}" >nul 2>&1
 del /F /Q "%~f0" >nul 2>&1
 """

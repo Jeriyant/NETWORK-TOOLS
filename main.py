@@ -641,14 +641,24 @@ class NetworkToolsApp(ctk.CTk):
                     apply_update_and_restart(dest)
 
                     def ok() -> None:
-                        # Langsung tutup — updater .cmd menukar EXE lalu jalankan ulang.
-                        # Tidak ada notifikasi "unduh selesai" (menghambat / membingungkan).
+                        # Tutup app setelah file .new disiapkan; script updater
+                        # menukar EXE tanpa auto-start (buka manual).
                         import os
 
                         state["closed"] = True
                         try:
                             dlg.grab_release()
                             dlg.destroy()
+                        except Exception:
+                            pass
+                        try:
+                            messagebox.showinfo(
+                                "Update siap",
+                                "Update siap dipasang.\n\n"
+                                "Aplikasi akan ditutup. Silakan buka Network Tools "
+                                "lagi secara manual.",
+                                parent=self,
+                            )
                         except Exception:
                             pass
                         try:
@@ -1561,7 +1571,6 @@ class NetworkToolsApp(ctk.CTk):
         self.console = None
         self._ipscan_rows: list[Any] = []
         self._ipscan_running = False
-        self._hide_sysinfo_strip()
 
         top = ctk.CTkFrame(self._header, fg_color="transparent")
         top.pack(fill="x")
@@ -1572,8 +1581,9 @@ class NetworkToolsApp(ctk.CTk):
             text_color=COLORS["text"],
         ).pack(side="left")
         self._header_actions(top)
+        self._hide_sysinfo_strip()
 
-        # Ringkasan subnet — lebih rapat
+        # Ringkasan subnet (rapat)
         summary = ctk.CTkFrame(
             self._content,
             fg_color=COLORS["panel"],
@@ -1581,10 +1591,10 @@ class NetworkToolsApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        summary.pack(fill="x", pady=(0, 10))
+        summary.pack(fill="x", pady=(0, 8))
 
         stats = ctk.CTkFrame(summary, fg_color="transparent")
-        stats.pack(fill="x", padx=10, pady=(8, 4))
+        stats.pack(fill="x", padx=12, pady=(8, 4))
         for col in range(4):
             stats.grid_columnconfigure(col, weight=1)
 
@@ -1601,7 +1611,7 @@ class NetworkToolsApp(ctk.CTk):
                 text=label,
                 font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
                 text_color=COLORS["muted"],
-            ).pack(anchor="w", padx=8, pady=(6, 0))
+            ).pack(anchor="w", padx=10, pady=(6, 0))
             val = ctk.CTkLabel(
                 cell,
                 text="—",
@@ -1609,7 +1619,7 @@ class NetworkToolsApp(ctk.CTk):
                 text_color=COLORS["text"],
                 anchor="w",
             )
-            val.pack(anchor="w", fill="x", padx=8, pady=(2, 6))
+            val.pack(anchor="w", fill="x", padx=10, pady=(2, 6))
             return val
 
         lbl_ip = _stat(stats, 0, "IP LOKAL")
@@ -1618,7 +1628,7 @@ class NetworkToolsApp(ctk.CTk):
         lbl_found = _stat(stats, 3, "HOST HIDUP")
 
         bar_row = ctk.CTkFrame(summary, fg_color="transparent")
-        bar_row.pack(fill="x", padx=10, pady=(0, 8))
+        bar_row.pack(fill="x", padx=12, pady=(0, 8))
         progress = ctk.CTkProgressBar(
             bar_row,
             height=6,
@@ -1635,17 +1645,17 @@ class NetworkToolsApp(ctk.CTk):
             text_color=COLORS["muted"],
             anchor="w",
         )
-        status_lbl.pack(fill="x", pady=(6, 0))
+        status_lbl.pack(fill="x", pady=(4, 0))
 
         # Toolbar
         tools = ctk.CTkFrame(self._content, fg_color="transparent")
-        tools.pack(fill="x", pady=(0, 10))
+        tools.pack(fill="x", pady=(0, 8))
 
         btn_start = ctk.CTkButton(
             tools,
             text=t("app.start_scan"),
             width=130,
-            height=36,
+            height=32,
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_dim"],
             text_color=COLORS["on_accent"],
@@ -1656,14 +1666,14 @@ class NetworkToolsApp(ctk.CTk):
             tools,
             text="Stop",
             width=90,
-            height=36,
+            height=32,
             fg_color=COLORS["danger"],
             hover_color=COLORS["danger_hover"],
             state="disabled",
         )
         btn_stop.pack(side="left", padx=(8, 0))
 
-        # Header kolom + scroll list (font sama Daftar Aplikasi)
+        # Header kolom + scroll list (font sama seperti Daftar Aplikasi)
         list_wrap = ctk.CTkFrame(
             self._content,
             fg_color=COLORS["panel"],
@@ -1701,7 +1711,7 @@ class NetworkToolsApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color=COLORS["muted"],
         )
-        empty.pack(pady=36)
+        empty.pack(pady=28)
 
         self._ipscan_found: list[tuple[str, str, bool]] = []
         self._ipscan_meta: dict[str, str] = {}
