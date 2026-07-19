@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# Onedir build — hindari extract ke Temp\_MEI (penyebab crash python312.dll saat update)
+# Single-file EXE. runtime_tmpdir di LocalAppData (bukan Temp sistem).
 from PyInstaller.utils.hooks import collect_all
 
 datas = []
@@ -39,27 +39,21 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
     name="NetworkTools",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
+    upx_exclude=[],
+    # Extract runtime ke LocalAppData, bukan %TEMP%\_MEI (lebih stabil saat update)
+    runtime_tmpdir="%LOCALAPPDATA%\\NetworkTools\\runtime",
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-)
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    name="NetworkTools",
-    strip=False,
-    upx=False,
-    upx_exclude=[],
 )

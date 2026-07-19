@@ -1,6 +1,6 @@
 # Network Tools
 
-Aplikasi desktop Windows untuk IT Networking.
+Aplikasi desktop Windows (single-file `.exe`) untuk IT Networking.
 
 ## Build
 
@@ -8,11 +8,7 @@ Aplikasi desktop Windows untuk IT Networking.
 build.bat
 ```
 
-Hasil:
-- Folder: `dist\NetworkTools\` (`NetworkTools.exe` + `_internal`)
-- Paket rilis: `dist\NetworkTools.zip`
-
-> Mulai v1.12 memakai **onedir** (bukan single-file), agar tidak extract runtime ke `Temp\_MEI` (penyebab error `python312.dll`).
+Hasil: `dist\NetworkTools.exe` (satu file, tanpa `config.json`).
 
 ## Fitur
 
@@ -31,6 +27,5 @@ Footer: `Copyright © {tahun} JERIYANT - BARAMCITY`
 ## Update otomatis
 
 Saat dijalankan, app mengecek **GitHub Releases** di `Jeriyant/NETWORK-TOOLS`.
-Update dipasang ke `%LOCALAPPDATA%\NetworkTools`.
 
 Lihat `UPDATE.md` untuk cara publish rilis baru.

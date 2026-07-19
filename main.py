@@ -182,7 +182,7 @@ class NetworkToolsApp(ctk.CTk):
         import webbrowser
         from pathlib import Path
 
-        from modules.updater import is_direct_update_url
+        from modules.updater import is_direct_exe_url
 
         ver = getattr(info, "version", "?")
         notes = (getattr(info, "changelog", "") or "").strip()
@@ -211,24 +211,19 @@ class NetworkToolsApp(ctk.CTk):
             webbrowser.open(UPDATE_REPO)
             return
 
-        kind = getattr(info, "kind", None) or (
-            "zip" if url.lower().split("?", 1)[0].endswith(".zip") else "exe"
-        )
-
-        # Bukan paket langsung / mode dev → buka halaman GitHub
-        if not is_direct_update_url(url) or not getattr(sys, "frozen", False):
+        # Bukan file .exe langsung / mode dev → buka halaman GitHub
+        if not is_direct_exe_url(url) or not getattr(sys, "frozen", False):
             webbrowser.open(url if url.startswith("http") else UPDATE_REPO)
             if not getattr(sys, "frozen", False):
                 messagebox.showinfo(
                     "Update",
-                    "Mode development: unduh ZIP dari GitHub Releases,\n"
-                    "lalu ekstrak folder NetworkTools.",
+                    "Mode development: unduh EXE dari GitHub, lalu ganti manual.\n"
+                    "Auto-replace hanya berjalan pada NetworkTools.exe.",
                     parent=self,
                 )
             return
 
-        suffix = ".zip" if kind == "zip" else ".exe"
-        dest = Path(tempfile.gettempdir()) / f"NetworkTools_update_v{ver}{suffix}"
+        dest = Path(tempfile.gettempdir()) / f"NetworkTools_update_v{ver}.exe"
         self._show_download_progress(url, dest, str(ver), info)
 
     def _show_download_progress(
@@ -328,24 +323,20 @@ class NetworkToolsApp(ctk.CTk):
 
         def worker() -> None:
             try:
-                from modules.updater import verify_update_file
+                from modules.updater import verify_exe_file
 
                 expected = getattr(info, "size", None)
-                kind = getattr(info, "kind", None) or (
-                    "zip" if str(dest).lower().endswith(".zip") else "exe"
-                )
                 download_file(
                     url,
                     dest,
                     on_progress=on_progress,
                     expected_size=expected if isinstance(expected, int) else None,
                 )
-                verify_update_file(
+                verify_exe_file(
                     dest,
-                    kind=kind,
                     expected_size=expected if isinstance(expected, int) else None,
                 )
-                apply_update_and_restart(dest, kind=kind)
+                apply_update_and_restart(dest)
 
                 def ok() -> None:
                     import os
@@ -358,9 +349,8 @@ class NetworkToolsApp(ctk.CTk):
                         pass
                     messagebox.showinfo(
                         "Update",
-                        "Unduhan selesai. Aplikasi akan ditutup dan dipasang ulang.\n"
-                        "Versi baru dipasang di folder AppData (bukan Temp/_MEI).\n"
-                        "Tunggu beberapa detik sampai jendela baru muncul.",
+                        "Unduhan selesai. Aplikasi akan ditutup.\n"
+                        "Setelah itu muncul dialog — klik OK untuk membuka versi baru.",
                         parent=self,
                     )
                     os._exit(0)
@@ -377,7 +367,7 @@ class NetworkToolsApp(ctk.CTk):
                     messagebox.showerror(
                         "Update gagal",
                         f"Gagal memasang update:\n{exc}\n\n"
-                        "Unduh manual ZIP dari GitHub Releases jika perlu.",
+                        "Unduh manual dari GitHub Releases jika perlu.",
                         parent=self,
                     )
                     webbrowser.open(getattr(info, "html_url", None) or UPDATE_REPO)
