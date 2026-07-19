@@ -16,9 +16,11 @@ from modules.clear_cache import ClearCacheRunner
 from modules.fix_anydesk import AnydeskRunner
 from modules.fix_printer import FixPrinterRunner
 from modules.fix_rdp import FixRdpRunner
+from modules.installed_apps import InstalledAppsRunner, format_apps_text
 from modules.ip_scanner import IpScannerRunner
 from modules.ping_runner import PingRunner
 from modules.refresh_network import RefreshNetworkRunner
+from modules.security_check import SecurityCheckRunner, format_security_text
 from modules.settings import (
     DEFAULT_THEME,
     DNS_LEAK_URL,
@@ -30,7 +32,11 @@ from modules.settings import (
     host_dropdown_values,
     resolve_target_ip,
 )
-from modules.telegram_share import capture_window_region, send_via_telegram
+from modules.telegram_share import (
+    capture_window_region,
+    send_text_via_telegram,
+    send_via_telegram,
+)
 from modules.theme import (
     MODE_LABELS,
     THEMES,
@@ -55,6 +61,8 @@ TOOLS = [
     ("speedtest", "Speedtest", "⚡", "Speedtest di browser bawaan aplikasi"),
     ("dns", "DNS Test", "◎", "DNS leak test di browser bawaan"),
     ("ipscan", "IP Scanner", "▦", "Scan host hidup di subnet PC ini"),
+    ("apps", "Daftar Aplikasi", "▤", "Tampilkan aplikasi terinstall di Windows"),
+    ("security", "Cek Keamanan", "🛡", "Firewall, Defender & Windows Update"),
     ("refresh", "Refresh Network", "↻", "Otomatis renew DHCP (Admin)"),
     ("printer", "Fix Printer", "🖨", "Otomatis clear spooler (Admin)"),
     ("fixrdp", "Fix RDP", "⧉", "Reset RDP client agar fresh (Admin)"),
@@ -62,7 +70,8 @@ TOOLS = [
     ("anydesk", "Anydesk", "⌨", "Tutup AnyDesk lama, buka baru, salin ID ke Telegram"),
 ]
 
-SEND_TOOLS = {"ping", "traceroute", "dns", "ipscan", "speedtest"}
+SEND_TOOLS = {"ping", "traceroute", "dns", "ipscan", "speedtest", "apps", "security"}
+TEXT_SEND_TOOLS = frozenset({"apps", "security"})
 
 
 class ConsoleView(ctk.CTkFrame):
@@ -116,6 +125,9 @@ class NetworkToolsApp(ctk.CTk):
         self._sysinfo_value_labels: dict[str, Any] = {}
         self._sysinfo_cache: dict[str, str] | None = None
         self._sysinfo_loaded = False
+        self._apps_list: list[dict[str, str]] = []
+        self._security_items: list[Any] = []
+        self._send_text_payload: str = ""
 
         self._header = ctk.CTkFrame(self, fg_color="transparent")
         self._header.pack(fill="x", padx=28, pady=(18, 4))
@@ -1013,6 +1025,14 @@ class NetworkToolsApp(ctk.CTk):
             self._open_ip_scanner_view()
             return
 
+        if key == "apps":
+            self._open_apps_list_view()
+            return
+
+        if key == "security":
+            self._open_security_check_view()
+            return
+
         top = ctk.CTkFrame(self._header, fg_color="transparent")
         top.pack(fill="x")
         ctk.CTkLabel(
@@ -1053,7 +1073,11 @@ class NetworkToolsApp(ctk.CTk):
                 fg_color=COLORS["accent"],
                 hover_color=COLORS["accent_dim"],
                 text_color=COLORS["on_accent"],
-                command=self._send_screenshot,
+                command=(
+                    self._send_text_payload_to_telegram
+                    if key in TEXT_SEND_TOOLS
+                    else self._send_screenshot
+                ),
             ).pack(side="right")
 
         self._seed_console(key)
@@ -1069,6 +1093,354 @@ class NetworkToolsApp(ctk.CTk):
             fn = starters.get(key)
             if fn:
                 self.after(150, fn)
+
+    def _pack_tool_action_bar(self, *, text_send: bool = False) -> None:
+        self._action_bar.pack(fill="x", padx=24, pady=(0, 8), before=self._footer)
+        ctk.CTkButton(
+            self._action_bar,
+            text="Kembali",
+            width=120,
+            height=36,
+            fg_color=COLORS["danger"],
+            hover_color=COLORS["danger_hover"],
+            command=self._cancel_to_dashboard,
+        ).pack(side="right", padx=(8, 0))
+        ctk.CTkButton(
+            self._action_bar,
+            text="Kirim",
+            width=120,
+            height=36,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+            command=(
+                self._send_text_payload_to_telegram
+                if text_send
+                else self._send_screenshot
+            ),
+        ).pack(side="right")
+
+    def _open_apps_list_view(self) -> None:
+        """Daftar aplikasi terinstall — UI list + Kirim teks ke Telegram."""
+        from modules.system_info import hostname as get_hostname
+
+        self.console = None
+        self._apps_list = []
+        self._send_text_payload = ""
+
+        top = ctk.CTkFrame(self._header, fg_color="transparent")
+        top.pack(fill="x")
+        ctk.CTkLabel(
+            top,
+            text="Daftar Aplikasi",
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=24),
+            text_color=COLORS["text"],
+        ).pack(side="left")
+        self._header_actions(top)
+        self._build_sysinfo_bar(self._sysinfo_strip)
+
+        summary = ctk.CTkFrame(
+            self._content,
+            fg_color=COLORS["panel"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        summary.pack(fill="x", pady=(0, 12))
+        sum_row = ctk.CTkFrame(summary, fg_color="transparent")
+        sum_row.pack(fill="x", padx=16, pady=14)
+
+        count_lbl = ctk.CTkLabel(
+            sum_row,
+            text="Memuat daftar aplikasi…",
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=15),
+            text_color=COLORS["text"],
+            anchor="w",
+        )
+        count_lbl.pack(side="left", fill="x", expand=True)
+
+        btn_refresh = ctk.CTkButton(
+            sum_row,
+            text="Refresh",
+            width=100,
+            height=32,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+        )
+        btn_refresh.pack(side="right")
+
+        list_wrap = ctk.CTkFrame(
+            self._content,
+            fg_color=COLORS["panel"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        list_wrap.pack(fill="both", expand=True)
+
+        cols = ctk.CTkFrame(list_wrap, fg_color=COLORS["bg"], corner_radius=0)
+        cols.pack(fill="x", padx=1, pady=(1, 0))
+        cols.grid_columnconfigure(0, weight=4, minsize=200)
+        cols.grid_columnconfigure(1, weight=2, minsize=100)
+        cols.grid_columnconfigure(2, weight=3, minsize=140)
+        for i, text in enumerate(("NAMA APLIKASI", "VERSI", "PUBLISHER")):
+            ctk.CTkLabel(
+                cols,
+                text=text,
+                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                text_color=COLORS["muted"],
+                anchor="w",
+            ).grid(row=0, column=i, sticky="ew", padx=14, pady=10)
+
+        scroll = ctk.CTkScrollableFrame(list_wrap, fg_color="transparent", corner_radius=0)
+        scroll.pack(fill="both", expand=True, padx=4, pady=4)
+
+        empty = ctk.CTkLabel(
+            scroll,
+            text="Mengambil daftar dari Windows…",
+            font=ctk.CTkFont(family="Segoe UI", size=13),
+            text_color=COLORS["muted"],
+        )
+        empty.pack(pady=36)
+
+        self._pack_tool_action_bar(text_send=True)
+
+        def _clear() -> None:
+            for w in list(scroll.winfo_children()):
+                try:
+                    w.destroy()
+                except Exception:
+                    pass
+
+        def _fill(apps: list[dict[str, str]]) -> None:
+            self._apps_list = apps
+            host = get_hostname()
+            self._send_text_payload = format_apps_text(apps, hostname=host)
+            count_lbl.configure(text=f"{len(apps)} aplikasi terinstall")
+            _clear()
+            if not apps:
+                ctk.CTkLabel(
+                    scroll,
+                    text="Tidak ada aplikasi terdeteksi.",
+                    font=ctk.CTkFont(family="Segoe UI", size=13),
+                    text_color=COLORS["muted"],
+                ).pack(pady=36)
+                return
+            for idx, app in enumerate(apps):
+                row = ctk.CTkFrame(
+                    scroll,
+                    fg_color=COLORS["bg"] if idx % 2 == 0 else "transparent",
+                    corner_radius=8,
+                    height=40,
+                )
+                row.pack(fill="x", pady=1, padx=4)
+                row.grid_columnconfigure(0, weight=4, minsize=200)
+                row.grid_columnconfigure(1, weight=2, minsize=100)
+                row.grid_columnconfigure(2, weight=3, minsize=140)
+                row.pack_propagate(False)
+                ctk.CTkLabel(
+                    row,
+                    text=app.get("name", "—"),
+                    font=ctk.CTkFont(family="Segoe UI", size=13),
+                    text_color=COLORS["text"],
+                    anchor="w",
+                ).grid(row=0, column=0, sticky="ew", padx=14)
+                ctk.CTkLabel(
+                    row,
+                    text=app.get("version", "—"),
+                    font=ctk.CTkFont(family="Segoe UI", size=12),
+                    text_color=COLORS["muted"],
+                    anchor="w",
+                ).grid(row=0, column=1, sticky="ew", padx=14)
+                ctk.CTkLabel(
+                    row,
+                    text=app.get("publisher", "—"),
+                    font=ctk.CTkFont(family="Segoe UI", size=12),
+                    text_color=COLORS["muted"],
+                    anchor="w",
+                ).grid(row=0, column=2, sticky="ew", padx=14)
+
+        def on_apps(apps: list[dict[str, str]]) -> None:
+            self.after(0, lambda: _fill(apps))
+
+        def on_error(msg: str) -> None:
+            def ui() -> None:
+                count_lbl.configure(text="Gagal memuat daftar")
+                _clear()
+                ctk.CTkLabel(
+                    scroll,
+                    text=msg,
+                    font=ctk.CTkFont(family="Segoe UI", size=13),
+                    text_color=COLORS["danger"],
+                ).pack(pady=36)
+
+            self.after(0, ui)
+
+        def load() -> None:
+            count_lbl.configure(text="Memuat daftar aplikasi…")
+            _clear()
+            empty_lbl = ctk.CTkLabel(
+                scroll,
+                text="Mengambil daftar dari Windows…",
+                font=ctk.CTkFont(family="Segoe UI", size=13),
+                text_color=COLORS["muted"],
+            )
+            empty_lbl.pack(pady=36)
+            InstalledAppsRunner(on_apps=on_apps, on_error=on_error).start()
+
+        btn_refresh.configure(command=load)
+        self.after(80, load)
+
+    def _open_security_check_view(self) -> None:
+        """Cek Firewall, Defender, Windows Update — kartu status."""
+        from modules.system_info import hostname as get_hostname
+
+        self.console = None
+        self._security_items = []
+        self._send_text_payload = ""
+
+        top = ctk.CTkFrame(self._header, fg_color="transparent")
+        top.pack(fill="x")
+        ctk.CTkLabel(
+            top,
+            text="Cek Keamanan",
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=24),
+            text_color=COLORS["text"],
+        ).pack(side="left")
+        self._header_actions(top)
+        self._build_sysinfo_bar(self._sysinfo_strip)
+
+        toolbar = ctk.CTkFrame(self._content, fg_color="transparent")
+        toolbar.pack(fill="x", pady=(0, 10))
+        status_lbl = ctk.CTkLabel(
+            toolbar,
+            text="Memeriksa status keamanan Windows…",
+            font=ctk.CTkFont(family="Segoe UI", size=13),
+            text_color=COLORS["muted"],
+            anchor="w",
+        )
+        status_lbl.pack(side="left", fill="x", expand=True)
+        btn_refresh = ctk.CTkButton(
+            toolbar,
+            text="Cek Ulang",
+            width=110,
+            height=32,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+        )
+        btn_refresh.pack(side="right")
+
+        cards = ctk.CTkFrame(self._content, fg_color="transparent")
+        cards.pack(fill="both", expand=True)
+
+        self._pack_tool_action_bar(text_send=True)
+
+        def _status_color(ok: bool, status: str) -> str:
+            if ok:
+                return COLORS["accent"]
+            if status.upper() in {"PARTIAL", "READY", "PENDING"}:
+                return COLORS["muted"]
+            return COLORS["danger"]
+
+        def _render(items: list[Any]) -> None:
+            self._security_items = items
+            host = get_hostname()
+            self._send_text_payload = format_security_text(items, hostname=host)
+            for w in list(cards.winfo_children()):
+                try:
+                    w.destroy()
+                except Exception:
+                    pass
+
+            ok_count = sum(1 for it in items if it.get("ok"))
+            status_lbl.configure(
+                text=f"Hasil: {ok_count}/{len(items)} komponen aman"
+                if items
+                else "Tidak ada hasil"
+            )
+
+            for item in items:
+                card = ctk.CTkFrame(
+                    cards,
+                    fg_color=COLORS["panel"],
+                    corner_radius=12,
+                    border_width=1,
+                    border_color=COLORS["border"],
+                )
+                card.pack(fill="x", pady=(0, 10))
+                inner = ctk.CTkFrame(card, fg_color="transparent")
+                inner.pack(fill="x", padx=16, pady=14)
+
+                head = ctk.CTkFrame(inner, fg_color="transparent")
+                head.pack(fill="x")
+                ctk.CTkLabel(
+                    head,
+                    text=item.get("label", "—"),
+                    font=ctk.CTkFont(family="Segoe UI Semibold", size=16),
+                    text_color=COLORS["text"],
+                    anchor="w",
+                ).pack(side="left")
+
+                st = str(item.get("status", "UNKNOWN"))
+                badge = ctk.CTkLabel(
+                    head,
+                    text=f"  {st}  ",
+                    font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+                    text_color=COLORS["on_accent"],
+                    fg_color=_status_color(bool(item.get("ok")), st),
+                    corner_radius=6,
+                )
+                badge.pack(side="right")
+
+                ctk.CTkLabel(
+                    inner,
+                    text=item.get("detail", ""),
+                    font=ctk.CTkFont(family="Segoe UI", size=13),
+                    text_color=COLORS["muted"],
+                    anchor="w",
+                    justify="left",
+                    wraplength=720,
+                ).pack(fill="x", pady=(8, 0))
+
+        def on_result(items: list[Any]) -> None:
+            self.after(0, lambda: _render(items))
+
+        def on_error(msg: str) -> None:
+            def ui() -> None:
+                status_lbl.configure(text=f"Gagal: {msg}")
+                for w in list(cards.winfo_children()):
+                    try:
+                        w.destroy()
+                    except Exception:
+                        pass
+                ctk.CTkLabel(
+                    cards,
+                    text=msg,
+                    font=ctk.CTkFont(family="Segoe UI", size=13),
+                    text_color=COLORS["danger"],
+                ).pack(pady=24)
+
+            self.after(0, ui)
+
+        def load() -> None:
+            status_lbl.configure(text="Memeriksa status keamanan Windows…")
+            for w in list(cards.winfo_children()):
+                try:
+                    w.destroy()
+                except Exception:
+                    pass
+            ctk.CTkLabel(
+                cards,
+                text="Mohon tunggu…",
+                font=ctk.CTkFont(family="Segoe UI", size=13),
+                text_color=COLORS["muted"],
+            ).pack(pady=24)
+            SecurityCheckRunner(on_result=on_result, on_error=on_error).start()
+
+        btn_refresh.configure(command=load)
+        self.after(80, load)
 
     def _open_ip_scanner_view(self) -> None:
         """UI khusus IP Scanner — kartu status + daftar host (bukan console)."""
@@ -1782,6 +2154,35 @@ class NetworkToolsApp(ctk.CTk):
                     pass
                 self._runner_stop = None
             self._show_kirim_dialog([f"Gagal kirim screenshot: {exc}"])
+
+    def _send_text_payload_to_telegram(self) -> None:
+        """Kirim teks (daftar aplikasi / hasil cek keamanan) ke Telegram via clipboard."""
+        text = (self._send_text_payload or "").strip()
+        if not text:
+            if self._current_tool == "apps" and self._apps_list:
+                from modules.system_info import hostname as get_hostname
+
+                text = format_apps_text(self._apps_list, hostname=get_hostname())
+            elif self._current_tool == "security" and self._security_items:
+                from modules.system_info import hostname as get_hostname
+
+                text = format_security_text(self._security_items, hostname=get_hostname())
+        if not text:
+            self._show_kirim_dialog(
+                ["Belum ada data untuk dikirim. Tunggu hingga daftar/hasil selesai dimuat."],
+                title="Belum siap",
+                subtitle="Muat data dulu, lalu klik Kirim.",
+            )
+            return
+        try:
+            _ok, tips = send_text_via_telegram(text)
+            self._show_kirim_dialog(
+                tips,
+                title="Teks siap dikirim",
+                subtitle="Buka chat Telegram, lalu tempel teks:",
+            )
+        except Exception as exc:
+            self._show_kirim_dialog([f"Gagal kirim teks: {exc}"])
 
     def log(self, line: str) -> None:
         def _append() -> None:

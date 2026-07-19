@@ -209,3 +209,25 @@ def send_via_telegram(
         )
 
     return copied, tips
+
+
+def send_text_via_telegram(
+    text: str,
+    telegram_exe: str = "",
+) -> tuple[bool, list[str]]:
+    """Copy plain text to clipboard and open Telegram."""
+    tips: list[str] = []
+    copied = copy_text_to_clipboard(text or "")
+    if copied:
+        tips.append("Teks daftar sudah di clipboard.")
+    else:
+        tips.append("Gagal menyalin teks ke clipboard.")
+
+    telegram = _find_telegram(telegram_exe)
+    if telegram:
+        subprocess.Popen([telegram], shell=False)
+        tips.append("Buka chat Telegram, lalu tempel dengan Ctrl+V atau Paste.")
+    else:
+        tips.append("Telegram tidak ditemukan. Teks tetap di clipboard (jika berhasil).")
+
+    return copied, tips

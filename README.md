@@ -18,6 +18,8 @@ Hasil: `dist\NetworkTools.exe` (satu file, tanpa `config.json`).
 | **Speedtest** | `https://jeriyant.speedtestcustom.com` (WebView2) |
 | **DNS Test** | `https://browserleaks.com/dns` (WebView2, seperti Speedtest) |
 | **IP Scanner** | UI daftar host: scan subnet PC (ICMP), progress bar, status Online |
+| **Daftar Aplikasi** | Tampilkan aplikasi terinstall; Kirim = teks daftar ke Telegram |
+| **Cek Keamanan** | Status Windows Firewall, Defender, dan Windows Update service |
 | **Refresh Network** | Disable/enable NIC + renew DHCP (minta Administrator) |
 | **Fix Printer** | Clear spooler: stop → hapus antrian → start (minta Administrator) |
 | **Fix RDP** | Reset RDP client: kill ConnectionClient, hapus RDP6/cache, bersihkan registry & kredensial TERMSRV |
