@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# PyInstaller
+build/
+dist/
+*.spec.bak
+
+# IDE / OS
+.idea/
+.vscode/
+*.user
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Local extras (optional installers)
+drivers/**
+!drivers/README.txt
+anydesk/**
+!anydesk/README.txt
+*.exe
+!hooks/
