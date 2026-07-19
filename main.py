@@ -17,6 +17,7 @@ from modules.dns_test import DnsTestRunner
 from modules.fix_anydesk import AnydeskRunner
 from modules.fix_printer import FixPrinterRunner
 from modules.ping_runner import PingRunner
+from modules.rdp_test import RdpTestRunner
 from modules.refresh_network import RefreshNetworkRunner
 from modules.settings import (
     DEFAULT_THEME,
@@ -52,6 +53,7 @@ TOOLS = [
     ("ping", "Ping", "●", "Ping terus ke host dari daftar"),
     ("traceroute", "Traceroute", "↗", "tracert -d ke alamat IP/host"),
     ("dns", "DNS Test", "◎", "Uji DNS & deteksi leak"),
+    ("rdp", "RDP Test", "▣", "Cek service RDP (port 3389) di host Ping"),
     ("speedtest", "Speedtest", "⚡", "Speedtest di browser bawaan aplikasi"),
     ("refresh", "Refresh Network", "↻", "Otomatis renew DHCP (Admin)"),
     ("printer", "Fix Printer", "🖨", "Otomatis clear spooler (Admin)"),
@@ -59,7 +61,7 @@ TOOLS = [
     ("anydesk", "Anydesk", "⌨", "Tutup AnyDesk lama, buka baru, salin ID ke Telegram"),
 ]
 
-SEND_TOOLS = {"ping", "traceroute", "dns", "speedtest"}
+SEND_TOOLS = {"ping", "traceroute", "dns", "rdp", "speedtest"}
 
 
 class ConsoleView(ctk.CTkFrame):
@@ -905,7 +907,8 @@ class NetworkToolsApp(ctk.CTk):
         grid.pack(fill="both", expand=True)
         for i in range(4):
             grid.grid_columnconfigure(i, weight=1, uniform="tiles")
-        for r in range(2):
+        rows = (len(TOOLS) + 3) // 4
+        for r in range(rows):
             grid.grid_rowconfigure(r, weight=1, uniform="tiles")
 
         for idx, (key, title, icon, desc) in enumerate(TOOLS):
@@ -1455,6 +1458,10 @@ class NetworkToolsApp(ctk.CTk):
             "ping": "Pilih host dari daftar, lalu Mulai Ping. Tekan Kembali untuk ke dashboard.",
             "traceroute": "Pilih host dari dropdown, lalu Mulai. Perintah: tracert -d <alamat>",
             "dns": "Klik Jalankan untuk uji DNS mirip leak test.",
+            "rdp": (
+                "Klik Jalankan untuk cek service RDP (TCP 3389)\n"
+                "pada semua host di menu Ping — RUNNING / NOT RUNNING."
+            ),
             "speedtest": "Speedtest berjalan di browser bawaan aplikasi.",
             "refresh": (
                 "Menjalankan otomatis: disable/enable adapter & renew DHCP.\n"
@@ -1492,6 +1499,16 @@ class NetworkToolsApp(ctk.CTk):
                 hover_color=COLORS["accent_dim"],
                 text_color=COLORS["on_accent"],
                 command=self._start_dns,
+            ).pack(side="left")
+        elif key == "rdp":
+            ctk.CTkButton(
+                parent,
+                text="Jalankan RDP Test",
+                width=160,
+                fg_color=COLORS["accent"],
+                hover_color=COLORS["accent_dim"],
+                text_color=COLORS["on_accent"],
+                command=self._start_rdp,
             ).pack(side="left")
         elif key in AUTO_RUN_TOOLS:
             ctk.CTkLabel(
@@ -1636,6 +1653,17 @@ class NetworkToolsApp(ctk.CTk):
             self.console.clear()
         domains = list(DNS_TEST_DOMAINS)
         runner = DnsTestRunner(domains, on_line=self.log, on_done=lambda: self.log("--- DNS Test selesai ---"))
+        self.set_runner_stop(runner.stop)
+        runner.start()
+
+    def _start_rdp(self) -> None:
+        self._stop_runner()
+        if self.console:
+            self.console.clear()
+        runner = RdpTestRunner(
+            on_line=self.log,
+            on_done=lambda: self.log("--- RDP Test selesai ---"),
+        )
         self.set_runner_stop(runner.stop)
         runner.start()
 
