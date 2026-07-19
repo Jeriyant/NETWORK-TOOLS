@@ -43,7 +43,7 @@ NETWORK_ADAPTER = ""  # empty = auto pick first Up adapter
 DEFAULT_THEME = "system"
 
 # App version — naikkan setiap rilis baru (harus cocok dengan tag GitHub Release)
-APP_VERSION = "1.18"
+APP_VERSION = "1.19"
 UPDATE_REPO = "https://github.com/Jeriyant/NETWORK-TOOLS"
 
 

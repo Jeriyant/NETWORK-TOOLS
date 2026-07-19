@@ -138,6 +138,11 @@ class NetworkToolsApp(ctk.CTk):
         self._footer_label.pack(expand=True)
 
         self.show_dashboard()
+        # Pastikan window utama tidak terkunci dari sesi update sebelumnya
+        try:
+            self.attributes("-disabled", False)
+        except Exception:
+            pass
         self.after(200, self._maybe_resume_elevated_tool)
         self.after(800, self._check_update_on_startup)
         try:
@@ -182,7 +187,7 @@ class NetworkToolsApp(ctk.CTk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _prompt_update(self, info: Any) -> None:
-        """Update wajib: dialog kustom, hanya OK — tanpa update app tidak bisa dipakai."""
+        """Update wajib: dialog kustom, hanya tombol Update — tanpa update app tidak bisa dipakai."""
         import sys
         import tempfile
         import webbrowser
@@ -192,24 +197,21 @@ class NetworkToolsApp(ctk.CTk):
 
         ver = str(getattr(info, "version", "?") or "?")
         notes = (getattr(info, "changelog", "") or "").strip()
-        if len(notes) > 600:
-            notes = notes[:600] + "…"
+        if len(notes) > 500:
+            notes = notes[:500] + "…"
 
         dlg = ctk.CTkToplevel(self)
         dlg.title("Update Wajib — Network Tools")
-        dlg.geometry("520x520")
-        dlg.minsize(480, 460)
+        dlg.geometry("500x480")
+        dlg.minsize(460, 440)
         dlg.resizable(False, False)
         dlg.transient(self)
-        dlg.attributes("-topmost", True)
         dlg.configure(fg_color=COLORS["bg"])
-        dlg.grab_set()
-        dlg.focus_force()
 
         self.update_idletasks()
-        px = self.winfo_rootx() + (self.winfo_width() - 520) // 2
-        py = self.winfo_rooty() + (self.winfo_height() - 520) // 2
-        dlg.geometry(f"520x520+{max(px, 40)}+{max(py, 40)}")
+        px = self.winfo_rootx() + max((self.winfo_width() - 500) // 2, 0)
+        py = self.winfo_rooty() + max((self.winfo_height() - 480) // 2, 0)
+        dlg.geometry(f"500x480+{max(px, 40)}+{max(py, 40)}")
 
         state = {"accepted": False}
 
@@ -226,7 +228,6 @@ class NetworkToolsApp(ctk.CTk):
 
         dlg.protocol("WM_DELETE_WINDOW", force_exit)
 
-        # Kartu utama
         card = ctk.CTkFrame(
             dlg,
             fg_color=COLORS["panel"],
@@ -234,111 +235,11 @@ class NetworkToolsApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        card.pack(fill="both", expand=True, padx=18, pady=18)
+        card.pack(fill="both", expand=True, padx=16, pady=16)
 
-        # Header accent
-        header = ctk.CTkFrame(card, fg_color=COLORS["accent"], corner_radius=14, height=88)
-        header.pack(fill="x", padx=14, pady=(14, 0))
-        header.pack_propagate(False)
-
-        ctk.CTkLabel(
-            header,
-            text="UPDATE WAJIB",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            text_color=COLORS["on_accent"],
-        ).pack(anchor="w", padx=18, pady=(14, 0))
-
-        ctk.CTkLabel(
-            header,
-            text="Versi baru tersedia",
-            font=ctk.CTkFont(family="Segoe UI Semibold", size=22),
-            text_color=COLORS["on_accent"],
-        ).pack(anchor="w", padx=18, pady=(2, 0))
-
-        ctk.CTkLabel(
-            header,
-            text="Aplikasi tidak dapat digunakan sebelum diperbarui.",
-            font=ctk.CTkFont(family="Segoe UI", size=12),
-            text_color=COLORS["on_accent"],
-        ).pack(anchor="w", padx=18, pady=(2, 12))
-
-        body = ctk.CTkFrame(card, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=18, pady=16)
-
-        # Versi comparison
-        ver_row = ctk.CTkFrame(body, fg_color="transparent")
-        ver_row.pack(fill="x", pady=(0, 14))
-        ver_row.grid_columnconfigure((0, 2), weight=1)
-        ver_row.grid_columnconfigure(1, weight=0)
-
-        def _ver_chip(parent: Any, label: str, value: str, emphasize: bool) -> None:
-            chip = ctk.CTkFrame(
-                parent,
-                fg_color=COLORS["bg"],
-                corner_radius=12,
-                border_width=1,
-                border_color=COLORS["accent"] if emphasize else COLORS["border"],
-            )
-            chip.pack(fill="both", expand=True)
-            ctk.CTkLabel(
-                chip,
-                text=label,
-                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-                text_color=COLORS["muted"],
-            ).pack(anchor="w", padx=14, pady=(10, 0))
-            ctk.CTkLabel(
-                chip,
-                text=value,
-                font=ctk.CTkFont(family="Segoe UI Semibold", size=18),
-                text_color=COLORS["accent"] if emphasize else COLORS["text"],
-            ).pack(anchor="w", padx=14, pady=(2, 12))
-
-        left = ctk.CTkFrame(ver_row, fg_color="transparent")
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        _ver_chip(left, "SAAT INI", f"v{APP_VERSION}", False)
-
-        ctk.CTkLabel(
-            ver_row,
-            text="→",
-            font=ctk.CTkFont(family="Segoe UI Semibold", size=20),
-            text_color=COLORS["accent"],
-        ).grid(row=0, column=1, padx=4)
-
-        right = ctk.CTkFrame(ver_row, fg_color="transparent")
-        right.grid(row=0, column=2, sticky="nsew", padx=(6, 0))
-        _ver_chip(right, "TERBARU", f"v{ver}", True)
-
-        ctk.CTkLabel(
-            body,
-            text="Catatan rilis",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            text_color=COLORS["muted"],
-            anchor="w",
-        ).pack(fill="x", pady=(0, 6))
-
-        notes_box = ctk.CTkTextbox(
-            body,
-            height=140,
-            font=ctk.CTkFont(family="Segoe UI", size=12),
-            fg_color=COLORS["bg"],
-            text_color=COLORS["text"],
-            border_width=1,
-            border_color=COLORS["border"],
-            corner_radius=10,
-            wrap="word",
-            activate_scrollbars=True,
-        )
-        notes_box.pack(fill="both", expand=True)
-        notes_box.insert("1.0", notes or "Pembaruan keamanan & perbaikan stabilitas.")
-        notes_box.configure(state="disabled")
-
-        ctk.CTkLabel(
-            body,
-            text="Dengan menekan OK, unduhan & pemasangan akan dimulai.",
-            font=ctk.CTkFont(family="Segoe UI", size=11),
-            text_color=COLORS["muted"],
-            anchor="w",
-        ).pack(fill="x", pady=(10, 0))
+        # Footer dulu (side=bottom) agar tombol selalu rapi & tidak terpotong
+        footer = ctk.CTkFrame(card, fg_color="transparent")
+        footer.pack(side="bottom", fill="x", padx=16, pady=(8, 16))
 
         def on_ok() -> None:
             import os
@@ -346,6 +247,9 @@ class NetworkToolsApp(ctk.CTk):
             state["accepted"] = True
             try:
                 dlg.grab_release()
+            except Exception:
+                pass
+            try:
                 dlg.destroy()
             except Exception:
                 pass
@@ -372,30 +276,126 @@ class NetworkToolsApp(ctk.CTk):
             self._show_download_progress(url, dest, ver, info)
 
         ctk.CTkButton(
-            card,
+            footer,
             text="Update Sekarang",
             font=ctk.CTkFont(family="Segoe UI Semibold", size=15),
-            height=48,
-            corner_radius=12,
+            height=46,
+            corner_radius=10,
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_dim"],
             text_color=COLORS["on_accent"],
             command=on_ok,
-        ).pack(fill="x", padx=18, pady=(8, 18))
+        ).pack(fill="x")
 
-        # Blok interaksi window utama selama dialog terbuka
-        try:
-            self.attributes("-disabled", True)
-        except Exception:
-            pass
+        ctk.CTkLabel(
+            footer,
+            text="Tanpa update, aplikasi tidak dapat digunakan.",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=COLORS["muted"],
+        ).pack(pady=(8, 0))
 
-        def _restore_main(_: Any = None) -> None:
+        # Header accent
+        header = ctk.CTkFrame(card, fg_color=COLORS["accent"], corner_radius=12, height=84)
+        header.pack(fill="x", padx=16, pady=(16, 0))
+        header.pack_propagate(False)
+
+        ctk.CTkLabel(
+            header,
+            text="UPDATE WAJIB",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=COLORS["on_accent"],
+        ).pack(anchor="w", padx=16, pady=(12, 0))
+        ctk.CTkLabel(
+            header,
+            text="Versi baru tersedia",
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=20),
+            text_color=COLORS["on_accent"],
+        ).pack(anchor="w", padx=16, pady=(2, 0))
+        ctk.CTkLabel(
+            header,
+            text="Pasang pembaruan untuk melanjutkan.",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color=COLORS["on_accent"],
+        ).pack(anchor="w", padx=16, pady=(2, 10))
+
+        body = ctk.CTkFrame(card, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=16, pady=12)
+
+        ver_row = ctk.CTkFrame(body, fg_color="transparent")
+        ver_row.pack(fill="x", pady=(0, 12))
+        ver_row.grid_columnconfigure((0, 2), weight=1)
+
+        def _ver_chip(parent: Any, label: str, value: str, emphasize: bool) -> None:
+            chip = ctk.CTkFrame(
+                parent,
+                fg_color=COLORS["bg"],
+                corner_radius=10,
+                border_width=1,
+                border_color=COLORS["accent"] if emphasize else COLORS["border"],
+            )
+            chip.pack(fill="both", expand=True)
+            ctk.CTkLabel(
+                chip,
+                text=label,
+                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+                text_color=COLORS["muted"],
+            ).pack(anchor="w", padx=12, pady=(8, 0))
+            ctk.CTkLabel(
+                chip,
+                text=value,
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=17),
+                text_color=COLORS["accent"] if emphasize else COLORS["text"],
+            ).pack(anchor="w", padx=12, pady=(2, 10))
+
+        left = ctk.CTkFrame(ver_row, fg_color="transparent")
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        _ver_chip(left, "SAAT INI", f"v{APP_VERSION}", False)
+
+        ctk.CTkLabel(
+            ver_row,
+            text="→",
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=18),
+            text_color=COLORS["accent"],
+        ).grid(row=0, column=1, padx=2)
+
+        right = ctk.CTkFrame(ver_row, fg_color="transparent")
+        right.grid(row=0, column=2, sticky="nsew", padx=(6, 0))
+        _ver_chip(right, "TERBARU", f"v{ver}", True)
+
+        ctk.CTkLabel(
+            body,
+            text="Catatan rilis",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=COLORS["muted"],
+            anchor="w",
+        ).pack(fill="x", pady=(0, 6))
+
+        notes_box = ctk.CTkTextbox(
+            body,
+            height=110,
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            fg_color=COLORS["bg"],
+            text_color=COLORS["text"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=10,
+            wrap="word",
+            activate_scrollbars=True,
+        )
+        notes_box.pack(fill="both", expand=True)
+        notes_box.insert("1.0", notes or "Pembaruan keamanan & perbaikan stabilitas.")
+        notes_box.configure(state="disabled")
+
+        def _show_modal() -> None:
             try:
-                self.attributes("-disabled", False)
+                dlg.lift()
+                dlg.attributes("-topmost", True)
+                dlg.focus_force()
+                dlg.grab_set()
             except Exception:
                 pass
 
-        dlg.bind("<Destroy>", _restore_main)
+        dlg.after(40, _show_modal)
 
     def _show_download_progress(
         self,
@@ -940,7 +940,7 @@ class NetworkToolsApp(ctk.CTk):
                 wraplength=180,
                 justify="left",
             ).pack(anchor="w")
-            ctk.CTkButton(
+            btn = ctk.CTkButton(
                 inner,
                 text="Buka",
                 width=90,
@@ -949,10 +949,26 @@ class NetworkToolsApp(ctk.CTk):
                 hover_color=COLORS["accent_dim"],
                 text_color=COLORS["on_accent"],
                 command=lambda k=key: self.open_tool(k),
-            ).pack(anchor="w", pady=(16, 0))
+            )
+            btn.pack(anchor="w", pady=(16, 0))
+
+            def _open(_event: Any = None, k: str = key) -> None:
+                self.open_tool(k)
+
             for widget in (tile, inner):
                 widget.bind("<Enter>", lambda e, t=tile: t.configure(fg_color=COLORS["tile_hover"]))
                 widget.bind("<Leave>", lambda e, t=tile: t.configure(fg_color=COLORS["tile"]))
+                widget.bind("<Button-1>", _open)
+            # Label ikut bisa diklik
+            for child in inner.winfo_children():
+                if child is btn:
+                    continue
+                try:
+                    child.bind("<Button-1>", _open)
+                    child.bind("<Enter>", lambda e, t=tile: t.configure(fg_color=COLORS["tile_hover"]))
+                    child.bind("<Leave>", lambda e, t=tile: t.configure(fg_color=COLORS["tile"]))
+                except Exception:
+                    pass
 
     def open_tool(self, key: str) -> None:
         self._stop_runner()
