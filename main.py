@@ -13,7 +13,6 @@ import customtkinter as ctk
 
 from modules.admin import is_admin, relaunch_as_admin
 from modules.clear_cache import ClearCacheRunner
-from modules.dns_test import DnsTestRunner
 from modules.fix_anydesk import AnydeskRunner
 from modules.fix_printer import FixPrinterRunner
 from modules.fix_rdp import FixRdpRunner
@@ -22,7 +21,7 @@ from modules.ping_runner import PingRunner
 from modules.refresh_network import RefreshNetworkRunner
 from modules.settings import (
     DEFAULT_THEME,
-    DNS_TEST_DOMAINS,
+    DNS_LEAK_URL,
     NETWORK_ADAPTER,
     SPEEDTEST_URL,
     APP_VERSION,
@@ -53,9 +52,9 @@ COLORS: dict[str, str] = dict(THEMES["light"])
 TOOLS = [
     ("ping", "Ping", "●", "Ping terus ke host dari daftar"),
     ("traceroute", "Traceroute", "↗", "tracert -d ke alamat IP/host"),
-    ("dns", "DNS Test", "◎", "Uji DNS & deteksi leak"),
-    ("ipscan", "IP Scanner", "▦", "Scan host hidup di subnet PC ini"),
     ("speedtest", "Speedtest", "⚡", "Speedtest di browser bawaan aplikasi"),
+    ("dns", "DNS Test", "◎", "DNS leak test di browser bawaan"),
+    ("ipscan", "IP Scanner", "▦", "Scan host hidup di subnet PC ini"),
     ("refresh", "Refresh Network", "↻", "Otomatis renew DHCP (Admin)"),
     ("printer", "Fix Printer", "🖨", "Otomatis clear spooler (Admin)"),
     ("fixrdp", "Fix RDP", "⧉", "Reset RDP client agar fresh (Admin)"),
@@ -996,8 +995,7 @@ class NetworkToolsApp(ctk.CTk):
 
         title = next((t for k, t, *_ in TOOLS if k == key), key)
 
-        if key == "speedtest":
-            # Speedtest: header ringkas tanpa strip sistem
+        if key in ("speedtest", "dns"):
             self._hide_sysinfo_strip()
             ctk.CTkLabel(
                 self._header,
@@ -1005,7 +1003,10 @@ class NetworkToolsApp(ctk.CTk):
                 font=ctk.CTkFont(family="Segoe UI Semibold", size=20),
                 text_color=COLORS["text"],
             ).pack(side="left")
-            self._open_speedtest_view()
+            if key == "speedtest":
+                self._open_embedded_web_view("Speedtest", SPEEDTEST_URL, auto_start=True)
+            else:
+                self._open_embedded_web_view("DNS Test", DNS_LEAK_URL, auto_start=False)
             return
 
         if key == "ipscan":
@@ -1373,10 +1374,17 @@ class NetworkToolsApp(ctk.CTk):
         btn_start.configure(command=start_scan)
         btn_stop.configure(command=stop_scan)
 
-    def _open_speedtest_view(self) -> None:
-        """Show Speedtest inside embedded Edge WebView2 (no external browser)."""
-        url = SPEEDTEST_URL
+    def _open_embedded_web_view(
+        self,
+        title: str,
+        url: str,
+        *,
+        auto_start: bool = False,
+    ) -> None:
+        """Tampilkan URL di Edge WebView2 bawaan (Speedtest / DNS leak, dll.)."""
         self.console = None
+        self._webview_auto_start = auto_start
+        self._webview_url = url
 
         # Maksimalkan area WebView: tanpa padding konten, tombol di header
         try:
@@ -1385,11 +1393,10 @@ class NetworkToolsApp(ctk.CTk):
         except Exception:
             pass
 
-        # Ganti aksi tema dengan tombol Speedtest di header (hemat tinggi)
         self._clear_frame(self._header)
         ctk.CTkLabel(
             self._header,
-            text="Speedtest",
+            text=title,
             font=ctk.CTkFont(family="Segoe UI Semibold", size=20),
             text_color=COLORS["text"],
         ).pack(side="left")
@@ -1416,12 +1423,12 @@ class NetworkToolsApp(ctk.CTk):
         ).pack(side="right", padx=(8, 0))
         ctk.CTkButton(
             actions,
-            text="Mulai Ulang",
+            text="Muat Ulang",
             width=110,
             height=32,
             fg_color=COLORS["tile"],
             hover_color=COLORS["tile_hover"],
-            command=lambda: self._reload_speedtest(url),
+            command=lambda: self._reload_webview(url),
         ).pack(side="right")
 
         host = tk.Frame(self._content, bg=COLORS["bg"])
@@ -1440,8 +1447,9 @@ class NetworkToolsApp(ctk.CTk):
             self.after(80, lambda: self._browser._force_stretch() if self._browser else None)
             self.after(300, lambda: self._browser._force_stretch() if self._browser else None)
             self.after(900, lambda: self._browser._force_stretch() if self._browser else None)
-            self._speedtest_click_tries = 0
-            self._speedtest_click_job = self.after(2500, self._speedtest_auto_start)
+            if auto_start:
+                self._speedtest_click_tries = 0
+                self._speedtest_click_job = self.after(2500, self._speedtest_auto_start)
             embed_ok = True
         except Exception as exc:
             embed_err = str(exc)
@@ -1455,7 +1463,7 @@ class NetworkToolsApp(ctk.CTk):
             box.pack(fill="both", expand=True, padx=16, pady=16)
             ctk.CTkLabel(
                 box,
-                text="Speedtest",
+                text=title,
                 font=ctk.CTkFont(family="Segoe UI Semibold", size=20),
                 text_color=COLORS["text"],
             ).pack(anchor="w", padx=20, pady=(20, 8))
@@ -1489,14 +1497,13 @@ class NetworkToolsApp(ctk.CTk):
                 ).pack(anchor="w", padx=20, pady=(0, 12))
             ctk.CTkButton(
                 box,
-                text="Buka Speedtest Lagi",
-                width=180,
+                text="Buka Lagi",
+                width=140,
                 fg_color=COLORS["accent"],
                 hover_color=COLORS["accent_dim"],
                 text_color=COLORS["on_accent"],
                 command=lambda: open_speedtest_edge_app(url),
             ).pack(anchor="w", padx=20, pady=(0, 20))
-            # Fallback: tetap tampilkan bar aksi
             self._action_bar.pack(fill="x", padx=12, pady=(0, 6), before=self._footer)
             ctk.CTkButton(
                 self._action_bar,
@@ -1518,19 +1525,19 @@ class NetworkToolsApp(ctk.CTk):
                 command=self._send_screenshot,
             ).pack(side="right")
         else:
-            # Tanpa action bar terpisah — area WebView hampir penuh
             self._action_bar.pack_forget()
 
-    def _reload_speedtest(self, url: str) -> None:
+    def _reload_webview(self, url: str) -> None:
         if self._browser is not None:
             self._browser.load_url(url)
-            self._speedtest_click_tries = 0
-            if self._speedtest_click_job is not None:
-                try:
-                    self.after_cancel(self._speedtest_click_job)
-                except Exception:
-                    pass
-            self._speedtest_click_job = self.after(2500, self._speedtest_auto_start)
+            if getattr(self, "_webview_auto_start", False):
+                self._speedtest_click_tries = 0
+                if self._speedtest_click_job is not None:
+                    try:
+                        self.after_cancel(self._speedtest_click_job)
+                    except Exception:
+                        pass
+                self._speedtest_click_job = self.after(2500, self._speedtest_auto_start)
             return
         from modules.speedtest_fallback import open_speedtest_edge_app
 
@@ -1793,7 +1800,7 @@ class NetworkToolsApp(ctk.CTk):
         hints = {
             "ping": "Pilih host dari daftar, lalu Mulai Ping. Tekan Kembali untuk ke dashboard.",
             "traceroute": "Pilih host dari dropdown, lalu Mulai. Perintah: tracert -d <alamat>",
-            "dns": "Klik Jalankan untuk uji DNS mirip leak test.",
+            "dns": "DNS leak test di browser bawaan aplikasi.",
             "ipscan": "Scan host hidup di subnet PC ini.",
             "speedtest": "Speedtest berjalan di browser bawaan aplikasi.",
             "refresh": (
@@ -1828,16 +1835,6 @@ class NetworkToolsApp(ctk.CTk):
             self._build_ping(parent)
         elif key == "traceroute":
             self._build_traceroute(parent)
-        elif key == "dns":
-            ctk.CTkButton(
-                parent,
-                text="Jalankan DNS Test",
-                width=160,
-                fg_color=COLORS["accent"],
-                hover_color=COLORS["accent_dim"],
-                text_color=COLORS["on_accent"],
-                command=self._start_dns,
-            ).pack(side="left")
         elif key in AUTO_RUN_TOOLS:
             ctk.CTkLabel(
                 parent,
@@ -1972,15 +1969,6 @@ class NetworkToolsApp(ctk.CTk):
         runner = TracerouteRunner(
             ip, on_line=self.log, on_done=lambda: self.log("--- Traceroute selesai ---")
         )
-        self.set_runner_stop(runner.stop)
-        runner.start()
-
-    def _start_dns(self) -> None:
-        self._stop_runner()
-        if self.console:
-            self.console.clear()
-        domains = list(DNS_TEST_DOMAINS)
-        runner = DnsTestRunner(domains, on_line=self.log, on_done=lambda: self.log("--- DNS Test selesai ---"))
         self.set_runner_stop(runner.stop)
         runner.start()
 

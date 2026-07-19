@@ -15,9 +15,9 @@ Hasil: `dist\NetworkTools.exe` (satu file, tanpa `config.json`).
 | Tool | Perilaku |
 |------|----------|
 | **Ping / Traceroute** | Host tetap: Internet, Gateway (otomatis), Server-VPN/DB/App1–8 |
-| **DNS Test** | Uji resolusi DNS |
-| **IP Scanner** | UI daftar host: scan subnet PC (ICMP), progress bar, status Online |
 | **Speedtest** | `https://jeriyant.speedtestcustom.com` (WebView2) |
+| **DNS Test** | `https://browserleaks.com/dns` (WebView2, seperti Speedtest) |
+| **IP Scanner** | UI daftar host: scan subnet PC (ICMP), progress bar, status Online |
 | **Refresh Network** | Disable/enable NIC + renew DHCP (minta Administrator) |
 | **Fix Printer** | Clear spooler: stop → hapus antrian → start (minta Administrator) |
 | **Fix RDP** | Reset RDP client: kill ConnectionClient, hapus RDP6/cache, bersihkan registry & kredensial TERMSRV |

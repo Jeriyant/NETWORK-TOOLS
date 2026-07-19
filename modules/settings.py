@@ -25,6 +25,7 @@ HOSTS: list[dict[str, str]] = [
 ]
 
 SPEEDTEST_URL = "https://jeriyant.speedtestcustom.com"
+DNS_LEAK_URL = "https://browserleaks.com/dns"
 
 # AnyDesk download URL kept for optional use; menu Anydesk opens installed app + copies ID
 ANYDESK_DRIVE_FILE_ID = "1bCt6Qwj4XgrpQC0h9j5lqqcEPDu63a8g"
@@ -43,7 +44,7 @@ NETWORK_ADAPTER = ""  # empty = auto pick first Up adapter
 DEFAULT_THEME = "system"
 
 # App version — naikkan setiap rilis baru (harus cocok dengan tag GitHub Release)
-APP_VERSION = "1.22"
+APP_VERSION = "1.23"
 UPDATE_REPO = "https://github.com/Jeriyant/NETWORK-TOOLS"
 
 
