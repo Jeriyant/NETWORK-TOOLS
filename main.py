@@ -315,11 +315,19 @@ class NetworkToolsApp(ctk.CTk):
 
         def worker() -> None:
             try:
-                download_file(url, dest, on_progress=on_progress)
-                if dest.stat().st_size < 1_000_000:
-                    raise RuntimeError(
-                        "File unduhan terlalu kecil — kemungkinan bukan EXE valid."
-                    )
+                from modules.updater import verify_exe_file
+
+                expected = getattr(info, "size", None)
+                download_file(
+                    url,
+                    dest,
+                    on_progress=on_progress,
+                    expected_size=expected if isinstance(expected, int) else None,
+                )
+                verify_exe_file(
+                    dest,
+                    expected_size=expected if isinstance(expected, int) else None,
+                )
                 apply_update_and_restart(dest)
 
                 def ok() -> None:
@@ -331,10 +339,13 @@ class NetworkToolsApp(ctk.CTk):
                         pass
                     messagebox.showinfo(
                         "Update",
-                        "Unduhan selesai. Aplikasi akan ditutup dan diganti otomatis.",
+                        "Unduhan selesai. Aplikasi akan ditutup dan diganti otomatis.\n"
+                        "Tunggu beberapa detik sampai jendela baru muncul.",
                         parent=self,
                     )
                     self.destroy()
+                    # Pastikan proses benar-benar keluar agar file EXE bisa diganti
+                    self.after(200, lambda: __import__("sys").exit(0))
 
                 self.after(0, ok)
             except Exception as exc:
@@ -347,7 +358,8 @@ class NetworkToolsApp(ctk.CTk):
                         pass
                     messagebox.showerror(
                         "Update gagal",
-                        f"Gagal memasang update:\n{exc}\n\nBuka halaman unduhan di browser.",
+                        f"Gagal memasang update:\n{exc}\n\n"
+                        "Unduh manual dari GitHub Releases jika perlu.",
                         parent=self,
                     )
                     webbrowser.open(getattr(info, "html_url", None) or UPDATE_REPO)
