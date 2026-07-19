@@ -9,8 +9,10 @@ build.bat
 ```
 
 Hasil:
-- `dist\NetworkTools\NetworkTools.exe` (+ folder `_internal`)
-- `dist\NetworkTools.zip` (untuk GitHub Release)
+- Folder: `dist\NetworkTools\` (`NetworkTools.exe` + `_internal`)
+- Paket rilis: `dist\NetworkTools.zip`
+
+> Mulai v1.12 memakai **onedir** (bukan single-file), agar tidak extract runtime ke `Temp\_MEI` (penyebab error `python312.dll`).
 
 ## Fitur
 
@@ -22,11 +24,13 @@ Hasil:
 | **Refresh Network** | Disable/enable NIC + renew DHCP (minta Administrator) |
 | **Fix Printer** | Clear spooler: stop → hapus antrian → start (minta Administrator) |
 | **Clear Cache** | Hapus TEMP & `RDP6` (minta Administrator) |
-| **Anydesk** | Buka AnyDesk, salin ID ke clipboard, buka Telegram |
+| **Anydesk** | Tutup AnyDesk lama, buka baru, salin ID, buka Telegram |
 
 Footer: `Copyright © {tahun} JERIYANT - BARAMCITY`
+
 ## Update otomatis
 
 Saat dijalankan, app mengecek **GitHub Releases** di `Jeriyant/NETWORK-TOOLS`.
+Update dipasang ke `%LOCALAPPDATA%\NetworkTools`.
 
 Lihat `UPDATE.md` untuk cara publish rilis baru.

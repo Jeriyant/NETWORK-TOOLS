@@ -6,24 +6,20 @@ https://github.com/Jeriyant/NETWORK-TOOLS/releases
 ## Langkah rilis
 
 1. Naikkan `APP_VERSION` di `modules/settings.py` (contoh: `1.12`)
-2. Build: `build.bat` → folder `dist\NetworkTools\` + `dist\NetworkTools.zip`
+2. Build: `build.bat` → `dist\NetworkTools\` + `dist\NetworkTools.zip`
 3. Buat Release di GitHub:
    - Tag: `v1.12`
    - Title: `Network Tools 1.12`
-   - Upload asset: **`NetworkTools.zip`** (isi: `NetworkTools.exe` + folder `_internal`)
+   - Upload asset: **`NetworkTools.zip`** (wajib — paket onedir)
 4. Publish release (centang *latest*)
 
 ## Instalasi manual
 
 1. Unduh `NetworkTools.zip`
-2. Extract ke folder (mis. Desktop\NetworkTools)
-3. Jalankan `NetworkTools.exe` di dalam folder itu
+2. Ekstrak ke folder mana saja (disarankan: `%LOCALAPPDATA%\NetworkTools`)
+3. Jalankan `NetworkTools.exe` di dalam folder hasil ekstrak (bersama folder `_internal`)
 
-## Alur auto-update
+> Catatan: mulai v1.12 app memakai **onedir** (bukan one-file), sehingga tidak lagi
+> mengekstrak runtime ke `Temp\_MEI...` (penyebab error `python312.dll` saat update).
 
-1. App ditutup
-2. File lama di lokasi program dihapus
-3. Paket baru diextract/diganti
-4. App dibuka lagi otomatis
-
-> Catatan: mulai v1.12 build memakai **onedir** (bukan single-file) agar tidak crash `_MEI/python312.dll` saat update.
+User dengan versi lama akan ditawari update saat membuka app (atau diarahkan ke halaman Release).

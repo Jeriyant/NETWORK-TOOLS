@@ -182,7 +182,7 @@ class NetworkToolsApp(ctk.CTk):
         import webbrowser
         from pathlib import Path
 
-        from modules.updater import is_direct_exe_url
+        from modules.updater import is_direct_update_url
 
         ver = getattr(info, "version", "?")
         notes = (getattr(info, "changelog", "") or "").strip()
@@ -211,20 +211,24 @@ class NetworkToolsApp(ctk.CTk):
             webbrowser.open(UPDATE_REPO)
             return
 
-        # Bukan file update langsung / mode dev → buka halaman GitHub
-        if not is_direct_exe_url(url) or not getattr(sys, "frozen", False):
+        kind = getattr(info, "kind", None) or (
+            "zip" if url.lower().split("?", 1)[0].endswith(".zip") else "exe"
+        )
+
+        # Bukan paket langsung / mode dev → buka halaman GitHub
+        if not is_direct_update_url(url) or not getattr(sys, "frozen", False):
             webbrowser.open(url if url.startswith("http") else UPDATE_REPO)
             if not getattr(sys, "frozen", False):
                 messagebox.showinfo(
                     "Update",
-                    "Mode development: unduh paket dari GitHub, lalu ganti manual.\n"
-                    "Auto-replace hanya berjalan pada NetworkTools.exe.",
+                    "Mode development: unduh ZIP dari GitHub Releases,\n"
+                    "lalu ekstrak folder NetworkTools.",
                     parent=self,
                 )
             return
 
-        ext = ".zip" if url.split("?", 1)[0].lower().endswith(".zip") else ".exe"
-        dest = Path(tempfile.gettempdir()) / f"NetworkTools_update_v{ver}{ext}"
+        suffix = ".zip" if kind == "zip" else ".exe"
+        dest = Path(tempfile.gettempdir()) / f"NetworkTools_update_v{ver}{suffix}"
         self._show_download_progress(url, dest, str(ver), info)
 
     def _show_download_progress(
@@ -327,6 +331,9 @@ class NetworkToolsApp(ctk.CTk):
                 from modules.updater import verify_update_file
 
                 expected = getattr(info, "size", None)
+                kind = getattr(info, "kind", None) or (
+                    "zip" if str(dest).lower().endswith(".zip") else "exe"
+                )
                 download_file(
                     url,
                     dest,
@@ -335,9 +342,10 @@ class NetworkToolsApp(ctk.CTk):
                 )
                 verify_update_file(
                     dest,
+                    kind=kind,
                     expected_size=expected if isinstance(expected, int) else None,
                 )
-                apply_update_and_restart(dest)
+                apply_update_and_restart(dest, kind=kind)
 
                 def ok() -> None:
                     import os
@@ -350,13 +358,11 @@ class NetworkToolsApp(ctk.CTk):
                         pass
                     messagebox.showinfo(
                         "Update",
-                        "Unduhan selesai. Aplikasi akan ditutup.\n"
-                        "File lama dihapus, diganti yang baru, lalu dibuka lagi otomatis.\n"
-                        "Tunggu beberapa detik.",
+                        "Unduhan selesai. Aplikasi akan ditutup dan dipasang ulang.\n"
+                        "Versi baru dipasang di folder AppData (bukan Temp/_MEI).\n"
+                        "Tunggu beberapa detik sampai jendela baru muncul.",
                         parent=self,
                     )
-                    # Hard exit: pastikan bootloader PyInstaller selesai
-                    # membersihkan _MEI sebelum updater menjalankan EXE baru.
                     os._exit(0)
 
                 self.after(0, ok)
@@ -371,7 +377,7 @@ class NetworkToolsApp(ctk.CTk):
                     messagebox.showerror(
                         "Update gagal",
                         f"Gagal memasang update:\n{exc}\n\n"
-                        "Unduh manual dari GitHub Releases jika perlu.",
+                        "Unduh manual ZIP dari GitHub Releases jika perlu.",
                         parent=self,
                     )
                     webbrowser.open(getattr(info, "html_url", None) or UPDATE_REPO)

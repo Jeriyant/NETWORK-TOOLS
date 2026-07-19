@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# One-folder build (onedir) — menghindari crash _MEI/python312.dll saat update.
+# Onedir build — hindari extract ke Temp\_MEI (penyebab crash python312.dll saat update)
 from PyInstaller.utils.hooks import collect_all
 
 datas = []

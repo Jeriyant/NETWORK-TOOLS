@@ -1,35 +1,28 @@
-"""Auto-update via GitHub Releases.
-
-Alur update (sesuai permintaan):
-1. Tutup aplikasi
-2. Hapus program di lokasi lama
-3. Ganti dengan paket baru
-4. Jalankan lagi otomatis (via explorer, env bersih)
-
-Build memakai onedir (folder) agar tidak ada extract _MEI/python312.dll.
-"""
+"""Auto-update via GitHub Releases (onedir ZIP — tanpa Temp\\_MEI)."""
 
 from __future__ import annotations
 
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import urllib.error
 import urllib.request
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
 
 GITHUB_REPO = "Jeriyant/NETWORK-TOOLS"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_REPO_URL = f"https://github.com/{GITHUB_REPO}"
-USER_AGENT = "NetworkTools-Updater/1.0"
+USER_AGENT = "NetworkTools-Updater/1.2"
 
-MIN_EXE_BYTES = 5 * 1024 * 1024
 MIN_ZIP_BYTES = 5 * 1024 * 1024
+MIN_EXE_BYTES = 8 * 1024 * 1024
 
 _PYI_ENV_KEYS = (
     "_MEIPASS",
@@ -38,6 +31,8 @@ _PYI_ENV_KEYS = (
     "PYTHONPATH",
     "PYTHONNOUSERSITE",
 )
+
+AssetKind = Literal["zip", "exe"]
 
 
 @dataclass
@@ -48,6 +43,7 @@ class UpdateInfo:
     mandatory: bool = False
     html_url: str = ""
     size: int | None = None
+    kind: AssetKind = "zip"
 
 
 def parse_version(text: str) -> tuple[int, ...]:
@@ -58,6 +54,12 @@ def parse_version(text: str) -> tuple[int, ...]:
 
 def is_newer(remote: str, local: str) -> bool:
     return parse_version(remote) > parse_version(local)
+
+
+def default_install_dir() -> Path:
+    """Lokasi instalasi tetap (onedir) di LocalAppData — bukan OneDrive/Desktop."""
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    return Path(base) / "NetworkTools"
 
 
 def _http_get_json(url: str, timeout: int = 12) -> dict | list | None:
@@ -80,8 +82,8 @@ def _http_get_json(url: str, timeout: int = 12) -> dict | list | None:
         return None
 
 
-def _pick_update_asset(assets: list[dict]) -> tuple[str | None, int | None]:
-    """Prefer NetworkTools.zip (onedir), fallback ke .exe."""
+def _pick_release_asset(assets: list[dict]) -> tuple[str | None, int | None, AssetKind | None]:
+    """Prefer ZIP onedir; fallback EXE (legacy one-file)."""
     zips: list[tuple[str, int | None]] = []
     exes: list[tuple[str, int | None]] = []
     for asset in assets or []:
@@ -102,10 +104,12 @@ def _pick_update_asset(assets: list[dict]) -> tuple[str | None, int | None]:
         elif lower.endswith(".exe"):
             exes.append(item)
     if zips:
-        return zips[0]
+        url, size = zips[0]
+        return url, size, "zip"
     if exes:
-        return exes[0]
-    return None, None
+        url, size = exes[0]
+        return url, size, "exe"
+    return None, None, None
 
 
 def check_github_release(local_version: str) -> UpdateInfo | None:
@@ -115,9 +119,15 @@ def check_github_release(local_version: str) -> UpdateInfo | None:
     tag = str(data.get("tag_name") or data.get("name") or "").strip()
     if not tag or not is_newer(tag, local_version):
         return None
-    url, size = _pick_update_asset(list(data.get("assets") or []))
-    if not url:
-        url = str(data.get("html_url") or GITHUB_REPO_URL)
+    url, size, kind = _pick_release_asset(list(data.get("assets") or []))
+    if not url or not kind:
+        return UpdateInfo(
+            version=tag.lstrip("vV"),
+            download_url=str(data.get("html_url") or GITHUB_REPO_URL),
+            changelog=str(data.get("body") or "").strip(),
+            html_url=str(data.get("html_url") or GITHUB_REPO_URL),
+            kind="zip",
+        )
     return UpdateInfo(
         version=tag.lstrip("vV"),
         download_url=url,
@@ -125,6 +135,7 @@ def check_github_release(local_version: str) -> UpdateInfo | None:
         mandatory=False,
         html_url=str(data.get("html_url") or GITHUB_REPO_URL),
         size=size,
+        kind=kind,
     )
 
 
@@ -186,7 +197,11 @@ def download_file(
     return received
 
 
-def verify_exe_file(path: Path, expected_size: int | None = None) -> None:
+def verify_update_file(
+    path: Path,
+    kind: AssetKind,
+    expected_size: int | None = None,
+) -> None:
     if not path.is_file():
         raise RuntimeError("File update tidak ditemukan setelah unduhan.")
     size = path.stat().st_size
@@ -194,48 +209,37 @@ def verify_exe_file(path: Path, expected_size: int | None = None) -> None:
         raise RuntimeError(
             f"Ukuran file tidak cocok ({size} ≠ {expected_size} byte)."
         )
+    if kind == "zip":
+        if size < MIN_ZIP_BYTES:
+            raise RuntimeError(
+                f"File ZIP terlalu kecil ({size} byte) — unduhan gagal."
+            )
+        if not zipfile.is_zipfile(path):
+            raise RuntimeError("File update bukan ZIP valid.")
+        return
+
     if size < MIN_EXE_BYTES:
         raise RuntimeError(
             f"File update terlalu kecil ({size} byte) — kemungkinan unduhan gagal."
         )
-    header = path.read_bytes()[:2]
-    if header != b"MZ":
+    if path.read_bytes()[:2] != b"MZ":
         raise RuntimeError(
-            "File update bukan EXE valid (header rusak). "
-            "Unduh manual dari GitHub Releases."
+            "File update bukan EXE valid. Unduh manual dari GitHub Releases."
         )
-
-
-def verify_update_file(path: Path, expected_size: int | None = None) -> None:
-    """Validasi paket update (.zip onedir atau .exe)."""
-    if not path.is_file():
-        raise RuntimeError("File update tidak ditemukan setelah unduhan.")
-    size = path.stat().st_size
-    if expected_size is not None and size != expected_size:
-        raise RuntimeError(
-            f"Ukuran file tidak cocok ({size} ≠ {expected_size} byte)."
-        )
-    suffix = path.suffix.lower()
-    if suffix == ".zip":
-        if size < MIN_ZIP_BYTES:
-            raise RuntimeError(
-                f"Paket zip terlalu kecil ({size} byte) — unduhan gagal."
-            )
-        header = path.read_bytes()[:4]
-        if header[:2] != b"PK":
-            raise RuntimeError("File update bukan ZIP valid.")
-        return
-    verify_exe_file(path, expected_size=expected_size)
 
 
 def is_direct_update_url(url: str) -> bool:
     path = url.split("?", 1)[0].lower()
-    return path.endswith(".exe") or path.endswith(".zip")
+    return path.endswith(".zip") or path.endswith(".exe")
 
 
+# Backward-compatible alias
 def is_direct_exe_url(url: str) -> bool:
-    """Kompatibilitas lama — true untuk exe atau zip langsung."""
     return is_direct_update_url(url)
+
+
+def verify_exe_file(path: Path, expected_size: int | None = None) -> None:
+    verify_update_file(path, "exe", expected_size)
 
 
 def _clean_environ() -> dict[str, str]:
@@ -250,183 +254,174 @@ def _clean_environ() -> dict[str, str]:
     return env
 
 
-def apply_update_and_restart(downloaded: Path) -> None:
-    """
-    Tutup app → hapus program lama di lokasinya → pasang yang baru → jalankan lagi.
+def _find_app_root(extracted: Path) -> Path:
+    """Cari folder yang berisi NetworkTools.exe + _internal."""
+    direct = extracted / "NetworkTools.exe"
+    if direct.is_file() and (extracted / "_internal").is_dir():
+        return extracted
+    nested = extracted / "NetworkTools"
+    if (nested / "NetworkTools.exe").is_file() and (nested / "_internal").is_dir():
+        return nested
+    for exe in extracted.rglob("NetworkTools.exe"):
+        if (exe.parent / "_internal").is_dir():
+            return exe.parent
+    # Legacy: exe tanpa _internal (onefile di dalam zip — jarang)
+    for exe in extracted.rglob("NetworkTools.exe"):
+        return exe.parent
+    raise RuntimeError("NetworkTools.exe tidak ditemukan di paket update.")
 
-    Restart memakai explorer.exe agar tidak mewarisi env _MEIPASS.
+
+def apply_update_and_restart(downloaded: Path, kind: AssetKind | None = None) -> None:
+    """
+    Pasang update ke %LOCALAPPDATA%\\NetworkTools (onedir) lalu restart.
+
+    Onedir tidak mengekstrak ke Temp\\_MEI, jadi crash python312.dll saat
+    update one-file tidak terjadi lagi.
     """
     if not getattr(sys, "frozen", False):
-        raise RuntimeError("Auto-replace hanya tersedia pada build .exe")
+        raise RuntimeError("Auto-update hanya tersedia pada build rilis.")
 
-    current = Path(sys.executable).resolve()
-    workdir = current.parent
-    source = downloaded.resolve()
+    path = downloaded.resolve()
+    if kind is None:
+        kind = "zip" if path.suffix.lower() == ".zip" else "exe"
+
+    install = default_install_dir()
     pid = os.getpid()
-    proc_name = current.stem
-    is_zip = source.suffix.lower() == ".zip"
-
-    bat = Path(tempfile.gettempdir()) / f"network_tools_apply_update_{pid}.bat"
+    proc_name = Path(sys.executable).stem
+    task_name = f"NetworkToolsRestart_{pid}"
+    ps1 = Path(tempfile.gettempdir()) / f"network_tools_apply_update_{pid}.ps1"
     err_log = Path(tempfile.gettempdir()) / "network_tools_update_error.txt"
     stage = Path(tempfile.gettempdir()) / f"network_tools_stage_{pid}"
 
-    target = str(current)
-    source_s = str(source)
-    workdir_s = str(workdir)
-    err_s = str(err_log)
-    stage_s = str(stage)
-    proc = f"{proc_name}.exe"
+    # Siapkan isi stage (folder siap-copy yang berisi NetworkTools.exe)
+    if stage.exists():
+        shutil.rmtree(stage, ignore_errors=True)
+    stage.mkdir(parents=True, exist_ok=True)
 
-    def _fill(template: str) -> str:
-        return (
-            template.replace("__TARGET__", target)
-            .replace("__SOURCE__", source_s)
-            .replace("__WORKDIR__", workdir_s)
-            .replace("__STAGE__", stage_s)
-            .replace("__ERRLOG__", err_s)
-            .replace("__PROC__", proc)
-        )
-
-    if is_zip:
-        body = _fill(
-            r"""@echo off
-setlocal EnableExtensions
-set "TARGET=__TARGET__"
-set "SOURCE=__SOURCE__"
-set "WORKDIR=__WORKDIR__"
-set "STAGE=__STAGE__"
-set "ERRLOG=__ERRLOG__"
-set "PROC=__PROC__"
-
-rem Bersihkan env PyInstaller
-set "_MEIPASS="
-set "_MEIPASS2="
-set "PYTHONHOME="
-set "PYTHONPATH="
-
-:wait
-tasklist /FI "IMAGENAME eq %PROC%" 2>nul | find /I "%PROC%" >nul
-if not errorlevel 1 (
-  timeout /t 1 /nobreak >nul
-  goto wait
-)
-
-timeout /t 3 /nobreak >nul
-
-if not exist "%SOURCE%" (
-  echo Source hilang> "%ERRLOG%"
-  exit /b 1
-)
-
-rem Hapus program lama di lokasi
-del /F /Q "%TARGET%" >nul 2>&1
-if exist "%WORKDIR%\_internal" rd /s /q "%WORKDIR%\_internal" >nul 2>&1
-del /F /Q "%TARGET%.old" >nul 2>&1
-
-rem Extract zip
-if exist "%STAGE%" rd /s /q "%STAGE%" >nul 2>&1
-mkdir "%STAGE%" >nul 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '%SOURCE%' -DestinationPath '%STAGE%' -Force"
-if errorlevel 1 (
-  echo Expand gagal> "%ERRLOG%"
-  exit /b 2
-)
-
-rem Jika zip berisi folder NetworkTools\, angkat isinya
-set "SRCROOT="
-if exist "%STAGE%\NetworkTools\NetworkTools.exe" set "SRCROOT=%STAGE%\NetworkTools"
-if not defined SRCROOT if exist "%STAGE%\NetworkTools.exe" set "SRCROOT=%STAGE%"
-if not defined SRCROOT (
-  echo Struktur zip tidak dikenali> "%ERRLOG%"
-  exit /b 3
-)
-
-xcopy /E /Y /I /Q "%SRCROOT%\*" "%WORKDIR%\" >nul
-if not exist "%TARGET%" (
-  echo Copy gagal, EXE tidak ada> "%ERRLOG%"
-  exit /b 4
-)
-
-timeout /t 2 /nobreak >nul
-
-rem Jalankan lewat explorer (env bersih, di luar process tree)
-explorer.exe "%TARGET%"
-
-timeout /t 2 /nobreak >nul
-rd /s /q "%STAGE%" >nul 2>&1
-del /F /Q "%SOURCE%" >nul 2>&1
-del "%~f0" >nul 2>&1
-"""
-        )
+    if kind == "zip":
+        extract_to = stage / "extract"
+        extract_to.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(path, "r") as zf:
+            zf.extractall(extract_to)
+        app_root = _find_app_root(extract_to)
+        # Salin isi app_root ke stage/app
+        app_stage = stage / "app"
+        shutil.copytree(app_root, app_stage)
     else:
-        body = _fill(
-            r"""@echo off
-setlocal EnableExtensions
-set "TARGET=__TARGET__"
-set "SOURCE=__SOURCE__"
-set "WORKDIR=__WORKDIR__"
-set "ERRLOG=__ERRLOG__"
-set "PROC=__PROC__"
+        # Legacy one-file: tetap simpan sebagai NetworkTools.exe di stage/app
+        # (bukan solusi ideal; rilis baru memakai ZIP onedir)
+        app_stage = stage / "app"
+        app_stage.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, app_stage / "NetworkTools.exe")
 
-set "_MEIPASS="
-set "_MEIPASS2="
-set "PYTHONHOME="
-set "PYTHONPATH="
+    new_exe = app_stage / "NetworkTools.exe"
+    if not new_exe.is_file():
+        raise RuntimeError("Paket update tidak berisi NetworkTools.exe.")
 
-:wait
-tasklist /FI "IMAGENAME eq %PROC%" 2>nul | find /I "%PROC%" >nul
-if not errorlevel 1 (
-  timeout /t 1 /nobreak >nul
-  goto wait
-)
+    def _ps_single(s: str) -> str:
+        return s.replace("'", "''")
 
-timeout /t 3 /nobreak >nul
+    script = f"""$ErrorActionPreference = 'Continue'
+$sourceApp = '{_ps_single(str(app_stage))}'
+$installDir = '{_ps_single(str(install))}'
+$targetExe = '{_ps_single(str(install / "NetworkTools.exe"))}'
+$errLog = '{_ps_single(str(err_log))}'
+$oldPid = {pid}
+$procName = '{_ps_single(proc_name)}'
+$taskName = '{_ps_single(task_name)}'
+$stageRoot = '{_ps_single(str(stage))}'
+$pkg = '{_ps_single(str(path))}'
 
-if not exist "%SOURCE%" (
-  echo Source hilang> "%ERRLOG%"
-  exit /b 1
-)
+function Fail([string]$msg) {{
+  Set-Content -LiteralPath $errLog -Value $msg -Encoding UTF8
+  exit 1
+}}
 
-rem Hapus program lama
-del /F /Q "%TARGET%" >nul 2>&1
-if exist "%TARGET%" (
-  timeout /t 2 /nobreak >nul
-  del /F /Q "%TARGET%" >nul 2>&1
-)
-if exist "%TARGET%" (
-  echo Gagal menghapus EXE lama> "%ERRLOG%"
-  exit /b 2
-)
+foreach ($k in @('_MEIPASS','_MEIPASS2','PYTHONHOME','PYTHONPATH','PYTHONNOUSERSITE')) {{
+  Remove-Item "Env:$k" -ErrorAction SilentlyContinue
+}}
+Get-ChildItem Env: | Where-Object {{ $_.Name -like '_MEI*' }} | ForEach-Object {{
+  Remove-Item "Env:$($_.Name)" -ErrorAction SilentlyContinue
+}}
 
-copy /Y "%SOURCE%" "%TARGET%" >nul
-if not exist "%TARGET%" (
-  echo Copy gagal> "%ERRLOG%"
-  exit /b 3
-)
+if (-not (Test-Path -LiteralPath $sourceApp)) {{ Fail "Stage update hilang" }}
 
-timeout /t 2 /nobreak >nul
+$tries = 0
+while (Get-Process -Id $oldPid -ErrorAction SilentlyContinue) {{
+  $tries++; if ($tries -gt 120) {{ Fail "Timeout menunggu PID $oldPid" }}
+  Start-Sleep -Milliseconds 500
+}}
 
-explorer.exe "%TARGET%"
+$tries = 0
+while (Get-Process -Name $procName -ErrorAction SilentlyContinue) {{
+  $tries++; if ($tries -gt 120) {{ Fail "Timeout menunggu $procName" }}
+  Start-Sleep -Milliseconds 500
+}}
 
-timeout /t 2 /nobreak >nul
-del /F /Q "%SOURCE%" >nul 2>&1
-del "%~f0" >nul 2>&1
+Start-Sleep -Seconds 3
+
+# Pasang ke LocalAppData\\NetworkTools (onedir — tanpa _MEI)
+New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+try {{
+  # Hapus _internal lama agar tidak campur versi
+  $oldInternal = Join-Path $installDir '_internal'
+  if (Test-Path -LiteralPath $oldInternal) {{
+    Remove-Item -LiteralPath $oldInternal -Recurse -Force -ErrorAction Stop
+  }}
+  Copy-Item -Path (Join-Path $sourceApp '*') -Destination $installDir -Recurse -Force -ErrorAction Stop
+}} catch {{
+  Fail "Gagal memasang update: $($_.Exception.Message)"
+}}
+
+if (-not (Test-Path -LiteralPath $targetExe)) {{
+  Fail "NetworkTools.exe tidak ada setelah pasang"
+}}
+
+Start-Sleep -Seconds 2
+
+Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+$arg = '/c timeout /t 3 /nobreak >nul & set "_MEIPASS=" & set "_MEIPASS2=" & set "PYTHONHOME=" & set "PYTHONPATH=" & start "" /D "' + $installDir + '" "' + $targetExe + '"'
+try {{
+  $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument $arg
+  $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+  $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+  Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+  Start-ScheduledTask -TaskName $taskName
+}} catch {{
+  try {{
+    Start-Process -FilePath 'cmd.exe' -ArgumentList $arg -WindowStyle Hidden
+  }} catch {{
+    Fail "Gagal menjalankan aplikasi baru: $($_.Exception.Message)"
+  }}
+}}
+
+Start-Sleep -Seconds 2
+Remove-Item -LiteralPath $pkg -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 12
+Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 """
-        )
+    ps1.write_text(script, encoding="utf-8")
 
-    bat.write_text(body, encoding="utf-8")
-
-    clean_env = _clean_environ()
     flags = 0
     flags |= getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
     flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
     flags |= 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
 
-    # start /min agar jendela cmd tidak mengganggu; env bersih
     subprocess.Popen(
-        ["cmd.exe", "/c", "start", "", "/min", str(bat)],
-        cwd=str(workdir),
-        env=clean_env,
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+            str(ps1),
+        ],
+        cwd=str(install),
+        env=_clean_environ(),
         creationflags=flags,
         close_fds=True,
         stdin=subprocess.DEVNULL,
