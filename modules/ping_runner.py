@@ -57,6 +57,12 @@ class PingRunner:
                 text = line.rstrip("\r\n")
                 if text:
                     self.on_line(text)
+                    try:
+                        from modules.ping_sound import notify_ping_line
+
+                        notify_ping_line(text)
+                    except Exception:
+                        pass
         except Exception as exc:
             self.on_line(f"Error: {exc}")
         finally:
