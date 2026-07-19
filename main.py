@@ -111,9 +111,13 @@ class NetworkToolsApp(ctk.CTk):
         self._speedtest_click_tries = 0
         self._sysinfo_poll_job: str | None = None
         self._sysinfo_value_labels: dict[str, Any] = {}
+        self._sysinfo_cache: dict[str, str] | None = None
+        self._sysinfo_loaded = False
 
         self._header = ctk.CTkFrame(self, fg_color="transparent")
         self._header.pack(fill="x", padx=28, pady=(18, 4))
+        self._sysinfo_strip = ctk.CTkFrame(self, fg_color="transparent")
+        self._sysinfo_strip.pack(fill="x", padx=28, pady=(0, 0))
         self._content = ctk.CTkFrame(self, fg_color="transparent")
         self._content.pack(fill="both", expand=True, padx=24, pady=8)
         self._action_bar = ctk.CTkFrame(self, fg_color="transparent")
@@ -624,7 +628,17 @@ class NetworkToolsApp(ctk.CTk):
         combo.pack(side="right")
 
     def _build_sysinfo_bar(self, parent: ctk.CTkFrame) -> None:
-        """Fluent status strip: label kecil + nilai tegas, dipisah garis halus."""
+        """Status strip sekali dibuat; data statis di-cache, latensi update tiap 5 dtk."""
+        # Sudah ada — jangan rebuild / jangan reload data
+        if self._sysinfo_value_labels and parent.winfo_children():
+            self._show_sysinfo_strip()
+            self._apply_sysinfo_cache_to_labels()
+            self._ensure_latency_poll()
+            return
+
+        for child in parent.winfo_children():
+            child.destroy()
+
         bar = ctk.CTkFrame(
             parent,
             fg_color=COLORS["panel"],
@@ -636,7 +650,6 @@ class NetworkToolsApp(ctk.CTk):
         bar.pack(fill="x", pady=(10, 0))
         bar.pack_propagate(False)
 
-        # Accent rail di kiri
         rail = ctk.CTkFrame(bar, fg_color=COLORS["accent"], width=4, corner_radius=0)
         rail.pack(side="left", fill="y")
 
@@ -652,10 +665,9 @@ class NetworkToolsApp(ctk.CTk):
             ("UPTIME", "…", False),
             ("WINDOWS", "…", False),
         ]
-        self._sysinfo_value_labels: dict[str, ctk.CTkLabel] = {}
+        self._sysinfo_value_labels = {}
 
         for i in range(len(metrics)):
-            # CPU & WINDOWS dapat ruang lebih untuk teks lengkap
             weight = 2 if metrics[i][0] in {"CPU", "WINDOWS"} else 1
             body.grid_columnconfigure(i * 2, weight=weight, uniform="")
             if i < len(metrics) - 1:
@@ -697,29 +709,49 @@ class NetworkToolsApp(ctk.CTk):
                 )
                 sep.grid(row=0, column=idx * 2 + 1, sticky="ns", padx=8, pady=2)
 
-        self.after(40, self._refresh_sysinfo_async)
-        # Refresh ringan setiap 60 detik (RAM / uptime / latensi)
+        self._show_sysinfo_strip()
+        if self._sysinfo_cache:
+            self._apply_sysinfo_cache_to_labels()
+            self._ensure_latency_poll()
+        else:
+            self.after(40, self._load_sysinfo_once)
+
+    def _show_sysinfo_strip(self) -> None:
+        try:
+            if not self._sysinfo_strip.winfo_ismapped():
+                self._sysinfo_strip.pack(fill="x", padx=28, pady=(0, 0), before=self._content)
+        except Exception:
+            pass
+
+    def _hide_sysinfo_strip(self) -> None:
+        try:
+            self._sysinfo_strip.pack_forget()
+        except Exception:
+            pass
+
+    def _apply_sysinfo_cache_to_labels(self) -> None:
+        if self._sysinfo_cache:
+            self._apply_sysinfo(self._sysinfo_cache)
+
+    def _ensure_latency_poll(self) -> None:
         if getattr(self, "_sysinfo_poll_job", None):
-            try:
-                self.after_cancel(self._sysinfo_poll_job)
-            except Exception:
-                pass
-        self._sysinfo_poll_job = self.after(60_000, self._poll_sysinfo)
+            return
+        self._sysinfo_poll_job = self.after(5_000, self._poll_latency)
 
-    def _poll_sysinfo(self) -> None:
-        self._sysinfo_poll_job = None
-        if getattr(self, "_sysinfo_value_labels", None):
-            self._refresh_sysinfo_async()
-            self._sysinfo_poll_job = self.after(60_000, self._poll_sysinfo)
-
-    def _refresh_sysinfo_async(self) -> None:
+    def _load_sysinfo_once(self) -> None:
+        """Load host/IP/CPU/RAM/uptime/windows sekali + latensi awal."""
         import threading
+
+        if self._sysinfo_loaded:
+            self._apply_sysinfo_cache_to_labels()
+            self._ensure_latency_poll()
+            return
 
         def worker() -> None:
             try:
                 from modules.system_info import collect_system_info
 
-                info = collect_system_info()
+                info = dict(collect_system_info())
             except Exception:
                 info = {
                     "hostname": "-",
@@ -730,7 +762,47 @@ class NetworkToolsApp(ctk.CTk):
                     "uptime": "-",
                     "windows": "-",
                 }
-            self.after(0, lambda: self._apply_sysinfo(info))
+
+            def apply() -> None:
+                self._sysinfo_cache = info
+                self._sysinfo_loaded = True
+                self._apply_sysinfo(info)
+                self._ensure_latency_poll()
+
+            self.after(0, apply)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _poll_latency(self) -> None:
+        """Hanya refresh latensi tiap 5 detik."""
+        self._sysinfo_poll_job = None
+        if not getattr(self, "_sysinfo_value_labels", None):
+            return
+
+        import threading
+
+        def worker() -> None:
+            try:
+                from modules.system_info import latency_to_dns
+
+                latency = latency_to_dns("8.8.8.8")
+            except Exception:
+                latency = "-"
+
+            def apply() -> None:
+                if self._sysinfo_cache is not None:
+                    self._sysinfo_cache["latency"] = latency
+                label = self._sysinfo_value_labels.get("LATENSI")
+                if label is None:
+                    return
+                try:
+                    if label.winfo_exists():
+                        label.configure(text=latency)
+                except Exception:
+                    pass
+                self._sysinfo_poll_job = self.after(5_000, self._poll_latency)
+
+            self.after(0, apply)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -759,13 +831,7 @@ class NetworkToolsApp(ctk.CTk):
 
     # ----- navigation -----
     def _clear_frame(self, frame: ctk.CTkFrame) -> None:
-        if frame is self._header and getattr(self, "_sysinfo_poll_job", None):
-            try:
-                self.after_cancel(self._sysinfo_poll_job)
-            except Exception:
-                pass
-            self._sysinfo_poll_job = None
-            self._sysinfo_value_labels = {}
+        # Jangan batalkan poll latensi / hapus cache saat ganti menu
         for child in frame.winfo_children():
             child.destroy()
 
@@ -833,7 +899,7 @@ class NetworkToolsApp(ctk.CTk):
         # Tema di baris atas (parent = top)
         self._header_actions(top)
 
-        self._build_sysinfo_bar(self._header)
+        self._build_sysinfo_bar(self._sysinfo_strip)
 
         grid = ctk.CTkFrame(self._content, fg_color="transparent")
         grid.pack(fill="both", expand=True)
@@ -902,6 +968,7 @@ class NetworkToolsApp(ctk.CTk):
 
         if key == "speedtest":
             # Speedtest: header ringkas tanpa strip sistem
+            self._hide_sysinfo_strip()
             ctk.CTkLabel(
                 self._header,
                 text=title,
@@ -920,7 +987,7 @@ class NetworkToolsApp(ctk.CTk):
             text_color=COLORS["text"],
         ).pack(side="left")
         self._header_actions(top)
-        self._build_sysinfo_bar(self._header)
+        self._build_sysinfo_bar(self._sysinfo_strip)
 
         # Tool-specific controls at top of content
         controls = ctk.CTkFrame(self._content, fg_color="transparent")
