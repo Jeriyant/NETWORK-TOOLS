@@ -641,19 +641,10 @@ class NetworkToolsApp(ctk.CTk):
                     apply_update_and_restart(dest)
 
                     def ok() -> None:
-                        # Tutup langsung — script updater menukar EXE di background.
+                        # Langsung keluar — tanpa dialog apa pun.
                         import os
 
                         state["closed"] = True
-                        try:
-                            dlg.grab_release()
-                            dlg.destroy()
-                        except Exception:
-                            pass
-                        try:
-                            self.destroy()
-                        except Exception:
-                            pass
                         os._exit(0)
 
                     self.after(0, ok)
