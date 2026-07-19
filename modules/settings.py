@@ -1,4 +1,4 @@
-"""Permanent built-in settings (no external config.json)."""
+﻿"""Permanent built-in settings (no external config.json)."""
 
 from __future__ import annotations
 
@@ -44,8 +44,8 @@ NETWORK_ADAPTER = ""  # empty = auto pick first Up adapter
 DEFAULT_THEME = "system"
 DEFAULT_LANG = "id"
 
-# App version — naikkan setiap rilis baru (harus cocok dengan tag GitHub Release)
-APP_VERSION = "1.35"
+# App version â€” naikkan setiap rilis baru (harus cocok dengan tag GitHub Release)
+APP_VERSION = "1.36"
 UPDATE_REPO = "https://github.com/Jeriyant/NETWORK-TOOLS"
 
 
@@ -110,9 +110,9 @@ def host_dropdown_values() -> list[str]:
         name = h["name"]
         ip = h["ip"]
         if ip == "auto":
-            values.append(f"{name} — (otomatis cek gateway)")
+            values.append(f"{name} â€” (otomatis cek gateway)")
         else:
-            values.append(f"{name} — {ip}")
+            values.append(f"{name} â€” {ip}")
     return values
 
 
