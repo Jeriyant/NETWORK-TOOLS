@@ -12,16 +12,30 @@ from typing import Any, Callable
 import customtkinter as ctk
 
 from modules.admin import is_admin, relaunch_as_admin
+from modules.app_icon import app_icon_path
 from modules.clear_cache import ClearCacheRunner
 from modules.fix_anydesk import AnydeskRunner
 from modules.fix_printer import FixPrinterRunner
 from modules.fix_rdp import FixRdpRunner
+from modules.i18n import (
+    DEFAULT_LANG as I18N_DEFAULT,
+    get_lang,
+    lang_dropdown_values,
+    lang_from_label,
+    mode_from_theme_label,
+    set_lang,
+    t,
+    theme_dropdown_values as i18n_theme_values,
+    theme_label,
+)
 from modules.installed_apps import InstalledAppsRunner, format_apps_text
 from modules.ip_scanner import IpScannerRunner
 from modules.ping_runner import PingRunner
+from modules.prefs import load_prefs, save_prefs
 from modules.refresh_network import RefreshNetworkRunner
 from modules.security_check import SecurityCheckRunner, format_security_text
 from modules.settings import (
+    DEFAULT_LANG,
     DEFAULT_THEME,
     DNS_LEAK_URL,
     NETWORK_ADAPTER,
@@ -38,12 +52,9 @@ from modules.telegram_share import (
     send_via_telegram,
 )
 from modules.theme import (
-    MODE_LABELS,
     THEMES,
-    mode_from_label,
     next_mode,
     resolve_theme,
-    theme_dropdown_values,
 )
 from modules.traceroute_runner import TracerouteRunner
 
@@ -55,20 +66,33 @@ AUTO_RUN_TOOLS = frozenset({"refresh", "cache", "printer", "fixrdp"})
 # Active palette (updated when theme changes)
 COLORS: dict[str, str] = dict(THEMES["light"])
 
-TOOLS = [
-    ("ping", "Ping", "●", "Ping terus ke host dari daftar"),
-    ("traceroute", "Traceroute", "↗", "tracert -d ke alamat IP/host"),
-    ("speedtest", "Speedtest", "⚡", "Speedtest di browser bawaan aplikasi"),
-    ("dns", "DNS Test", "◎", "DNS leak test di browser bawaan"),
-    ("ipscan", "IP Scanner", "▦", "Scan host hidup di subnet PC ini"),
-    ("apps", "Daftar Aplikasi", "▤", "Tampilkan aplikasi terinstall di Windows"),
-    ("security", "Cek Keamanan", "🛡", "Firewall, Defender & Windows Update"),
-    ("refresh", "Refresh Network", "↻", "Otomatis renew DHCP (Admin)"),
-    ("printer", "Fix Printer", "🖨", "Otomatis clear spooler (Admin)"),
-    ("fixrdp", "Fix RDP", "⧉", "Reset RDP client agar fresh (Admin)"),
-    ("cache", "Clear Cache", "⌫", "Otomatis hapus TEMP & RDP6 (Admin)"),
-    ("anydesk", "Anydesk", "⌨", "Tutup AnyDesk lama, buka baru, salin ID ke Telegram"),
+# (key, icon) — title/desc dari i18n
+TOOL_DEFS: list[tuple[str, str]] = [
+    ("ping", "●"),
+    ("traceroute", "↗"),
+    ("speedtest", "⚡"),
+    ("dns", "◎"),
+    ("ipscan", "▦"),
+    ("apps", "▤"),
+    ("security", "🛡"),
+    ("refresh", "↻"),
+    ("printer", "🖨"),
+    ("fixrdp", "⧉"),
+    ("cache", "⌫"),
+    ("anydesk", "⌨"),
 ]
+
+
+def tools_for_ui() -> list[tuple[str, str, str, str]]:
+    """Return (key, title, icon, desc) in current language."""
+    return [
+        (key, t(f"tool.{key}.title"), icon, t(f"tool.{key}.desc"))
+        for key, icon in TOOL_DEFS
+    ]
+
+
+# Backward-compatible alias — prefer tools_for_ui() for live language
+TOOLS = TOOL_DEFS
 
 SEND_TOOLS = {"ping", "traceroute", "dns", "ipscan", "speedtest", "apps", "security"}
 TEXT_SEND_TOOLS = frozenset({"apps", "security"})
@@ -103,13 +127,18 @@ class ConsoleView(ctk.CTkFrame):
 class NetworkToolsApp(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
-        self.theme_mode = DEFAULT_THEME
+        prefs = load_prefs()
+        self.theme_mode = str(prefs.get("theme") or DEFAULT_THEME)
+        lang = str(prefs.get("lang") or DEFAULT_LANG or I18N_DEFAULT)
+        set_lang(lang)
+        self.lang = get_lang()
         self._apply_palette(refresh_ui=False)
 
-        self.title(f"Network Tools  v{APP_VERSION}")
+        self.title(t("app.title", version=APP_VERSION))
         self.geometry("980x700")
         self.minsize(860, 620)
         self.configure(fg_color=COLORS["bg"])
+        self._apply_window_icon()
 
         self._runner_stop: Callable[[], None] | None = None
         self._current_tool: str | None = None
@@ -165,6 +194,31 @@ class NetworkToolsApp(ctk.CTk):
         except Exception:
             pass
 
+    def _apply_window_icon(self) -> None:
+        """Samakan icon jendela dengan icon file EXE."""
+        path = app_icon_path()
+        if not path:
+            return
+        try:
+            self.iconbitmap(default=str(path))
+        except Exception:
+            try:
+                self.iconbitmap(str(path))
+            except Exception:
+                pass
+        try:
+            from PIL import Image, ImageTk
+
+            img = Image.open(path)
+            # Keep reference so Tk doesn't GC the photo
+            self._app_icon_photo = ImageTk.PhotoImage(img.resize((32, 32)))
+            self.iconphoto(True, self._app_icon_photo)
+        except Exception:
+            pass
+
+    def _persist_prefs(self) -> None:
+        save_prefs(theme=self.theme_mode, lang=get_lang())
+
     def _maybe_resume_elevated_tool(self) -> None:
         """Setelah UAC, buka ulang tool & jalankan otomatis."""
         import sys
@@ -176,7 +230,7 @@ class NetworkToolsApp(ctk.CTk):
             key = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else ""
         except Exception:
             return
-        if key not in {t[0] for t in TOOLS}:
+        if key not in {t[0] for t in TOOL_DEFS}:
             return
         if not is_admin():
             return
@@ -214,7 +268,7 @@ class NetworkToolsApp(ctk.CTk):
             notes = notes[:500] + "…"
 
         dlg = ctk.CTkToplevel(self)
-        dlg.title("Update Wajib — Network Tools")
+        dlg.title(t("update.title"))
         dlg.geometry("600x580")
         dlg.minsize(560, 540)
         dlg.resizable(False, False)
@@ -278,7 +332,7 @@ class NetworkToolsApp(ctk.CTk):
                 if not getattr(sys, "frozen", False):
                     messagebox.showinfo(
                         "Update",
-                        "Mode development: unduh EXE dari GitHub, lalu ganti manual.",
+                        t("update.dev"),
                         parent=self,
                     )
                     return
@@ -290,7 +344,7 @@ class NetworkToolsApp(ctk.CTk):
 
         ctk.CTkButton(
             footer,
-            text="Update Sekarang",
+            text=t("update.now"),
             font=ctk.CTkFont(family="Segoe UI Semibold", size=15),
             height=46,
             corner_radius=10,
@@ -302,7 +356,7 @@ class NetworkToolsApp(ctk.CTk):
 
         ctk.CTkLabel(
             footer,
-            text="Tanpa update, aplikasi tidak dapat digunakan.",
+            text=t("update.footer"),
             font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color=COLORS["muted"],
         ).pack(pady=(10, 0))
@@ -316,19 +370,19 @@ class NetworkToolsApp(ctk.CTk):
 
         ctk.CTkLabel(
             head_inner,
-            text="UPDATE WAJIB",
+            text=t("update.badge"),
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             text_color=COLORS["on_accent"],
         ).pack(anchor="w")
         ctk.CTkLabel(
             head_inner,
-            text="Versi baru tersedia",
+            text=t("update.heading"),
             font=ctk.CTkFont(family="Segoe UI Semibold", size=22),
             text_color=COLORS["on_accent"],
         ).pack(anchor="w", pady=(6, 0))
         ctk.CTkLabel(
             head_inner,
-            text="Pasang pembaruan untuk melanjutkan.",
+            text=t("update.sub"),
             font=ctk.CTkFont(family="Segoe UI", size=13),
             text_color=COLORS["on_accent"],
         ).pack(anchor="w", pady=(8, 0))
@@ -364,7 +418,7 @@ class NetworkToolsApp(ctk.CTk):
 
         left = ctk.CTkFrame(ver_row, fg_color="transparent")
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        _ver_chip(left, "SAAT INI", f"v{APP_VERSION}", False)
+        _ver_chip(left, t("update.current"), f"v{APP_VERSION}", False)
 
         ctk.CTkLabel(
             ver_row,
@@ -375,11 +429,11 @@ class NetworkToolsApp(ctk.CTk):
 
         right = ctk.CTkFrame(ver_row, fg_color="transparent")
         right.grid(row=0, column=2, sticky="nsew", padx=(8, 0))
-        _ver_chip(right, "TERBARU", f"v{ver}", True)
+        _ver_chip(right, t("update.latest"), f"v{ver}", True)
 
         ctk.CTkLabel(
             body,
-            text="Catatan rilis",
+            text=t("update.notes"),
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             text_color=COLORS["muted"],
             anchor="w",
@@ -405,7 +459,7 @@ class NetworkToolsApp(ctk.CTk):
             activate_scrollbars=True,
         )
         notes_box.pack(fill="both", expand=True, padx=10, pady=10)
-        notes_box.insert("1.0", notes or "Pembaruan keamanan & perbaikan stabilitas.")
+        notes_box.insert("1.0", notes or t("update.notes_fallback"))
         notes_box.configure(state="disabled")
 
         def _show_modal() -> None:
@@ -606,12 +660,15 @@ class NetworkToolsApp(ctk.CTk):
         ctk.set_appearance_mode("light" if resolved == "light" else "dark")
         ctk.set_default_color_theme("blue")
         self.configure(fg_color=COLORS["bg"])
+        self.title(t("app.title", version=APP_VERSION))
         if hasattr(self, "_footer"):
             self._footer.configure(fg_color=COLORS["panel"])
         if hasattr(self, "_footer_label"):
             self._footer_label.configure(text_color=COLORS["muted"])
         if not refresh_ui:
             return
+        # Rebuild sysinfo strip labels in new language/theme
+        self._sysinfo_value_labels = {}
         tool = self._current_tool
         if tool:
             self.open_tool(tool)
@@ -620,25 +677,37 @@ class NetworkToolsApp(ctk.CTk):
 
     def _cycle_theme(self) -> None:
         self.theme_mode = next_mode(self.theme_mode)
+        self._persist_prefs()
         self._apply_palette(refresh_ui=True)
 
     def _on_theme_dropdown(self, choice: str) -> None:
-        mode = mode_from_label(choice)
+        mode = mode_from_theme_label(choice)
         if mode == self.theme_mode:
             return
         self.theme_mode = mode
+        self._persist_prefs()
+        self._apply_palette(refresh_ui=True)
+
+    def _on_lang_dropdown(self, choice: str) -> None:
+        lang = lang_from_label(choice)
+        if lang == get_lang():
+            return
+        set_lang(lang)
+        self.lang = lang
+        self._persist_prefs()
         self._apply_palette(refresh_ui=True)
 
     def _header_actions(self, parent: ctk.CTkFrame | None = None) -> None:
         host = parent if parent is not None else self._header
         actions = ctk.CTkFrame(host, fg_color="transparent")
         actions.pack(side="right", pady=4)
-        values = theme_dropdown_values()
-        current = MODE_LABELS.get(self.theme_mode, values[0])
-        combo = ctk.CTkOptionMenu(
+
+        theme_values = i18n_theme_values()
+        theme_current = theme_label(self.theme_mode)
+        theme_combo = ctk.CTkOptionMenu(
             actions,
-            values=values,
-            width=180,
+            values=theme_values,
+            width=170,
             height=34,
             fg_color=COLORS["tile"],
             button_color=COLORS["accent"],
@@ -648,8 +717,26 @@ class NetworkToolsApp(ctk.CTk):
             text_color=COLORS["text"],
             command=self._on_theme_dropdown,
         )
-        combo.set(current if current in values else values[0])
-        combo.pack(side="right")
+        theme_combo.set(theme_current if theme_current in theme_values else theme_values[0])
+        theme_combo.pack(side="right", padx=(8, 0))
+
+        lang_values = lang_dropdown_values()
+        lang_current = t("lang.en") if get_lang() == "en" else t("lang.id")
+        lang_combo = ctk.CTkOptionMenu(
+            actions,
+            values=lang_values,
+            width=170,
+            height=34,
+            fg_color=COLORS["tile"],
+            button_color=COLORS["accent"],
+            button_hover_color=COLORS["accent_dim"],
+            dropdown_fg_color=COLORS["panel"],
+            dropdown_hover_color=COLORS["tile_hover"],
+            text_color=COLORS["text"],
+            command=self._on_lang_dropdown,
+        )
+        lang_combo.set(lang_current if lang_current in lang_values else lang_values[0])
+        lang_combo.pack(side="right")
 
     def _build_sysinfo_bar(self, parent: ctk.CTkFrame) -> None:
         """Status strip sekali dibuat; data statis di-cache, latensi update tiap 5 dtk."""
@@ -681,29 +768,29 @@ class NetworkToolsApp(ctk.CTk):
         body.pack(fill="both", expand=True, padx=(14, 16), pady=10)
 
         metrics = [
-            ("HOST", "…", True),
-            ("IP", "…", True),
-            ("LATENSI", "…", True),
-            ("CPU", "…", False),
-            ("RAM", "…", False),
-            ("UPTIME", "…", False),
-            ("WINDOWS", "…", False),
+            ("hostname", t("sys.host"), "…", True),
+            ("ip", t("sys.ip"), "…", True),
+            ("latency", t("sys.latency"), "…", True),
+            ("cpu", t("sys.cpu"), "…", False),
+            ("ram", t("sys.ram"), "…", False),
+            ("uptime", t("sys.uptime"), "…", False),
+            ("windows", t("sys.windows"), "…", False),
         ]
         self._sysinfo_value_labels = {}
 
         for i in range(len(metrics)):
-            weight = 2 if metrics[i][0] in {"CPU", "WINDOWS"} else 1
+            weight = 2 if metrics[i][0] in {"cpu", "windows"} else 1
             body.grid_columnconfigure(i * 2, weight=weight, uniform="")
             if i < len(metrics) - 1:
                 body.grid_columnconfigure(i * 2 + 1, weight=0)
 
-        for idx, (key, placeholder, emphasize) in enumerate(metrics):
+        for idx, (cache_key, label, placeholder, emphasize) in enumerate(metrics):
             cell = ctk.CTkFrame(body, fg_color="transparent")
             cell.grid(row=0, column=idx * 2, sticky="nsew", padx=(0, 4))
 
             ctk.CTkLabel(
                 cell,
-                text=key,
+                text=label,
                 font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
                 text_color=COLORS["muted"],
                 anchor="w",
@@ -718,11 +805,11 @@ class NetworkToolsApp(ctk.CTk):
                 ),
                 text_color=COLORS["accent"] if emphasize else COLORS["text"],
                 anchor="w",
-                wraplength=200 if key in {"CPU", "WINDOWS"} else 0,
+                wraplength=200 if cache_key in {"cpu", "windows"} else 0,
                 justify="left",
             )
             value.pack(anchor="w", pady=(2, 0))
-            self._sysinfo_value_labels[key] = value
+            self._sysinfo_value_labels[cache_key] = value
 
             if idx < len(metrics) - 1:
                 sep = ctk.CTkFrame(
@@ -816,7 +903,7 @@ class NetworkToolsApp(ctk.CTk):
             def apply() -> None:
                 if self._sysinfo_cache is not None:
                     self._sysinfo_cache["latency"] = latency
-                label = self._sysinfo_value_labels.get("LATENSI")
+                label = self._sysinfo_value_labels.get("latency")
                 if label is None:
                     return
                 try:
@@ -835,13 +922,13 @@ class NetworkToolsApp(ctk.CTk):
         if not labels:
             return
         mapping = {
-            "HOST": info.get("hostname", "-"),
-            "IP": info.get("ip", "-"),
-            "LATENSI": info.get("latency", "-"),
-            "CPU": info.get("cpu", "-"),
-            "RAM": info.get("ram", "-"),
-            "UPTIME": info.get("uptime", "-"),
-            "WINDOWS": info.get("windows", "-"),
+            "hostname": info.get("hostname", "-"),
+            "ip": info.get("ip", "-"),
+            "latency": info.get("latency", "-"),
+            "cpu": info.get("cpu", "-"),
+            "ram": info.get("ram", "-"),
+            "uptime": info.get("uptime", "-"),
+            "windows": info.get("windows", "-"),
         }
         for key, text in mapping.items():
             label = labels.get(key)
@@ -909,31 +996,32 @@ class NetworkToolsApp(ctk.CTk):
         brand.pack(side="left")
         ctk.CTkLabel(
             brand,
-            text="NETWORK TOOLS",
+            text=t("app.brand"),
             font=ctk.CTkFont(family="Segoe UI", size=28, weight="bold"),
             text_color=COLORS["accent"],
         ).pack(anchor="w")
         ctk.CTkLabel(
             brand,
-            text="IT Networking utilities — ping, DNS, speedtest & perbaikan cepat",
+            text=t("app.tagline"),
             font=ctk.CTkFont(family="Segoe UI", size=13),
             text_color=COLORS["muted"],
         ).pack(anchor="w", pady=(2, 0))
 
-        # Tema di baris atas (parent = top)
+        # Tema + bahasa di baris atas (parent = top)
         self._header_actions(top)
 
         self._build_sysinfo_bar(self._sysinfo_strip)
 
         grid = ctk.CTkFrame(self._content, fg_color="transparent")
         grid.pack(fill="both", expand=True)
+        tools = tools_for_ui()
         for i in range(4):
             grid.grid_columnconfigure(i, weight=1, uniform="tiles")
-        rows = (len(TOOLS) + 3) // 4
+        rows = (len(tools) + 3) // 4
         for r in range(rows):
             grid.grid_rowconfigure(r, weight=1, uniform="tiles")
 
-        for idx, (key, title, icon, desc) in enumerate(TOOLS):
+        for idx, (key, title, icon, desc) in enumerate(tools):
             r, c = divmod(idx, 4)
             tile = ctk.CTkFrame(
                 grid,
@@ -964,7 +1052,7 @@ class NetworkToolsApp(ctk.CTk):
             ).pack(anchor="w")
             btn = ctk.CTkButton(
                 inner,
-                text="Buka",
+                text=t("app.open"),
                 width=90,
                 height=32,
                 fg_color=COLORS["accent"],
@@ -1005,7 +1093,7 @@ class NetworkToolsApp(ctk.CTk):
         except Exception:
             pass
 
-        title = next((t for k, t, *_ in TOOLS if k == key), key)
+        title = t(f"tool.{key}.title") if key in {k for k, _ in TOOL_DEFS} else key
 
         if key in ("speedtest", "dns"):
             self._hide_sysinfo_strip()
@@ -1056,7 +1144,7 @@ class NetworkToolsApp(ctk.CTk):
         self._action_bar.pack(fill="x", padx=24, pady=(0, 8), before=self._footer)
         ctk.CTkButton(
             self._action_bar,
-            text="Kembali",
+            text=t("app.back"),
             width=120,
             height=36,
             fg_color=COLORS["danger"],
@@ -1067,7 +1155,7 @@ class NetworkToolsApp(ctk.CTk):
         if key in SEND_TOOLS:
             ctk.CTkButton(
                 self._action_bar,
-                text="Kirim",
+                text=t("app.send"),
                 width=120,
                 height=36,
                 fg_color=COLORS["accent"],
@@ -1098,7 +1186,7 @@ class NetworkToolsApp(ctk.CTk):
         self._action_bar.pack(fill="x", padx=24, pady=(0, 8), before=self._footer)
         ctk.CTkButton(
             self._action_bar,
-            text="Kembali",
+            text=t("app.back"),
             width=120,
             height=36,
             fg_color=COLORS["danger"],
@@ -1107,7 +1195,7 @@ class NetworkToolsApp(ctk.CTk):
         ).pack(side="right", padx=(8, 0))
         ctk.CTkButton(
             self._action_bar,
-            text="Kirim",
+            text=t("app.send"),
             width=120,
             height=36,
             fg_color=COLORS["accent"],
@@ -1132,7 +1220,7 @@ class NetworkToolsApp(ctk.CTk):
         top.pack(fill="x")
         ctk.CTkLabel(
             top,
-            text="Daftar Aplikasi",
+            text=t("tool.apps.title"),
             font=ctk.CTkFont(family="Segoe UI Semibold", size=24),
             text_color=COLORS["text"],
         ).pack(side="left")
@@ -1152,7 +1240,7 @@ class NetworkToolsApp(ctk.CTk):
 
         count_lbl = ctk.CTkLabel(
             sum_row,
-            text="Memuat daftar aplikasi…",
+            text=t("apps.loading"),
             font=ctk.CTkFont(family="Segoe UI Semibold", size=15),
             text_color=COLORS["text"],
             anchor="w",
@@ -1161,7 +1249,7 @@ class NetworkToolsApp(ctk.CTk):
 
         btn_refresh = ctk.CTkButton(
             sum_row,
-            text="Refresh",
+            text=t("app.refresh"),
             width=100,
             height=32,
             fg_color=COLORS["accent"],
@@ -1184,7 +1272,7 @@ class NetworkToolsApp(ctk.CTk):
         cols.grid_columnconfigure(0, weight=4, minsize=200)
         cols.grid_columnconfigure(1, weight=2, minsize=100)
         cols.grid_columnconfigure(2, weight=3, minsize=140)
-        for i, text in enumerate(("NAMA APLIKASI", "VERSI", "PUBLISHER")):
+        for i, text in enumerate((t("apps.col.name"), t("apps.col.version"), t("apps.col.publisher"))):
             ctk.CTkLabel(
                 cols,
                 text=text,
@@ -1198,7 +1286,7 @@ class NetworkToolsApp(ctk.CTk):
 
         empty = ctk.CTkLabel(
             scroll,
-            text="Mengambil daftar dari Windows…",
+            text=t("apps.fetching"),
             font=ctk.CTkFont(family="Segoe UI", size=13),
             text_color=COLORS["muted"],
         )
@@ -1217,12 +1305,12 @@ class NetworkToolsApp(ctk.CTk):
             self._apps_list = apps
             host = get_hostname()
             self._send_text_payload = format_apps_text(apps, hostname=host)
-            count_lbl.configure(text=f"{len(apps)} aplikasi terinstall")
+            count_lbl.configure(text=t("apps.count", n=len(apps)))
             _clear()
             if not apps:
                 ctk.CTkLabel(
                     scroll,
-                    text="Tidak ada aplikasi terdeteksi.",
+                    text=t("apps.empty"),
                     font=ctk.CTkFont(family="Segoe UI", size=13),
                     text_color=COLORS["muted"],
                 ).pack(pady=36)
@@ -1266,7 +1354,7 @@ class NetworkToolsApp(ctk.CTk):
 
         def on_error(msg: str) -> None:
             def ui() -> None:
-                count_lbl.configure(text="Gagal memuat daftar")
+                count_lbl.configure(text=t("apps.fail"))
                 _clear()
                 ctk.CTkLabel(
                     scroll,
@@ -1278,11 +1366,11 @@ class NetworkToolsApp(ctk.CTk):
             self.after(0, ui)
 
         def load() -> None:
-            count_lbl.configure(text="Memuat daftar aplikasi…")
+            count_lbl.configure(text=t("apps.loading"))
             _clear()
             empty_lbl = ctk.CTkLabel(
                 scroll,
-                text="Mengambil daftar dari Windows…",
+                text=t("apps.fetching"),
                 font=ctk.CTkFont(family="Segoe UI", size=13),
                 text_color=COLORS["muted"],
             )
@@ -1304,7 +1392,7 @@ class NetworkToolsApp(ctk.CTk):
         top.pack(fill="x")
         ctk.CTkLabel(
             top,
-            text="Cek Keamanan",
+            text=t("tool.security.title"),
             font=ctk.CTkFont(family="Segoe UI Semibold", size=24),
             text_color=COLORS["text"],
         ).pack(side="left")
@@ -1315,7 +1403,7 @@ class NetworkToolsApp(ctk.CTk):
         toolbar.pack(fill="x", pady=(0, 10))
         status_lbl = ctk.CTkLabel(
             toolbar,
-            text="Memeriksa status keamanan Windows…",
+            text=t("sec.checking"),
             font=ctk.CTkFont(family="Segoe UI", size=13),
             text_color=COLORS["muted"],
             anchor="w",
@@ -1323,7 +1411,7 @@ class NetworkToolsApp(ctk.CTk):
         status_lbl.pack(side="left", fill="x", expand=True)
         btn_refresh = ctk.CTkButton(
             toolbar,
-            text="Cek Ulang",
+            text=t("app.recheck"),
             width=110,
             height=32,
             fg_color=COLORS["accent"],
@@ -1356,9 +1444,9 @@ class NetworkToolsApp(ctk.CTk):
 
             ok_count = sum(1 for it in items if it.get("ok"))
             status_lbl.configure(
-                text=f"Hasil: {ok_count}/{len(items)} komponen aman"
+                text=t("sec.result", ok=ok_count, total=len(items))
                 if items
-                else "Tidak ada hasil"
+                else t("sec.none")
             )
 
             for item in items:
@@ -1409,7 +1497,7 @@ class NetworkToolsApp(ctk.CTk):
 
         def on_error(msg: str) -> None:
             def ui() -> None:
-                status_lbl.configure(text=f"Gagal: {msg}")
+                status_lbl.configure(text=t("sec.fail", msg=msg))
                 for w in list(cards.winfo_children()):
                     try:
                         w.destroy()
@@ -1425,7 +1513,7 @@ class NetworkToolsApp(ctk.CTk):
             self.after(0, ui)
 
         def load() -> None:
-            status_lbl.configure(text="Memeriksa status keamanan Windows…")
+            status_lbl.configure(text=t("sec.checking"))
             for w in list(cards.winfo_children()):
                 try:
                     w.destroy()
@@ -1433,7 +1521,7 @@ class NetworkToolsApp(ctk.CTk):
                     pass
             ctk.CTkLabel(
                 cards,
-                text="Mohon tunggu…",
+                text=t("sec.wait"),
                 font=ctk.CTkFont(family="Segoe UI", size=13),
                 text_color=COLORS["muted"],
             ).pack(pady=24)
@@ -1524,7 +1612,7 @@ class NetworkToolsApp(ctk.CTk):
 
         btn_start = ctk.CTkButton(
             tools,
-            text="Mulai Scan",
+            text=t("app.start_scan"),
             width=130,
             height=36,
             fg_color=COLORS["accent"],
@@ -1588,7 +1676,7 @@ class NetworkToolsApp(ctk.CTk):
         self._action_bar.pack(fill="x", padx=24, pady=(0, 8), before=self._footer)
         ctk.CTkButton(
             self._action_bar,
-            text="Kembali",
+            text=t("app.back"),
             width=120,
             height=36,
             fg_color=COLORS["danger"],
@@ -1597,7 +1685,7 @@ class NetworkToolsApp(ctk.CTk):
         ).pack(side="right", padx=(8, 0))
         ctk.CTkButton(
             self._action_bar,
-            text="Kirim",
+            text=t("app.send"),
             width=120,
             height=36,
             fg_color=COLORS["accent"],
@@ -1776,7 +1864,7 @@ class NetworkToolsApp(ctk.CTk):
         actions.pack(side="right")
         ctk.CTkButton(
             actions,
-            text="Kembali",
+            text=t("app.back"),
             width=100,
             height=32,
             fg_color=COLORS["danger"],
@@ -1785,7 +1873,7 @@ class NetworkToolsApp(ctk.CTk):
         ).pack(side="right", padx=(8, 0))
         ctk.CTkButton(
             actions,
-            text="Kirim",
+            text=t("app.send"),
             width=100,
             height=32,
             fg_color=COLORS["accent"],
@@ -1795,7 +1883,7 @@ class NetworkToolsApp(ctk.CTk):
         ).pack(side="right", padx=(8, 0))
         ctk.CTkButton(
             actions,
-            text="Muat Ulang",
+            text=t("app.reload"),
             width=110,
             height=32,
             fg_color=COLORS["tile"],
@@ -1879,7 +1967,7 @@ class NetworkToolsApp(ctk.CTk):
             self._action_bar.pack(fill="x", padx=12, pady=(0, 6), before=self._footer)
             ctk.CTkButton(
                 self._action_bar,
-                text="Kembali",
+                text=t("app.back"),
                 width=120,
                 height=36,
                 fg_color=COLORS["danger"],
@@ -1888,7 +1976,7 @@ class NetworkToolsApp(ctk.CTk):
             ).pack(side="right", padx=(8, 0))
             ctk.CTkButton(
                 self._action_bar,
-                text="Kirim",
+                text=t("app.send"),
                 width=120,
                 height=36,
                 fg_color=COLORS["accent"],

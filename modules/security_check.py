@@ -225,12 +225,14 @@ def collect_security_status() -> list[SecurityItem]:
 
 
 def format_security_text(items: list[SecurityItem], hostname: str = "") -> str:
-    lines = ["=== CEK KEAMANAN WINDOWS ==="]
+    from modules.i18n import t
+
+    lines = [t("sec.report.title")]
     if hostname:
-        lines.append(f"PC: {hostname}")
+        lines.append(t("apps.report.pc", host=hostname))
     lines.append("")
     for item in items:
-        mark = "OK" if item["ok"] else "PERHATIAN"
+        mark = t("sec.ok") if item["ok"] else t("sec.warn")
         lines.append(f"[{mark}] {item['label']}: {item['status']}")
         lines.append(f"     {item['detail']}")
         lines.append("")

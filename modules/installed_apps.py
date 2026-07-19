@@ -77,16 +77,20 @@ def collect_installed_apps() -> list[dict[str, str]]:
 
 
 def format_apps_text(apps: list[dict[str, str]], hostname: str = "") -> str:
-    lines = ["=== DAFTAR APLIKASI TERINSTALL ==="]
+    from modules.i18n import t
+
+    lines = [t("apps.report.title")]
     if hostname:
-        lines.append(f"PC: {hostname}")
-    lines.append(f"Total: {len(apps)}")
+        lines.append(t("apps.report.pc", host=hostname))
+    lines.append(t("apps.report.total", n=len(apps)))
     lines.append("")
     for idx, app in enumerate(apps, 1):
         ver = app.get("version") or "—"
         pub = app.get("publisher") or "—"
         lines.append(f"{idx}. {app['name']}")
-        lines.append(f"   Versi: {ver}  |  Publisher: {pub}")
+        lines.append(
+            f"   {t('apps.report.version')}: {ver}  |  {t('apps.report.publisher')}: {pub}"
+        )
     return "\n".join(lines)
 
 
