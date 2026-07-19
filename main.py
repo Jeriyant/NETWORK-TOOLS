@@ -1168,9 +1168,10 @@ class NetworkToolsApp(ctk.CTk):
         self._build_sysinfo_bar(self._sysinfo_strip)
 
         # Tool-specific controls at top of content
-        controls = ctk.CTkFrame(self._content, fg_color="transparent")
-        controls.pack(fill="x", pady=(0, 8))
-        self._build_tool_controls(key, controls)
+        if key not in AUTO_RUN_TOOLS:
+            controls = ctk.CTkFrame(self._content, fg_color="transparent")
+            controls.pack(fill="x", pady=(0, 8))
+            self._build_tool_controls(key, controls)
 
         self.console = ConsoleView(self._content)
         self.console.pack(fill="both", expand=True)
@@ -2370,17 +2371,6 @@ class NetworkToolsApp(ctk.CTk):
             self._build_ping(parent)
         elif key == "traceroute":
             self._build_traceroute(parent)
-        elif key in AUTO_RUN_TOOLS:
-            bar = ctk.CTkProgressBar(
-                parent,
-                width=160,
-                height=8,
-                mode="indeterminate",
-                progress_color=COLORS["accent"],
-                fg_color=COLORS["border"],
-            )
-            bar.pack(side="left", pady=10)
-            bar.start()
 
     def _build_ping(self, parent: ctk.CTkFrame) -> None:
         panel = ctk.CTkFrame(parent, fg_color=COLORS["panel"], corner_radius=10)
