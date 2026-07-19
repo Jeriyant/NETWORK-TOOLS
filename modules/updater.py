@@ -261,7 +261,10 @@ def apply_update_and_restart(downloaded_exe: Path, kind: str | None = None) -> N
     verify_exe_file(staged)
 
     bat = Path(tempfile.gettempdir()) / f"network_tools_apply_update_{pid}.cmd"
-    # cmd.exe — lebih andal daripada PowerShell DETACHED untuk self-replace
+    exe_name = current.name  # NetworkTools.exe
+    # cmd.exe — lebih andal daripada PowerShell DETACHED untuk self-replace.
+    # Penting: hapus _MEIPASS sebelum start agar bootloader tidak warisi folder
+    # extract lama (penyebab popup error DLL meski app akhirnya jalan).
     script = f"""@echo off
 setlocal EnableExtensions
 set "TARGET={current}"
@@ -272,6 +275,7 @@ set "OKLOG={ok_log}"
 set "OLDPID={pid}"
 set "RUNTIMEDIR={runtime_dir}"
 set "TEMPSRC={source}"
+set "EXENAME={exe_name}"
 
 rem Hapus log lama
 del /F /Q "%ERRLOG%" >nul 2>&1
@@ -281,7 +285,7 @@ rem 1) Tunggu proses app (PID) keluar
 set /a TRIES=0
 :waitpid
 tasklist /FI "PID eq %OLDPID%" 2>nul | findstr /R /C:" %OLDPID% " >nul
-if errorlevel 1 goto waitdone
+if errorlevel 1 goto waitall
 set /a TRIES+=1
 if %TRIES% GEQ 90 (
   echo Timeout menunggu PID %OLDPID% keluar.> "%ERRLOG%"
@@ -290,9 +294,20 @@ if %TRIES% GEQ 90 (
 timeout /t 1 /nobreak >nul
 goto waitpid
 
+rem 1b) Pastikan tidak ada NetworkTools.exe lain (bootloader parent)
+:waitall
+set /a TRIES=0
+:waitall_loop
+tasklist /FI "IMAGENAME eq %EXENAME%" 2>nul | find /I "%EXENAME%" >nul
+if errorlevel 1 goto waitdone
+set /a TRIES+=1
+if %TRIES% GEQ 90 goto waitdone
+timeout /t 1 /nobreak >nul
+goto waitall_loop
+
 :waitdone
-rem 2) Jeda agar bootloader / handle file lepas
-timeout /t 3 /nobreak >nul
+rem 2) Jeda agar handle file / _MEI lepas sepenuhnya
+timeout /t 5 /nobreak >nul
 
 if not exist "%STAGED%" (
   echo File staged hilang: %STAGED%> "%ERRLOG%"
@@ -323,7 +338,7 @@ if not exist "%TARGET%" (
   exit /b 4
 )
 
-rem 5) Verifikasi ukuran kasar (staged sudah dipindah; bandingkan dengan .old jika ada)
+rem 5) Verifikasi ukuran kasar
 for %%A in ("%TARGET%") do set SZNEW=%%~zA
 if %SZNEW% LSS 8000000 (
   echo EXE baru terlalu kecil ^(%SZNEW%^).> "%ERRLOG%"
@@ -334,14 +349,20 @@ if %SZNEW% LSS 8000000 (
   exit /b 5
 )
 
-rem 6) Bersihkan
+rem 6) Bersihkan runtime extract + file sementara
+if exist "%RUNTIMEDIR%" rd /S /Q "%RUNTIMEDIR%" >nul 2>&1
+timeout /t 2 /nobreak >nul
 if exist "%RUNTIMEDIR%" rd /S /Q "%RUNTIMEDIR%" >nul 2>&1
 del /F /Q "%TEMPSRC%" >nul 2>&1
 del /F /Q "%TARGET%.old" >nul 2>&1
 
 echo OK v-swap %SZNEW%> "%OKLOG%"
 
-rem 7) Jalankan EXE baru (env bersih via cmd baru)
+rem 7) Jalankan EXE baru — buang env PyInstaller agar tidak muncul error DLL palsu
+set "_MEIPASS="
+set "_MEIPASS2="
+set "PYTHONHOME="
+set "PYTHONPATH="
 timeout /t 1 /nobreak >nul
 start "" /D "%WORKDIR%" "%TARGET%"
 
@@ -350,45 +371,48 @@ del "%~f0" >nul 2>&1
 """
     bat.write_text(script, encoding="utf-8")
 
-    # ShellExecute memutus tree PyInstaller; cmd lebih stabil daripada PS detached
+    # Utamakan Popen + env bersih (tanpa _MEIPASS) agar start EXE baru tidak error DLL.
+    # ShellExecute sebagai cadangan.
     launched = False
+    flags = 0
+    flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+    flags |= getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+    flags |= 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
     try:
-        import ctypes
-
-        rc = int(
-            ctypes.windll.shell32.ShellExecuteW(
-                None,
-                "open",
-                "cmd.exe",
-                f'/c call "{bat}"',
-                str(workdir),
-                0,  # SW_HIDE
-            )
-        )
-        launched = rc > 32
-    except Exception:
-        launched = False
-
-    if not launched:
-        flags = 0
-        flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-        flags |= getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-        flags |= 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
-        # CREATE_NO_WINDOW sering dipakai; untuk updater file-replace lebih aman pakai new group
-        creation = flags
-        if hasattr(subprocess, "CREATE_NO_WINDOW"):
-            # Jangan CREATE_NO_WINDOW di sini — bisa memutus start exe anak
-            pass
         subprocess.Popen(
             ["cmd.exe", "/c", str(bat)],
             cwd=str(workdir),
             env=_clean_environ(),
-            creationflags=creation,
+            creationflags=flags,
             close_fds=True,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        launched = True
+    except Exception:
+        launched = False
+
+    if not launched:
+        try:
+            import ctypes
+
+            rc = int(
+                ctypes.windll.shell32.ShellExecuteW(
+                    None,
+                    "open",
+                    "cmd.exe",
+                    f'/c call "{bat}"',
+                    str(workdir),
+                    0,  # SW_HIDE
+                )
+            )
+            launched = rc > 32
+        except Exception:
+            launched = False
+
+    if not launched:
+        raise RuntimeError("Gagal menjalankan skrip update.")
 
 
 def cleanup_update_leftovers() -> None:
