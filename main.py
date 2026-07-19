@@ -350,7 +350,8 @@ class NetworkToolsApp(ctk.CTk):
                     messagebox.showinfo(
                         "Update",
                         "Unduhan selesai. Aplikasi akan ditutup dan diganti otomatis.\n"
-                        "Tunggu beberapa detik sampai jendela baru muncul.",
+                        "Tunggu sekitar 15–20 detik sampai jendela baru muncul.\n"
+                        "(Jangan buka EXE manual selama proses ini.)",
                         parent=self,
                     )
                     # Hard exit: pastikan bootloader PyInstaller selesai

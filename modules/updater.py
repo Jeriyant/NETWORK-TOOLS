@@ -22,6 +22,15 @@ USER_AGENT = "NetworkTools-Updater/1.0"
 # EXE build normal ~20MB+; di bawah ini hampir pasti rusak/bukan paket lengkap
 MIN_EXE_BYTES = 8 * 1024 * 1024
 
+# Env PyInstaller yang jika diwariskan ke EXE baru → crash python312.dll / _MEI
+_PYI_ENV_KEYS = (
+    "_MEIPASS",
+    "_MEIPASS2",
+    "PYTHONHOME",
+    "PYTHONPATH",
+    "PYTHONNOUSERSITE",
+)
+
 
 @dataclass
 class UpdateInfo:
@@ -193,18 +202,28 @@ def is_direct_exe_url(url: str) -> bool:
     return path.endswith(".exe")
 
 
+def _clean_environ() -> dict[str, str]:
+    """Salin env proses tanpa variabel PyInstaller yang merusak restart."""
+    env = {k: v for k, v in os.environ.items() if k.upper() not in {x.upper() for x in _PYI_ENV_KEYS}}
+    # Pastikan benar-benar tidak ada
+    for key in list(env):
+        if key.upper().startswith("_MEI"):
+            env.pop(key, None)
+    return env
+
+
 def apply_update_and_restart(downloaded_exe: Path) -> None:
     """
-    Ganti EXE yang sedang jalan lewat updater PowerShell terpisah.
+    Ganti EXE yang sedang jalan, lalu restart lewat Task Scheduler.
 
-    PyInstaller onefile punya proses bootloader induk yang baru menghapus
-    folder _MEI setelah child (app) keluar. Jika EXE baru dijalankan terlalu
-    cepat / sebagai anak dari proses lama, Windows sering gagal extract
-    python312.dll. Solusi:
-    - Jalankan updater lewat ShellExecute (bukan child tree Python)
-    - Tunggu PID app + semua instance EXE hilang
-    - Tunggu file EXE bisa di-rename (bootloader selesai)
-    - Jeda ekstra, baru swap + Start-Process mandiri
+    Penyebab crash python312.dll / _MEIxxx:
+    EXE baru mewarisi env ``_MEIPASS`` dari proses lama, sehingga bootloader
+    mencari DLL di folder temp yang sudah dihapus.
+
+    Perbaikan:
+    - Updater dijalankan dengan env bersih (tanpa _MEIPASS)
+    - Setelah swap file, jadwalkan start lewat Task Scheduler (proses mandiri)
+    - cmd start mengosongkan _MEIPASS sebelum menjalankan EXE baru
     """
     if not getattr(sys, "frozen", False):
         raise RuntimeError("Auto-replace hanya tersedia pada build .exe")
@@ -213,8 +232,8 @@ def apply_update_and_restart(downloaded_exe: Path) -> None:
     source = downloaded_exe.resolve()
     workdir = str(current.parent)
     pid = os.getpid()
-    # Get-Process -Name memakai nama tanpa ekstensi
     proc_name = current.stem
+    task_name = f"NetworkToolsRestart_{pid}"
 
     ps1 = Path(tempfile.gettempdir()) / f"network_tools_apply_update_{pid}.ps1"
     err_log = Path(tempfile.gettempdir()) / "network_tools_update_error.txt"
@@ -229,10 +248,19 @@ $workdir = '{_ps_single(workdir)}'
 $errLog = '{_ps_single(str(err_log))}'
 $oldPid = {pid}
 $procName = '{_ps_single(proc_name)}'
+$taskName = '{_ps_single(task_name)}'
 
 function Fail([string]$msg) {{
   Set-Content -LiteralPath $errLog -Value $msg -Encoding UTF8
   exit 1
+}}
+
+# Hapus env PyInstaller yang diwariskan dari app lama (penyebab utama crash)
+foreach ($k in @('_MEIPASS','_MEIPASS2','PYTHONHOME','PYTHONPATH','PYTHONNOUSERSITE')) {{
+  Remove-Item "Env:$k" -ErrorAction SilentlyContinue
+}}
+Get-ChildItem Env: | Where-Object {{ $_.Name -like '_MEI*' }} | ForEach-Object {{
+  Remove-Item "Env:$($_.Name)" -ErrorAction SilentlyContinue
 }}
 
 if (-not (Test-Path -LiteralPath $source)) {{
@@ -274,8 +302,8 @@ while ($true) {{
   }}
 }}
 
-# 4) Jeda agar folder _MEI lama selesai dibersihkan bootloader
-Start-Sleep -Seconds 4
+# 4) Jeda agar folder _MEI lama selesai dibersihkan
+Start-Sleep -Seconds 6
 
 try {{
   Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop
@@ -300,65 +328,66 @@ if ($szSrc -ne $szDst) {{
   Fail "Ukuran setelah copy tidak cocok ($szDst vs $szSrc)"
 }}
 
-# 5) Jeda singkat untuk antivirus scan
-Start-Sleep -Seconds 2
+# 5) Jeda untuk antivirus / OneDrive settle
+Start-Sleep -Seconds 3
 
-# 6) Jalankan EXE baru sebagai proses mandiri
+# 6) Jadwalkan start lewat Task Scheduler (env bersih, di luar process tree)
+Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+
+# cmd menunggu lalu start dengan _MEIPASS dikosongkan
+$arg = '/c timeout /t 8 /nobreak >nul & set "_MEIPASS=" & set "_MEIPASS2=" & set "PYTHONHOME=" & set "PYTHONPATH=" & start "" /D "' + $workdir + '" "' + $target + '"'
 try {{
-  Start-Process -FilePath $target -WorkingDirectory $workdir
+  $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument $arg
+  $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+  $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+  Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+  Start-ScheduledTask -TaskName $taskName
 }} catch {{
-  Fail "Gagal menjalankan EXE baru: $($_.Exception.Message)"
+  # Fallback: start langsung dari cmd dengan env bersih
+  try {{
+    Start-Process -FilePath 'cmd.exe' -ArgumentList $arg -WindowStyle Hidden
+  }} catch {{
+    Fail "Gagal menjadwalkan/menjalankan EXE baru: $($_.Exception.Message)"
+  }}
 }}
 
 Start-Sleep -Seconds 2
 Remove-Item -LiteralPath $source -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
+
+# Hapus task setelah sempat jalan (best-effort)
+Start-Sleep -Seconds 20
+Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 """
     ps1.write_text(script, encoding="utf-8")
 
-    # ShellExecute memutus relationship dengan proses PyInstaller (penting!)
-    params = (
-        f'-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{ps1}"'
-    )
-    try:
-        import ctypes
+    clean_env = _clean_environ()
+    flags = 0
+    flags |= getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+    flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+    flags |= 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
 
-        rc = int(
-            ctypes.windll.shell32.ShellExecuteW(
-                None,
-                "open",
-                "powershell.exe",
-                params,
-                str(current.parent),
-                0,  # SW_HIDE
-            )
-        )
-        if rc <= 32:
-            raise OSError(f"ShellExecute gagal (kode {rc})")
-    except Exception:
-        flags = 0
-        flags |= getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-        flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-        flags |= 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
-        subprocess.Popen(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-WindowStyle",
-                "Hidden",
-                "-File",
-                str(ps1),
-            ],
-            cwd=str(current.parent),
-            creationflags=flags,
-            close_fds=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+    # Jangan pakai ShellExecute: env _MEIPASS dari app frozen ikut terwariskan.
+    subprocess.Popen(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+            str(ps1),
+        ],
+        cwd=str(current.parent),
+        env=clean_env,
+        creationflags=flags,
+        close_fds=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
 def cleanup_update_leftovers() -> None:
