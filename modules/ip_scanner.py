@@ -13,13 +13,12 @@ from typing import Callable
 from modules.system_info import primary_ipv4
 
 
-def _local_ipv4_and_prefix() -> tuple[str | None, int]:
+def local_ipv4_and_prefix() -> tuple[str | None, int]:
     """Return (ip, prefixlen). Prefer /24 if mask unknown."""
     ip = primary_ipv4()
     if not ip or ip == "-":
         return None, 24
 
-    # Try PowerShell for prefix length
     creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
         completed = subprocess.run(
@@ -51,7 +50,6 @@ def _local_ipv4_and_prefix() -> tuple[str | None, int]:
 
 def _ping_host(ip: str, timeout_ms: int = 600) -> bool:
     creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    # Windows: ping -n 1 -w timeout_ms
     args = ["ping", "-n", "1", "-w", str(timeout_ms), ip]
     if platform.system().lower() != "windows":
         args = ["ping", "-c", "1", "-W", "1", ip]
@@ -79,14 +77,29 @@ def _resolve_hostname(ip: str) -> str:
 
 
 class IpScannerRunner:
+    """
+    Callbacks (semua dipanggil dari thread worker — UI harus marshal ke main thread):
+    - on_start(local_ip, network_str, total)
+    - on_progress(checked, total)
+    - on_host(ip, hostname, is_self)
+    - on_done(found_count, total, cancelled)
+    - on_error(message)
+    """
+
     def __init__(
         self,
-        on_line: Callable[[str], None],
-        on_done: Callable[[], None] | None = None,
+        on_start: Callable[[str, str, int], None] | None = None,
+        on_progress: Callable[[int, int], None] | None = None,
+        on_host: Callable[[str, str, bool], None] | None = None,
+        on_done: Callable[[int, int, bool], None] | None = None,
+        on_error: Callable[[str], None] | None = None,
         workers: int = 64,
     ) -> None:
-        self.on_line = on_line
+        self.on_start = on_start
+        self.on_progress = on_progress
+        self.on_host = on_host
         self.on_done = on_done
+        self.on_error = on_error
         self.workers = workers
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -100,91 +113,78 @@ class IpScannerRunner:
         self._stop.set()
 
     def _run(self) -> None:
+        cancelled = False
+        found_count = 0
+        total = 0
         try:
-            self.on_line("=== IP SCANNER ===")
-            ip, prefix = _local_ipv4_and_prefix()
+            ip, prefix = local_ipv4_and_prefix()
             if not ip:
-                self.on_line("IP lokal tidak terdeteksi. Periksa koneksi jaringan.")
+                if self.on_error:
+                    self.on_error("IP lokal tidak terdeteksi. Periksa koneksi jaringan.")
                 return
 
             try:
                 iface = ipaddress.ip_interface(f"{ip}/{prefix}")
                 network = iface.network
             except ValueError as exc:
-                self.on_line(f"Subnet tidak valid: {exc}")
+                if self.on_error:
+                    self.on_error(f"Subnet tidak valid: {exc}")
                 return
 
             hosts = [str(h) for h in network.hosts()]
-            # Cap very large subnets (e.g. /16) to avoid huge scans
-            max_hosts = 1022  # roughly /22
+            max_hosts = 1022
             if len(hosts) > max_hosts:
-                self.on_line(
-                    f"Subnet {network} terlalu besar ({len(hosts)} host). "
-                    f"Memindai /24 di sekitar {ip}."
-                )
                 iface = ipaddress.ip_interface(f"{ip}/24")
                 network = iface.network
                 hosts = [str(h) for h in network.hosts()]
 
-            self.on_line(f"IP lokal : {ip}/{prefix}")
-            self.on_line(f"Subnet  : {network}")
-            self.on_line(f"Target  : {len(hosts)} host")
-            self.on_line("Memindai (ICMP ping)…")
-            self.on_line("")
+            total = len(hosts)
+            if self.on_start:
+                self.on_start(ip, str(network), total)
 
             found: list[tuple[str, str]] = []
             checked = 0
             lock = threading.Lock()
 
             def work(addr: str) -> None:
-                nonlocal checked
+                nonlocal checked, found_count
                 if self._stop.is_set():
                     return
                 alive = _ping_host(addr)
                 with lock:
                     checked += 1
                     n = checked
-                if n % 32 == 0 or n == len(hosts):
-                    self.on_line(f"  Progress: {n}/{len(hosts)}")
+                if self.on_progress and (n % 8 == 0 or n == total):
+                    self.on_progress(n, total)
                 if alive and not self._stop.is_set():
                     host = _resolve_hostname(addr)
+                    is_self = addr == ip
                     with lock:
                         found.append((addr, host))
-                    mark = " (PC ini)" if addr == ip else ""
-                    self.on_line(f"  [UP] {addr:<15}  {host}{mark}")
+                        found_count = len(found)
+                    if self.on_host:
+                        self.on_host(addr, host, is_self)
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=self.workers) as pool:
                 futures = [pool.submit(work, h) for h in hosts]
                 for fut in concurrent.futures.as_completed(futures):
                     if self._stop.is_set():
+                        cancelled = True
                         break
                     try:
                         fut.result()
                     except Exception:
                         pass
                 if self._stop.is_set():
+                    cancelled = True
                     for fut in futures:
                         fut.cancel()
 
-            self.on_line("")
-            if self._stop.is_set():
-                self.on_line("Scan dibatalkan.")
-            else:
-                # Sort by IP
-                def _key(item: tuple[str, str]) -> tuple[int, ...]:
-                    parts = item[0].split(".")
-                    return tuple(int(p) for p in parts)
-
-                found.sort(key=_key)
-                self.on_line(f"Selesai. Host hidup: {len(found)} / {len(hosts)}")
-                if found:
-                    self.on_line("")
-                    self.on_line("Ringkasan:")
-                    for addr, host in found:
-                        mark = " *" if addr == ip else ""
-                        self.on_line(f"  {addr:<15}  {host}{mark}")
+            if self.on_progress:
+                self.on_progress(total if not cancelled else checked, total)
         except Exception as exc:
-            self.on_line(f"Error: {exc}")
+            if self.on_error:
+                self.on_error(str(exc))
         finally:
             if self.on_done:
-                self.on_done()
+                self.on_done(found_count, total, cancelled)

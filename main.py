@@ -204,16 +204,16 @@ class NetworkToolsApp(ctk.CTk):
 
         dlg = ctk.CTkToplevel(self)
         dlg.title("Update Wajib — Network Tools")
-        dlg.geometry("520x540")
-        dlg.minsize(480, 500)
+        dlg.geometry("600x580")
+        dlg.minsize(560, 540)
         dlg.resizable(False, False)
         dlg.transient(self)
         dlg.configure(fg_color=COLORS["bg"])
 
         self.update_idletasks()
-        px = self.winfo_rootx() + max((self.winfo_width() - 520) // 2, 0)
-        py = self.winfo_rooty() + max((self.winfo_height() - 540) // 2, 0)
-        dlg.geometry(f"520x540+{max(px, 40)}+{max(py, 40)}")
+        px = self.winfo_rootx() + max((self.winfo_width() - 600) // 2, 0)
+        py = self.winfo_rooty() + max((self.winfo_height() - 580) // 2, 0)
+        dlg.geometry(f"600x580+{max(px, 40)}+{max(py, 40)}")
 
         state = {"accepted": False}
 
@@ -296,28 +296,31 @@ class NetworkToolsApp(ctk.CTk):
             text_color=COLORS["muted"],
         ).pack(pady=(10, 0))
 
-        # Header — tinggi natural (jangan pack_propagate False agar teks tidak terpotong)
+        # Header accent — padding bawah besar agar teks tidak terpotong corner radius
         header = ctk.CTkFrame(card, fg_color=COLORS["accent"], corner_radius=12)
         header.pack(fill="x", padx=18, pady=(18, 0))
 
+        head_inner = ctk.CTkFrame(header, fg_color="transparent")
+        head_inner.pack(fill="x", padx=20, pady=18)
+
         ctk.CTkLabel(
-            header,
+            head_inner,
             text="UPDATE WAJIB",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             text_color=COLORS["on_accent"],
-        ).pack(anchor="w", padx=18, pady=(14, 0))
+        ).pack(anchor="w")
         ctk.CTkLabel(
-            header,
+            head_inner,
             text="Versi baru tersedia",
-            font=ctk.CTkFont(family="Segoe UI Semibold", size=20),
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=22),
             text_color=COLORS["on_accent"],
-        ).pack(anchor="w", padx=18, pady=(4, 0))
+        ).pack(anchor="w", pady=(6, 0))
         ctk.CTkLabel(
-            header,
+            head_inner,
             text="Pasang pembaruan untuk melanjutkan.",
-            font=ctk.CTkFont(family="Segoe UI", size=12),
+            font=ctk.CTkFont(family="Segoe UI", size=13),
             text_color=COLORS["on_accent"],
-        ).pack(anchor="w", padx=18, pady=(4, 14))
+        ).pack(anchor="w", pady=(8, 0))
 
         body = ctk.CTkFrame(card, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=18, pady=(14, 8))
@@ -1005,6 +1008,10 @@ class NetworkToolsApp(ctk.CTk):
             self._open_speedtest_view()
             return
 
+        if key == "ipscan":
+            self._open_ip_scanner_view()
+            return
+
         top = ctk.CTkFrame(self._header, fg_color="transparent")
         top.pack(fill="x")
         ctk.CTkLabel(
@@ -1061,6 +1068,310 @@ class NetworkToolsApp(ctk.CTk):
             fn = starters.get(key)
             if fn:
                 self.after(150, fn)
+
+    def _open_ip_scanner_view(self) -> None:
+        """UI khusus IP Scanner — kartu status + daftar host (bukan console)."""
+        self.console = None
+        self._ipscan_rows: list[Any] = []
+        self._ipscan_running = False
+
+        top = ctk.CTkFrame(self._header, fg_color="transparent")
+        top.pack(fill="x")
+        ctk.CTkLabel(
+            top,
+            text="IP Scanner",
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=24),
+            text_color=COLORS["text"],
+        ).pack(side="left")
+        self._header_actions(top)
+        self._build_sysinfo_bar(self._sysinfo_strip)
+
+        # Ringkasan subnet
+        summary = ctk.CTkFrame(
+            self._content,
+            fg_color=COLORS["panel"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        summary.pack(fill="x", pady=(0, 12))
+
+        stats = ctk.CTkFrame(summary, fg_color="transparent")
+        stats.pack(fill="x", padx=16, pady=14)
+        for col in range(4):
+            stats.grid_columnconfigure(col, weight=1)
+
+        def _stat(parent: Any, col: int, label: str) -> ctk.CTkLabel:
+            cell = ctk.CTkFrame(parent, fg_color=COLORS["bg"], corner_radius=10)
+            cell.grid(row=0, column=col, sticky="nsew", padx=(0 if col == 0 else 6, 0 if col == 3 else 6))
+            ctk.CTkLabel(
+                cell,
+                text=label,
+                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+                text_color=COLORS["muted"],
+            ).pack(anchor="w", padx=12, pady=(10, 0))
+            val = ctk.CTkLabel(
+                cell,
+                text="—",
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=15),
+                text_color=COLORS["text"],
+                anchor="w",
+            )
+            val.pack(anchor="w", fill="x", padx=12, pady=(4, 12))
+            return val
+
+        lbl_ip = _stat(stats, 0, "IP LOKAL")
+        lbl_net = _stat(stats, 1, "SUBNET")
+        lbl_prog = _stat(stats, 2, "PROGRESS")
+        lbl_found = _stat(stats, 3, "HOST HIDUP")
+
+        bar_row = ctk.CTkFrame(summary, fg_color="transparent")
+        bar_row.pack(fill="x", padx=16, pady=(0, 14))
+        progress = ctk.CTkProgressBar(
+            bar_row,
+            height=8,
+            progress_color=COLORS["accent"],
+            fg_color=COLORS["bg"],
+        )
+        progress.pack(fill="x")
+        progress.set(0)
+
+        status_lbl = ctk.CTkLabel(
+            bar_row,
+            text="Siap memindai subnet PC ini.",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color=COLORS["muted"],
+            anchor="w",
+        )
+        status_lbl.pack(fill="x", pady=(8, 0))
+
+        # Toolbar
+        tools = ctk.CTkFrame(self._content, fg_color="transparent")
+        tools.pack(fill="x", pady=(0, 10))
+
+        btn_start = ctk.CTkButton(
+            tools,
+            text="Mulai Scan",
+            width=130,
+            height=36,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+        )
+        btn_start.pack(side="left")
+
+        btn_stop = ctk.CTkButton(
+            tools,
+            text="Stop",
+            width=90,
+            height=36,
+            fg_color=COLORS["danger"],
+            hover_color=COLORS["danger_hover"],
+            state="disabled",
+        )
+        btn_stop.pack(side="left", padx=(8, 0))
+
+        # Header kolom + scroll list
+        list_wrap = ctk.CTkFrame(
+            self._content,
+            fg_color=COLORS["panel"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        list_wrap.pack(fill="both", expand=True)
+
+        cols = ctk.CTkFrame(list_wrap, fg_color=COLORS["bg"], corner_radius=0)
+        cols.pack(fill="x", padx=1, pady=(1, 0))
+        cols.grid_columnconfigure(0, weight=2, minsize=140)
+        cols.grid_columnconfigure(1, weight=4, minsize=180)
+        cols.grid_columnconfigure(2, weight=1, minsize=90)
+
+        for i, text in enumerate(("ALAMAT IP", "HOSTNAME", "STATUS")):
+            ctk.CTkLabel(
+                cols,
+                text=text,
+                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                text_color=COLORS["muted"],
+                anchor="w",
+            ).grid(row=0, column=i, sticky="ew", padx=14, pady=10)
+
+        scroll = ctk.CTkScrollableFrame(
+            list_wrap,
+            fg_color="transparent",
+            corner_radius=0,
+        )
+        scroll.pack(fill="both", expand=True, padx=4, pady=4)
+
+        empty = ctk.CTkLabel(
+            scroll,
+            text="Belum ada hasil. Klik Mulai Scan.",
+            font=ctk.CTkFont(family="Segoe UI", size=13),
+            text_color=COLORS["muted"],
+        )
+        empty.pack(pady=36)
+
+        # Action bar
+        self._action_bar.pack(fill="x", padx=24, pady=(0, 8), before=self._footer)
+        ctk.CTkButton(
+            self._action_bar,
+            text="Kembali",
+            width=120,
+            height=36,
+            fg_color=COLORS["danger"],
+            hover_color=COLORS["danger_hover"],
+            command=self._cancel_to_dashboard,
+        ).pack(side="right", padx=(8, 0))
+        ctk.CTkButton(
+            self._action_bar,
+            text="Kirim",
+            width=120,
+            height=36,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+            command=self._send_screenshot,
+        ).pack(side="right")
+
+        def _clear_rows() -> None:
+            for w in list(scroll.winfo_children()):
+                try:
+                    w.destroy()
+                except Exception:
+                    pass
+            self._ipscan_rows = []
+
+        def _add_row(ip: str, hostname: str, is_self: bool) -> None:
+            if empty.winfo_exists():
+                try:
+                    empty.pack_forget()
+                except Exception:
+                    pass
+            row = ctk.CTkFrame(
+                scroll,
+                fg_color=COLORS["bg"] if len(self._ipscan_rows) % 2 == 0 else "transparent",
+                corner_radius=8,
+                height=42,
+            )
+            row.pack(fill="x", pady=2, padx=4)
+            row.grid_columnconfigure(0, weight=2, minsize=140)
+            row.grid_columnconfigure(1, weight=4, minsize=180)
+            row.grid_columnconfigure(2, weight=1, minsize=90)
+            row.pack_propagate(False)
+
+            ctk.CTkLabel(
+                row,
+                text=ip,
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=13),
+                text_color=COLORS["text"],
+                anchor="w",
+            ).grid(row=0, column=0, sticky="ew", padx=14)
+
+            host_text = hostname if hostname and hostname != "-" else "—"
+            if is_self:
+                host_text = f"{host_text}  ·  PC ini"
+            ctk.CTkLabel(
+                row,
+                text=host_text,
+                font=ctk.CTkFont(family="Segoe UI", size=13),
+                text_color=COLORS["muted"] if not is_self else COLORS["accent"],
+                anchor="w",
+            ).grid(row=0, column=1, sticky="ew", padx=14)
+
+            badge = ctk.CTkLabel(
+                row,
+                text="  Online  ",
+                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                text_color=COLORS["on_accent"],
+                fg_color=COLORS["accent"],
+                corner_radius=6,
+            )
+            badge.grid(row=0, column=2, sticky="e", padx=14, pady=8)
+            self._ipscan_rows.append(row)
+
+        def _set_scanning(active: bool) -> None:
+            self._ipscan_running = active
+            btn_start.configure(state="disabled" if active else "normal")
+            btn_stop.configure(state="normal" if active else "disabled")
+
+        def on_start(local_ip: str, network: str, total: int) -> None:
+            def ui() -> None:
+                lbl_ip.configure(text=local_ip)
+                lbl_net.configure(text=network)
+                lbl_prog.configure(text=f"0 / {total}")
+                lbl_found.configure(text="0")
+                progress.set(0)
+                status_lbl.configure(text=f"Memindai {total} host di {network}…")
+                _clear_rows()
+                empty.configure(text="Sedang memindai…")
+                empty.pack(pady=36)
+
+            self.after(0, ui)
+
+        def on_progress(checked: int, total: int) -> None:
+            def ui() -> None:
+                lbl_prog.configure(text=f"{checked} / {total}")
+                if total > 0:
+                    progress.set(min(1.0, checked / total))
+
+            self.after(0, ui)
+
+        def on_host(ip: str, hostname: str, is_self: bool) -> None:
+            def ui() -> None:
+                _add_row(ip, hostname, is_self)
+                lbl_found.configure(text=str(len(self._ipscan_rows)))
+
+            self.after(0, ui)
+
+        def on_error(msg: str) -> None:
+            def ui() -> None:
+                status_lbl.configure(text=msg)
+                _set_scanning(False)
+                progress.set(0)
+
+            self.after(0, ui)
+
+        def on_done(found: int, total: int, cancelled: bool) -> None:
+            def ui() -> None:
+                _set_scanning(False)
+                if total > 0 and not cancelled:
+                    progress.set(1.0)
+                    lbl_prog.configure(text=f"{total} / {total}")
+                if cancelled:
+                    status_lbl.configure(text=f"Dibatalkan. Ditemukan {found} host.")
+                else:
+                    status_lbl.configure(text=f"Selesai. {found} host hidup dari {total} target.")
+                if found == 0 and empty.winfo_exists():
+                    empty.configure(text="Tidak ada host yang merespons ping.")
+                    try:
+                        empty.pack(pady=36)
+                    except Exception:
+                        pass
+
+            self.after(0, ui)
+
+        def start_scan() -> None:
+            if self._ipscan_running:
+                return
+            self._stop_runner()
+            _set_scanning(True)
+            status_lbl.configure(text="Menyiapkan scan…")
+            runner = IpScannerRunner(
+                on_start=on_start,
+                on_progress=on_progress,
+                on_host=on_host,
+                on_done=on_done,
+                on_error=on_error,
+            )
+            self.set_runner_stop(runner.stop)
+            runner.start()
+
+        def stop_scan() -> None:
+            self._stop_runner()
+            status_lbl.configure(text="Menghentikan…")
+
+        btn_start.configure(command=start_scan)
+        btn_stop.configure(command=stop_scan)
 
     def _open_speedtest_view(self) -> None:
         """Show Speedtest inside embedded Edge WebView2 (no external browser)."""
@@ -1483,10 +1794,7 @@ class NetworkToolsApp(ctk.CTk):
             "ping": "Pilih host dari daftar, lalu Mulai Ping. Tekan Kembali untuk ke dashboard.",
             "traceroute": "Pilih host dari dropdown, lalu Mulai. Perintah: tracert -d <alamat>",
             "dns": "Klik Jalankan untuk uji DNS mirip leak test.",
-            "ipscan": (
-                "Klik Mulai Scan untuk memindai host hidup di subnet\n"
-                "jaringan PC ini (ICMP ping). Tekan Kembali untuk menghentikan."
-            ),
+            "ipscan": "Scan host hidup di subnet PC ini.",
             "speedtest": "Speedtest berjalan di browser bawaan aplikasi.",
             "refresh": (
                 "Menjalankan otomatis: disable/enable adapter & renew DHCP.\n"
@@ -1529,16 +1837,6 @@ class NetworkToolsApp(ctk.CTk):
                 hover_color=COLORS["accent_dim"],
                 text_color=COLORS["on_accent"],
                 command=self._start_dns,
-            ).pack(side="left")
-        elif key == "ipscan":
-            ctk.CTkButton(
-                parent,
-                text="Mulai Scan",
-                width=140,
-                fg_color=COLORS["accent"],
-                hover_color=COLORS["accent_dim"],
-                text_color=COLORS["on_accent"],
-                command=self._start_ip_scan,
             ).pack(side="left")
         elif key in AUTO_RUN_TOOLS:
             ctk.CTkLabel(
@@ -1683,17 +1981,6 @@ class NetworkToolsApp(ctk.CTk):
             self.console.clear()
         domains = list(DNS_TEST_DOMAINS)
         runner = DnsTestRunner(domains, on_line=self.log, on_done=lambda: self.log("--- DNS Test selesai ---"))
-        self.set_runner_stop(runner.stop)
-        runner.start()
-
-    def _start_ip_scan(self) -> None:
-        self._stop_runner()
-        if self.console:
-            self.console.clear()
-        runner = IpScannerRunner(
-            on_line=self.log,
-            on_done=lambda: self.log("--- IP Scanner selesai ---"),
-        )
         self.set_runner_stop(runner.stop)
         runner.start()
 
