@@ -19,10 +19,6 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 
-# Local extras (optional installers)
-drivers/**
-!drivers/README.txt
-anydesk/**
-!anydesk/README.txt
+# Built EXE (upload via GitHub Releases only)
 *.exe
 !hooks/

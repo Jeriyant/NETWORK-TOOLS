@@ -5,8 +5,6 @@ from PyInstaller.utils.hooks import collect_all
 datas = [("assets/app.ico", "assets"), ("assets/app.png", "assets")]
 binaries = []
 hiddenimports = [
-    "dns",
-    "dns.resolver",
     "customtkinter",
     "clr",
     "clr_loader",
