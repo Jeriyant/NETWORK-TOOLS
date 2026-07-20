@@ -1477,10 +1477,12 @@ class NetworkToolsApp(ctk.CTk):
 
         def _status_color(ok: bool, status: str) -> tuple[str, str]:
             st = (status or "").upper()
-            if ok or st in {"ON", "READY", "RUNNING", "ONLINE"}:
+            if ok and st in {"ON", "READY", "RUNNING", "ONLINE"}:
+                return COLORS.get("ok", "#12B76A"), COLORS.get("on_ok", "#FFFFFF")
+            if ok:
                 return COLORS.get("ok", "#12B76A"), COLORS.get("on_ok", "#FFFFFF")
             if st in {"PARTIAL", "PENDING"}:
-                return COLORS["muted"], COLORS["on_accent"]
+                return COLORS.get("warn", "#E6B422"), COLORS.get("on_warn", "#1A1400")
             return COLORS["danger"], COLORS["on_accent"]
 
         def _render(items: list[Any]) -> None:
