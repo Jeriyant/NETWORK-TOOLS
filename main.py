@@ -250,9 +250,9 @@ class NetworkToolsApp(ctk.CTk):
         min_w = min(780, max(720, max_w - 20))
         min_h = min(560, max(480, max_h - 20))
         self.minsize(min_w, min_h)
-        # Tengah layar
+        # Top-center layar
         x = max((sw - win_w) // 2, 0)
-        y = max((sh - win_h) // 2, 0)
+        y = 24
         self.geometry(f"{win_w}x{win_h}+{x}+{y}")
 
     def _apply_window_icon(self) -> None:
@@ -921,7 +921,7 @@ class NetworkToolsApp(ctk.CTk):
     def _ensure_latency_poll(self) -> None:
         if getattr(self, "_sysinfo_poll_job", None):
             return
-        self._sysinfo_poll_job = self.after(5_000, self._poll_latency)
+        self._sysinfo_poll_job = self.after(1_000, self._poll_latency)
 
     def _load_sysinfo_once(self) -> None:
         """Load host/IP/CPU/RAM/uptime/windows sekali + latensi awal."""
@@ -985,7 +985,7 @@ class NetworkToolsApp(ctk.CTk):
                         label.configure(text=latency)
                 except Exception:
                     pass
-                self._sysinfo_poll_job = self.after(5_000, self._poll_latency)
+                self._sysinfo_poll_job = self.after(1_000, self._poll_latency)
 
             self.after(0, apply)
 
@@ -1112,73 +1112,67 @@ class NetworkToolsApp(ctk.CTk):
         grid.pack(fill="both", expand=True)
         tools = tools_for_ui()
 
-        # 4 kolom jika lebar cukup, 3 kolom di layar sempit
+        # Compact tiles — hemat ruang vertikal
         try:
             win_w = max(int(self.winfo_width()), int(self.winfo_screenwidth()) - 80)
         except Exception:
             win_w = 980
-        cols = 3 if win_w < 900 else 4
+        cols = 4 if win_w < 860 else 5
         for i in range(cols):
             grid.grid_columnconfigure(i, weight=1, uniform="tiles")
-        rows = (len(tools) + cols - 1) // cols
-        for r in range(rows):
-            grid.grid_rowconfigure(r, weight=1, uniform="tiles")
 
-        wrap = 150 if cols == 4 else 180
+        wrap = 120 if cols == 5 else 140
         for idx, (key, title, icon, desc) in enumerate(tools):
             r, c = divmod(idx, cols)
             tile = ctk.CTkFrame(
                 grid,
                 fg_color=COLORS["tile"],
-                corner_radius=10,
+                corner_radius=8,
                 border_width=1,
                 border_color=COLORS["border"],
+                height=72,
             )
-            tile.grid(row=r, column=c, padx=6, pady=6, sticky="nsew")
+            tile.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
+            tile.grid_propagate(False)
             inner = ctk.CTkFrame(tile, fg_color="transparent")
-            inner.pack(fill="both", expand=True, padx=12, pady=10)
+            inner.pack(fill="both", expand=True, padx=10, pady=8)
+
+            row = ctk.CTkFrame(inner, fg_color="transparent")
+            row.pack(fill="x", anchor="nw")
             ctk.CTkLabel(
-                inner,
+                row,
                 text=icon,
-                font=ctk.CTkFont(size=22),
+                font=ctk.CTkFont(size=18),
                 text_color=COLORS["accent"],
+                width=22,
+            ).pack(side="left", padx=(0, 6))
+            texts = ctk.CTkFrame(row, fg_color="transparent")
+            texts.pack(side="left", fill="x", expand=True)
+            ctk.CTkLabel(
+                texts,
+                text=title,
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=13),
+                text_color=COLORS["text"],
+                anchor="w",
             ).pack(anchor="w")
             ctk.CTkLabel(
-                inner,
-                text=title,
-                font=ctk.CTkFont(family="Segoe UI Semibold", size=14),
-                text_color=COLORS["text"],
-            ).pack(anchor="w", pady=(2, 0))
-            ctk.CTkLabel(
-                inner,
+                texts,
                 text=desc,
-                font=ctk.CTkFont(size=11),
+                font=ctk.CTkFont(size=10),
                 text_color=COLORS["muted"],
                 wraplength=wrap,
                 justify="left",
+                anchor="w",
             ).pack(anchor="w", pady=(0, 0))
-            btn = ctk.CTkButton(
-                inner,
-                text=t("app.open"),
-                width=80,
-                height=28,
-                fg_color=COLORS["accent"],
-                hover_color=COLORS["accent_dim"],
-                text_color=COLORS["on_accent"],
-                command=lambda k=key: self.open_tool(k),
-            )
-            btn.pack(anchor="w", pady=(8, 0))
 
             def _open(_event: Any = None, k: str = key) -> None:
                 self.open_tool(k)
 
-            for widget in (tile, inner):
+            for widget in (tile, inner, row, texts):
                 widget.bind("<Enter>", lambda e, t=tile: t.configure(fg_color=COLORS["tile_hover"]))
                 widget.bind("<Leave>", lambda e, t=tile: t.configure(fg_color=COLORS["tile"]))
                 widget.bind("<Button-1>", _open)
-            for child in inner.winfo_children():
-                if child is btn:
-                    continue
+            for child in list(texts.winfo_children()) + list(row.winfo_children()):
                 try:
                     child.bind("<Button-1>", _open)
                     child.bind("<Enter>", lambda e, t=tile: t.configure(fg_color=COLORS["tile_hover"]))
