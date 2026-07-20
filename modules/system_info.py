@@ -138,7 +138,7 @@ def uptime_summary() -> str:
 
 
 def windows_version() -> str:
-    """Compact OS string for the info bar (fits small screens)."""
+    """Full OS string for the info bar (wraps; not truncated)."""
     out = _run_ps(
         "$p=Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion'; "
         "$name=$p.ProductName; $disp=$p.DisplayVersion; if (-not $disp) { $disp=$p.ReleaseId }; "
@@ -146,8 +146,7 @@ def windows_version() -> str:
         "if ([int]$build -ge 22000 -and $name -like 'Windows 10*') { "
         "  $name=$name -replace 'Windows 10','Windows 11' "
         "}; "
-        "$short=$name -replace '^Windows ','Win '; "
-        "\"$short $disp - $build.$ubr\""
+        "\"$name $disp (Build $build.$ubr)\""
     )
     if out:
         return _clean_spaces(out)

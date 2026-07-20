@@ -802,16 +802,14 @@ class NetworkToolsApp(ctk.CTk):
             corner_radius=10,
             border_width=1,
             border_color=COLORS["border"],
-            height=74,
         )
         bar.pack(fill="x", pady=(6, 0))
-        bar.pack_propagate(False)
 
         rail = ctk.CTkFrame(bar, fg_color=COLORS["accent"], width=4, corner_radius=0)
         rail.pack(side="left", fill="y")
 
         body = ctk.CTkFrame(bar, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=(10, 12), pady=6)
+        body.pack(fill="both", expand=True, padx=(10, 12), pady=(6, 8))
 
         metrics = [
             ("hostname", t("sys.host"), "…", True),
@@ -827,7 +825,7 @@ class NetworkToolsApp(ctk.CTk):
         for i in range(len(metrics)):
             key = metrics[i][0]
             if key == "windows":
-                weight = 3
+                weight = 4
             elif key == "cpu":
                 weight = 2
             else:
@@ -848,9 +846,9 @@ class NetworkToolsApp(ctk.CTk):
                 anchor="w",
             ).pack(anchor="w")
 
-            # Windows/CPU: wrap lebih lebar agar teks tidak terpotong
+            # Windows/CPU: wrap agar teks penuh tidak terpotong
             if cache_key == "windows":
-                wrap = 320
+                wrap = 280
             elif cache_key == "cpu":
                 wrap = 200
             else:
@@ -868,7 +866,7 @@ class NetworkToolsApp(ctk.CTk):
                 wraplength=wrap,
                 justify="left",
             )
-            value.pack(anchor="w", fill="x", pady=(0, 0))
+            value.pack(anchor="nw", fill="x", pady=(0, 0))
             self._sysinfo_value_labels[cache_key] = value
 
             if idx < len(metrics) - 1:
@@ -1015,6 +1013,20 @@ class NetworkToolsApp(ctk.CTk):
                     label.configure(text=text)
             except Exception:
                 pass
+        # Setelah teks penuh di-set, sesuaikan wrap Windows/CPU
+        def _refresh_wrap() -> None:
+            for key in ("windows", "cpu"):
+                lbl = labels.get(key)
+                if lbl is None:
+                    continue
+                try:
+                    parent_w = int(lbl.master.winfo_width())
+                    if parent_w > 40:
+                        lbl.configure(wraplength=max(parent_w - 8, 80))
+                except Exception:
+                    pass
+
+        self.after(50, _refresh_wrap)
 
     # ----- navigation -----
     def _clear_frame(self, frame: ctk.CTkFrame) -> None:
