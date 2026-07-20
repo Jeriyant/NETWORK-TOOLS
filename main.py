@@ -250,10 +250,7 @@ class NetworkToolsApp(ctk.CTk):
         min_w = min(780, max(720, max_w - 20))
         min_h = min(560, max(480, max_h - 20))
         self.minsize(min_w, min_h)
-        # Top-center layar
-        x = max((sw - win_w) // 2, 0)
-        y = 24
-        self.geometry(f"{win_w}x{win_h}+{x}+{y}")
+        self.geometry(f"{win_w}x{win_h}")
 
     def _apply_window_icon(self) -> None:
         """Samakan icon jendela dengan icon file EXE."""
@@ -785,7 +782,7 @@ class NetworkToolsApp(ctk.CTk):
         lang_combo.pack(side="right")
 
     def _build_sysinfo_bar(self, parent: ctk.CTkFrame) -> None:
-        """Status strip compact; wrap otomatis hanya jika kolom terlalu sempit."""
+        """Status strip sekali dibuat; data statis di-cache, latensi update tiap 5 dtk."""
         # Sudah ada — jangan rebuild / jangan reload data
         if self._sysinfo_value_labels and parent.winfo_children():
             self._show_sysinfo_strip()
@@ -799,46 +796,47 @@ class NetworkToolsApp(ctk.CTk):
         bar = ctk.CTkFrame(
             parent,
             fg_color=COLORS["panel"],
-            corner_radius=8,
+            corner_radius=10,
             border_width=1,
             border_color=COLORS["border"],
+            height=68,
         )
-        bar.pack(fill="x", pady=(4, 0))
+        bar.pack(fill="x", pady=(6, 0))
+        bar.pack_propagate(False)
 
-        rail = ctk.CTkFrame(bar, fg_color=COLORS["accent"], width=3, corner_radius=0)
+        rail = ctk.CTkFrame(bar, fg_color=COLORS["accent"], width=4, corner_radius=0)
         rail.pack(side="left", fill="y")
 
         body = ctk.CTkFrame(bar, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=(8, 10), pady=(4, 5))
+        body.pack(fill="both", expand=True, padx=(10, 12), pady=6)
 
         metrics = [
-            ("hostname", t("sys.host"), "…", True, 1),
-            ("ip", t("sys.ip"), "…", True, 1),
-            ("latency", t("sys.latency"), "…", True, 1),
-            ("cpu", t("sys.cpu"), "…", False, 2),
-            ("ram", t("sys.ram"), "…", False, 1),
-            ("uptime", t("sys.uptime"), "…", False, 1),
-            ("windows", t("sys.windows"), "…", False, 3),
+            ("hostname", t("sys.host"), "…", True),
+            ("ip", t("sys.ip"), "…", True),
+            ("latency", t("sys.latency"), "…", True),
+            ("cpu", t("sys.cpu"), "…", False),
+            ("ram", t("sys.ram"), "…", False),
+            ("uptime", t("sys.uptime"), "…", False),
+            ("windows", t("sys.windows"), "…", False),
         ]
         self._sysinfo_value_labels = {}
-        self._sysinfo_wrap_keys = ("cpu", "windows")
 
-        for i, (_key, _lab, _ph, _em, weight) in enumerate(metrics):
-            body.grid_columnconfigure(i * 2, weight=weight)
+        for i in range(len(metrics)):
+            weight = 2 if metrics[i][0] in {"cpu", "windows"} else 1
+            body.grid_columnconfigure(i * 2, weight=weight, uniform="")
             if i < len(metrics) - 1:
                 body.grid_columnconfigure(i * 2 + 1, weight=0)
 
-        for idx, (cache_key, label, placeholder, emphasize, _weight) in enumerate(metrics):
+        for idx, (cache_key, label, placeholder, emphasize) in enumerate(metrics):
             cell = ctk.CTkFrame(body, fg_color="transparent")
-            cell.grid(row=0, column=idx * 2, sticky="nsew", padx=(0, 2))
+            cell.grid(row=0, column=idx * 2, sticky="nsew", padx=(0, 4))
 
             ctk.CTkLabel(
                 cell,
                 text=label,
-                font=ctk.CTkFont(family="Segoe UI", size=8, weight="bold"),
+                font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
                 text_color=COLORS["muted"],
                 anchor="w",
-                height=12,
             ).pack(anchor="w")
 
             value = ctk.CTkLabel(
@@ -846,15 +844,14 @@ class NetworkToolsApp(ctk.CTk):
                 text=placeholder,
                 font=ctk.CTkFont(
                     family="Segoe UI Semibold",
-                    size=11 if emphasize else 10,
+                    size=12 if emphasize else 11,
                 ),
                 text_color=COLORS["accent"] if emphasize else COLORS["text"],
-                anchor="nw",
+                anchor="w",
+                wraplength=160 if cache_key in {"cpu", "windows"} else 0,
                 justify="left",
-                wraplength=0,
-                height=16,
             )
-            value.pack(anchor="nw", fill="x")
+            value.pack(anchor="w", pady=(0, 0))
             self._sysinfo_value_labels[cache_key] = value
 
             if idx < len(metrics) - 1:
@@ -864,10 +861,7 @@ class NetworkToolsApp(ctk.CTk):
                     width=1,
                     corner_radius=0,
                 )
-                sep.grid(row=0, column=idx * 2 + 1, sticky="ns", padx=3, pady=1)
-
-        body.bind("<Configure>", lambda _e: self.after(40, self._refresh_sysinfo_wrap))
-        self.after(100, self._refresh_sysinfo_wrap)
+                sep.grid(row=0, column=idx * 2 + 1, sticky="ns", padx=4, pady=2)
 
         self._show_sysinfo_strip()
         if self._sysinfo_cache:
@@ -875,31 +869,6 @@ class NetworkToolsApp(ctk.CTk):
             self._ensure_latency_poll()
         else:
             self.after(40, self._load_sysinfo_once)
-
-    def _refresh_sysinfo_wrap(self) -> None:
-        """Wrap hanya jika teks lebih lebar dari kolom; jika muat → satu baris."""
-        labels = getattr(self, "_sysinfo_value_labels", None) or {}
-        wrap_keys = getattr(self, "_sysinfo_wrap_keys", ("cpu", "windows"))
-        for key in wrap_keys:
-            lbl = labels.get(key)
-            if lbl is None:
-                continue
-            try:
-                if not lbl.winfo_exists():
-                    continue
-                cell_w = int(lbl.master.winfo_width())
-                if cell_w < 40:
-                    continue
-                # Ukur lebar natural (tanpa wrap)
-                lbl.configure(wraplength=0, height=0)
-                lbl.update_idletasks()
-                needed = int(lbl.winfo_reqwidth())
-                if needed > cell_w - 4:
-                    lbl.configure(wraplength=max(cell_w - 4, 60), height=0)
-                else:
-                    lbl.configure(wraplength=0, height=16)
-            except Exception:
-                pass
 
     def _show_sysinfo_strip(self) -> None:
         try:
@@ -921,7 +890,7 @@ class NetworkToolsApp(ctk.CTk):
     def _ensure_latency_poll(self) -> None:
         if getattr(self, "_sysinfo_poll_job", None):
             return
-        self._sysinfo_poll_job = self.after(1_000, self._poll_latency)
+        self._sysinfo_poll_job = self.after(5_000, self._poll_latency)
 
     def _load_sysinfo_once(self) -> None:
         """Load host/IP/CPU/RAM/uptime/windows sekali + latensi awal."""
@@ -959,7 +928,7 @@ class NetworkToolsApp(ctk.CTk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _poll_latency(self) -> None:
-        """Refresh latensi tiap 1 detik."""
+        """Hanya refresh latensi tiap 5 detik."""
         self._sysinfo_poll_job = None
         if not getattr(self, "_sysinfo_value_labels", None):
             return
@@ -985,7 +954,7 @@ class NetworkToolsApp(ctk.CTk):
                         label.configure(text=latency)
                 except Exception:
                     pass
-                self._sysinfo_poll_job = self.after(1_000, self._poll_latency)
+                self._sysinfo_poll_job = self.after(5_000, self._poll_latency)
 
             self.after(0, apply)
 
@@ -1013,7 +982,6 @@ class NetworkToolsApp(ctk.CTk):
                     label.configure(text=text)
             except Exception:
                 pass
-        self.after(50, self._refresh_sysinfo_wrap)
 
     # ----- navigation -----
     def _clear_frame(self, frame: ctk.CTkFrame) -> None:
@@ -1099,67 +1067,73 @@ class NetworkToolsApp(ctk.CTk):
         grid.pack(fill="both", expand=True)
         tools = tools_for_ui()
 
-        # Compact tiles — hemat ruang vertikal
+        # 4 kolom jika lebar cukup, 3 kolom di layar sempit
         try:
             win_w = max(int(self.winfo_width()), int(self.winfo_screenwidth()) - 80)
         except Exception:
             win_w = 980
-        cols = 4 if win_w < 860 else 5
+        cols = 3 if win_w < 900 else 4
         for i in range(cols):
             grid.grid_columnconfigure(i, weight=1, uniform="tiles")
+        rows = (len(tools) + cols - 1) // cols
+        for r in range(rows):
+            grid.grid_rowconfigure(r, weight=1, uniform="tiles")
 
-        wrap = 120 if cols == 5 else 140
+        wrap = 150 if cols == 4 else 180
         for idx, (key, title, icon, desc) in enumerate(tools):
             r, c = divmod(idx, cols)
             tile = ctk.CTkFrame(
                 grid,
                 fg_color=COLORS["tile"],
-                corner_radius=8,
+                corner_radius=10,
                 border_width=1,
                 border_color=COLORS["border"],
-                height=72,
             )
-            tile.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
-            tile.grid_propagate(False)
+            tile.grid(row=r, column=c, padx=6, pady=6, sticky="nsew")
             inner = ctk.CTkFrame(tile, fg_color="transparent")
-            inner.pack(fill="both", expand=True, padx=10, pady=8)
-
-            row = ctk.CTkFrame(inner, fg_color="transparent")
-            row.pack(fill="x", anchor="nw")
+            inner.pack(fill="both", expand=True, padx=12, pady=10)
             ctk.CTkLabel(
-                row,
+                inner,
                 text=icon,
-                font=ctk.CTkFont(size=18),
+                font=ctk.CTkFont(size=22),
                 text_color=COLORS["accent"],
-                width=22,
-            ).pack(side="left", padx=(0, 6))
-            texts = ctk.CTkFrame(row, fg_color="transparent")
-            texts.pack(side="left", fill="x", expand=True)
-            ctk.CTkLabel(
-                texts,
-                text=title,
-                font=ctk.CTkFont(family="Segoe UI Semibold", size=13),
-                text_color=COLORS["text"],
-                anchor="w",
             ).pack(anchor="w")
             ctk.CTkLabel(
-                texts,
+                inner,
+                text=title,
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=14),
+                text_color=COLORS["text"],
+            ).pack(anchor="w", pady=(4, 0))
+            ctk.CTkLabel(
+                inner,
                 text=desc,
-                font=ctk.CTkFont(size=10),
+                font=ctk.CTkFont(size=11),
                 text_color=COLORS["muted"],
                 wraplength=wrap,
                 justify="left",
-                anchor="w",
-            ).pack(anchor="w", pady=(0, 0))
+            ).pack(anchor="w", pady=(1, 0))
+            btn = ctk.CTkButton(
+                inner,
+                text=t("app.open"),
+                width=80,
+                height=28,
+                fg_color=COLORS["accent"],
+                hover_color=COLORS["accent_dim"],
+                text_color=COLORS["on_accent"],
+                command=lambda k=key: self.open_tool(k),
+            )
+            btn.pack(anchor="w", pady=(8, 0))
 
             def _open(_event: Any = None, k: str = key) -> None:
                 self.open_tool(k)
 
-            for widget in (tile, inner, row, texts):
+            for widget in (tile, inner):
                 widget.bind("<Enter>", lambda e, t=tile: t.configure(fg_color=COLORS["tile_hover"]))
                 widget.bind("<Leave>", lambda e, t=tile: t.configure(fg_color=COLORS["tile"]))
                 widget.bind("<Button-1>", _open)
-            for child in list(texts.winfo_children()) + list(row.winfo_children()):
+            for child in inner.winfo_children():
+                if child is btn:
+                    continue
                 try:
                     child.bind("<Button-1>", _open)
                     child.bind("<Enter>", lambda e, t=tile: t.configure(fg_color=COLORS["tile_hover"]))

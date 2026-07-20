@@ -1,4 +1,4 @@
-﻿"""Permanent built-in settings (no external config.json)."""
+"""Permanent built-in settings (no external config.json)."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ DEFAULT_THEME = "system"
 DEFAULT_LANG = "id"
 
 # App version — naikkan setiap rilis baru (harus cocok dengan tag GitHub Release)
-APP_VERSION = "2.0"
+APP_VERSION = "2.1"
 UPDATE_REPO = "https://github.com/Jeriyant/NETWORK-TOOLS"
 
 

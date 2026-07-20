@@ -138,7 +138,6 @@ def uptime_summary() -> str:
 
 
 def windows_version() -> str:
-    """Full OS string for the info bar (wraps; not truncated)."""
     out = _run_ps(
         "$p=Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion'; "
         "$name=$p.ProductName; $disp=$p.DisplayVersion; if (-not $disp) { $disp=$p.ReleaseId }; "
@@ -150,7 +149,7 @@ def windows_version() -> str:
     )
     if out:
         return _clean_spaces(out)
-    return _clean_spaces(platform.platform() or "-")
+    return platform.platform() or "-"
 
 
 def latency_to_dns(host: str = "8.8.8.8") -> str:
