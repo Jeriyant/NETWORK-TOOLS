@@ -234,7 +234,7 @@ class NetworkToolsApp(ctk.CTk):
             pass
 
     def _fit_window_to_screen(self) -> None:
-        """Ukuran awal mengikuti referensi screenshot (~1000x620)."""
+        """Ukuran awal dashboard compact."""
         try:
             self.update_idletasks()
             sw = int(self.winfo_screenwidth())
@@ -242,39 +242,46 @@ class NetworkToolsApp(ctk.CTk):
         except Exception:
             sw, sh = 1366, 768
 
-        # Referensi: screenshot user ~1024x653 (termasuk title bar)
         win_w = min(1000, max(sw - 40, 720))
-        win_h = min(620, max(sh - 80, 480))
+        win_h = min(580, max(sh - 80, 480))
         self._dash_min_w = min(720, win_w)
-        self._dash_min_h = 480
+        self._dash_min_h = 420
         self._tool_min_w = self._dash_min_w
         self._tool_min_h = min(520, max(480, sh - 100))
         self._dash_w = win_w
+        self._side_pad = 16
         self.minsize(self._dash_min_w, self._dash_min_h)
         x = max((sw - win_w) // 2, 0)
         y = 24
         self.geometry(f"{win_w}x{win_h}+{x}+{y}")
 
     def _shrink_window_to_content(self) -> None:
-        """Kunci lebar ~1000px; tinggi pas sampai footer (seperti screenshot)."""
+        """Tinggi = isi sebenarnya (bukan posisi footer di jendela yang masih tinggi)."""
         try:
-            self._content.pack_configure(fill="x", expand=False, padx=8, pady=(2, 2))
+            pad = int(getattr(self, "_side_pad", 16))
+            self._header.pack_configure(padx=pad, pady=(6, 2))
+            try:
+                if self._sysinfo_strip.winfo_ismapped():
+                    self._sysinfo_strip.pack_configure(padx=pad, pady=(0, 0))
+            except Exception:
+                pass
+            self._content.pack_configure(fill="x", expand=False, padx=pad, pady=(4, 4))
             self.update_idletasks()
+
+            h = 0
+            h += int(self._header.winfo_reqheight()) + 8  # pady header 6+2
+            if self._sysinfo_strip.winfo_ismapped():
+                h += int(self._sysinfo_strip.winfo_reqheight())
+            h += int(self._content.winfo_reqheight()) + 8  # pady content 4+4
+            h += int(self._footer.winfo_reqheight() or 34)
 
             sw = int(self.winfo_screenwidth())
             target_w = int(getattr(self, "_dash_w", 0) or min(1000, max(sw - 40, 720)))
-
-            # Ukur dari atas jendela sampai bawah footer
-            top = int(self.winfo_rooty())
-            foot_bottom = int(self._footer.winfo_rooty()) + int(self._footer.winfo_height())
-            outer_h = max(foot_bottom - top + 2, 480)
-            # Batasi agar tidak lebih tinggi dari referensi screenshot
-            outer_h = min(outer_h, 660)
-
+            target_h = max(h, 420)
             x = max((sw - target_w) // 2, 0)
             y = max(int(self.winfo_y()), 24)
-            self.minsize(min(720, target_w), min(480, outer_h))
-            self.geometry(f"{target_w}x{outer_h}+{x}+{y}")
+            self.minsize(min(720, target_w), min(420, target_h))
+            self.geometry(f"{target_w}x{target_h}+{x}+{y}")
         except Exception:
             pass
 
@@ -968,8 +975,11 @@ class NetworkToolsApp(ctk.CTk):
 
     def _show_sysinfo_strip(self) -> None:
         try:
+            pad = int(getattr(self, "_side_pad", 16))
             if not self._sysinfo_strip.winfo_ismapped():
-                self._sysinfo_strip.pack(fill="x", padx=16, pady=(0, 0), before=self._content)
+                self._sysinfo_strip.pack(fill="x", padx=pad, pady=(0, 0), before=self._content)
+            else:
+                self._sysinfo_strip.pack_configure(padx=pad, pady=(0, 0))
         except Exception:
             pass
 
@@ -1118,9 +1128,12 @@ class NetworkToolsApp(ctk.CTk):
         self._ping_combo = None
         self._trace_combo = None
 
+        pad = int(getattr(self, "_side_pad", 16))
         try:
-            self._header.pack_configure(padx=12, pady=(6, 2))
-            self._content.pack_configure(fill="x", expand=False, padx=8, pady=(2, 2))
+            self._header.pack_configure(padx=pad, pady=(6, 2))
+            self._content.pack_configure(fill="x", expand=False, padx=pad, pady=(4, 4))
+            if self._sysinfo_strip.winfo_ismapped():
+                self._sysinfo_strip.pack_configure(padx=pad, pady=(0, 0))
         except Exception:
             pass
 
