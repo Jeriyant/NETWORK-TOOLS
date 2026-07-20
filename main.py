@@ -243,9 +243,9 @@ class NetworkToolsApp(ctk.CTk):
             sw, sh = 1366, 768
 
         win_w = min(1000, max(sw - 40, 720))
-        win_h = min(580, max(sh - 80, 480))
+        win_h = min(560, max(sh - 80, 460))
         self._dash_min_w = min(720, win_w)
-        self._dash_min_h = 420
+        self._dash_min_h = 460
         self._tool_min_w = self._dash_min_w
         self._tool_min_h = min(520, max(480, sh - 100))
         self._dash_w = win_w
@@ -255,35 +255,38 @@ class NetworkToolsApp(ctk.CTk):
         y = 24
         self.geometry(f"{win_w}x{win_h}+{x}+{y}")
 
-    def _shrink_window_to_content(self) -> None:
-        """Tinggi = isi sebenarnya (bukan posisi footer di jendela yang masih tinggi)."""
+    def _fit_dashboard_window(self) -> None:
+        """Set tinggi jendela pas untuk 3 baris menu (tanpa ruang kosong)."""
         try:
-            pad = int(getattr(self, "_side_pad", 16))
-            self._header.pack_configure(padx=pad, pady=(6, 2))
-            try:
-                if self._sysinfo_strip.winfo_ismapped():
-                    self._sysinfo_strip.pack_configure(padx=pad, pady=(0, 0))
-            except Exception:
-                pass
-            self._content.pack_configure(fill="x", expand=False, padx=pad, pady=(4, 4))
             self.update_idletasks()
-
-            h = 0
-            h += int(self._header.winfo_reqheight()) + 8  # pady header 6+2
+            pref_row = 118
+            rows = 3
+            h = int(self._header.winfo_reqheight()) + 8
             if self._sysinfo_strip.winfo_ismapped():
                 h += int(self._sysinfo_strip.winfo_reqheight())
-            h += int(self._content.winfo_reqheight()) + 8  # pady content 4+4
+            h += rows * pref_row + 8
             h += int(self._footer.winfo_reqheight() or 34)
+            h = max(h, 460)
 
             sw = int(self.winfo_screenwidth())
-            target_w = int(getattr(self, "_dash_w", 0) or min(1000, max(sw - 40, 720)))
-            target_h = max(h, 420)
-            x = max((sw - target_w) // 2, 0)
+            w = int(getattr(self, "_dash_w", 0) or min(1000, max(sw - 40, 720)))
+            x = max((sw - w) // 2, 0)
             y = max(int(self.winfo_y()), 24)
-            self.minsize(min(720, target_w), min(420, target_h))
-            self.geometry(f"{target_w}x{target_h}+{x}+{y}")
+            self.minsize(min(720, w), min(460, h))
+            self.geometry(f"{w}x{h}+{x}+{y}")
+            self.after(30, self._refresh_tile_wrap)
         except Exception:
             pass
+
+    def _refresh_tile_wrap(self) -> None:
+        """Update wrap deskripsi saat lebar tile berubah (stretch)."""
+        for tile, desc_lbl in getattr(self, "_dash_tile_descs", []) or []:
+            try:
+                tw = int(tile.winfo_width())
+                if tw > 40:
+                    desc_lbl.configure(wraplength=max(tw - 28, 80))
+            except Exception:
+                pass
 
     def _apply_window_icon(self) -> None:
         """Samakan icon jendela dengan icon file EXE."""
@@ -1131,7 +1134,8 @@ class NetworkToolsApp(ctk.CTk):
         pad = int(getattr(self, "_side_pad", 16))
         try:
             self._header.pack_configure(padx=pad, pady=(6, 2))
-            self._content.pack_configure(fill="x", expand=False, padx=pad, pady=(4, 4))
+            # expand=True agar area konten terisi tile (tidak ada lubang kosong)
+            self._content.pack_configure(fill="both", expand=True, padx=pad, pady=(4, 4))
             if self._sysinfo_strip.winfo_ismapped():
                 self._sysinfo_strip.pack_configure(padx=pad, pady=(0, 0))
         except Exception:
@@ -1160,29 +1164,23 @@ class NetworkToolsApp(ctk.CTk):
             text_color=COLORS["muted"],
         ).pack(anchor="w", pady=(0, 0))
 
-        # Tema + bahasa di baris atas (parent = top)
         self._header_actions(top)
-
         self._build_sysinfo_bar(self._sysinfo_strip)
 
-        # Grid tile seragam (ukuran kotak sama)
+        # Grid stretch: ikut membesar saat jendela di-resize
         grid = ctk.CTkFrame(self._content, fg_color="transparent")
-        grid.pack(fill="x", anchor="n")
+        grid.pack(fill="both", expand=True)
+        self._dash_grid = grid
+        self._dash_tile_descs: list[tuple[Any, Any]] = []
         tools = tools_for_ui()
 
-        try:
-            win_w = max(int(getattr(self, "_dash_w", 0) or self.winfo_width()), 900)
-        except Exception:
-            win_w = 1000
         cols = 4
         for i in range(cols):
             grid.grid_columnconfigure(i, weight=1, uniform="tiles")
         rows = (len(tools) + cols - 1) // cols
         for r in range(rows):
-            grid.grid_rowconfigure(r, weight=0, uniform="tile_rows")
+            grid.grid_rowconfigure(r, weight=1, uniform="tile_rows")
 
-        wrap = 145
-        tile_h = 112
         for idx, (key, title, icon, desc) in enumerate(tools):
             r, c = divmod(idx, cols)
             tile = ctk.CTkFrame(
@@ -1191,10 +1189,8 @@ class NetworkToolsApp(ctk.CTk):
                 corner_radius=8,
                 border_width=1,
                 border_color=COLORS["border"],
-                height=tile_h,
             )
             tile.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
-            tile.grid_propagate(False)
             inner = ctk.CTkFrame(tile, fg_color="transparent")
             inner.pack(fill="both", expand=True, padx=10, pady=8)
             ctk.CTkLabel(
@@ -1211,16 +1207,17 @@ class NetworkToolsApp(ctk.CTk):
                 text_color=COLORS["text"],
                 height=18,
             ).pack(anchor="w", pady=(2, 0))
-            ctk.CTkLabel(
+            desc_lbl = ctk.CTkLabel(
                 inner,
                 text=desc,
                 font=ctk.CTkFont(size=10),
                 text_color=COLORS["muted"],
-                wraplength=wrap,
+                wraplength=140,
                 justify="left",
                 anchor="nw",
-                height=30,
-            ).pack(anchor="w", fill="x", pady=(0, 0))
+            )
+            desc_lbl.pack(anchor="w", fill="x", pady=(0, 0))
+            self._dash_tile_descs.append((tile, desc_lbl))
             btn = ctk.CTkButton(
                 inner,
                 text=t("app.open"),
@@ -1250,9 +1247,12 @@ class NetworkToolsApp(ctk.CTk):
                 except Exception:
                     pass
 
-        # Tinggi jendela mengikuti barisan menu
-        self.after(100, self._shrink_window_to_content)
-        self.after(250, self._shrink_window_to_content)
+        def _on_grid_cfg(_event: Any = None) -> None:
+            self.after(40, self._refresh_tile_wrap)
+
+        grid.bind("<Configure>", _on_grid_cfg)
+        self.after(80, self._fit_dashboard_window)
+        self.after(200, self._fit_dashboard_window)
 
     def open_tool(self, key: str) -> None:
         self._stop_runner()
