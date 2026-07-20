@@ -1,4 +1,4 @@
-"""Classic short ping / failure sounds for Ping & Traceroute (Windows)."""
+"""Short ting/tet sounds for Ping & Traceroute (Windows)."""
 
 from __future__ import annotations
 
@@ -9,26 +9,25 @@ _HOP_LINE = re.compile(r"^\s*\d+\s+")
 
 
 def play_ting(*, success: bool = True) -> None:
-    """Nada khas ping pendek (sukses) atau bunyi failure sistem (timeout)."""
+    """Ting (sukses) atau tet (timeout) — beep pendek, non-blocking."""
 
     def _play() -> None:
         try:
             import winsound
 
             if success:
-                # Nada khas ping: beep pendek tajam
-                winsound.Beep(1000, 50)
+                # ting — nada tinggi pendek
+                winsound.Beep(1650, 45)
             else:
-                # Failure: bunyi error Windows
-                winsound.MessageBeep(winsound.MB_ICONHAND)
+                # tet — nada rendah pendek
+                winsound.Beep(380, 70)
         except Exception:
             try:
                 import winsound
 
-                if success:
-                    winsound.MessageBeep(winsound.MB_OK)
-                else:
-                    winsound.Beep(300, 120)
+                winsound.MessageBeep(
+                    winsound.MB_OK if success else winsound.MB_ICONHAND
+                )
             except Exception:
                 pass
 
@@ -36,7 +35,7 @@ def play_ting(*, success: bool = True) -> None:
 
 
 def notify_ping_line(line: str) -> None:
-    """Ping tone on successful reply; failure on timeout."""
+    """Ting on reply; tet on timeout."""
     low = (line or "").lower()
     if not low.strip():
         return
@@ -52,6 +51,7 @@ def notify_ping_line(line: str) -> None:
         "timed out" in low
         or "habis waktu" in low
         or "waktu tunggu permintaan" in low
+        or "request timed out" in low
         or "general failure" in low
         or "destination host unreachable" in low
         or "tidak dapat diakses" in low
@@ -60,7 +60,7 @@ def notify_ping_line(line: str) -> None:
 
 
 def notify_traceroute_line(line: str) -> None:
-    """Ping tone on hop reply; failure if hop is all timeouts (*)."""
+    """Ting on hop reply; tet if hop is all timeouts (*)."""
     text = (line or "").rstrip()
     if not text or not _HOP_LINE.match(text):
         return
