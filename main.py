@@ -1093,8 +1093,8 @@ class NetworkToolsApp(ctk.CTk):
         self._trace_combo = None
 
         try:
-            self._header.pack_configure(padx=16, pady=(10, 2))
-            self._content.pack_configure(padx=12, pady=4)
+            self._header.pack_configure(padx=16, pady=(8, 2))
+            self._content.pack_configure(padx=10, pady=(2, 2))
         except Exception:
             pass
 
@@ -1126,19 +1126,11 @@ class NetworkToolsApp(ctk.CTk):
 
         self._build_sysinfo_bar(self._sysinfo_strip)
 
-        # Scroll agar tetap nyaman di resolusi kecil
-        scroll = ctk.CTkScrollableFrame(
-            self._content,
-            fg_color="transparent",
-            corner_radius=0,
-        )
-        scroll.pack(fill="both", expand=True)
-
-        grid = ctk.CTkFrame(scroll, fg_color="transparent")
+        # Frame biasa (tanpa scrollbar) — tile compact agar muat 1 layar
+        grid = ctk.CTkFrame(self._content, fg_color="transparent")
         grid.pack(fill="both", expand=True)
         tools = tools_for_ui()
 
-        # 4 kolom jika lebar cukup, 3 kolom di layar sempit
         try:
             win_w = max(int(self.winfo_width()), int(self.winfo_screenwidth()) - 80)
         except Exception:
@@ -1150,50 +1142,53 @@ class NetworkToolsApp(ctk.CTk):
         for r in range(rows):
             grid.grid_rowconfigure(r, weight=1, uniform="tiles")
 
-        wrap = 150 if cols == 4 else 180
+        wrap = 140 if cols == 4 else 170
         for idx, (key, title, icon, desc) in enumerate(tools):
             r, c = divmod(idx, cols)
             tile = ctk.CTkFrame(
                 grid,
                 fg_color=COLORS["tile"],
-                corner_radius=10,
+                corner_radius=8,
                 border_width=1,
                 border_color=COLORS["border"],
             )
-            tile.grid(row=r, column=c, padx=6, pady=6, sticky="nsew")
+            tile.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
             inner = ctk.CTkFrame(tile, fg_color="transparent")
-            inner.pack(fill="both", expand=True, padx=12, pady=10)
+            inner.pack(fill="both", expand=True, padx=10, pady=7)
             ctk.CTkLabel(
                 inner,
                 text=icon,
-                font=ctk.CTkFont(size=22),
+                font=ctk.CTkFont(size=18),
                 text_color=COLORS["accent"],
+                height=20,
             ).pack(anchor="w")
             ctk.CTkLabel(
                 inner,
                 text=title,
-                font=ctk.CTkFont(family="Segoe UI Semibold", size=14),
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=13),
                 text_color=COLORS["text"],
-            ).pack(anchor="w", pady=(4, 0))
+                height=18,
+            ).pack(anchor="w", pady=(2, 0))
             ctk.CTkLabel(
                 inner,
                 text=desc,
-                font=ctk.CTkFont(size=11),
+                font=ctk.CTkFont(size=10),
                 text_color=COLORS["muted"],
                 wraplength=wrap,
                 justify="left",
-            ).pack(anchor="w", pady=(1, 0))
+                height=28,
+            ).pack(anchor="w", pady=(0, 0))
             btn = ctk.CTkButton(
                 inner,
                 text=t("app.open"),
-                width=80,
-                height=28,
+                width=72,
+                height=26,
                 fg_color=COLORS["accent"],
                 hover_color=COLORS["accent_dim"],
                 text_color=COLORS["on_accent"],
                 command=lambda k=key: self.open_tool(k),
             )
-            btn.pack(anchor="w", pady=(8, 0))
+            btn.pack(anchor="w", pady=(6, 0))
 
             def _open(_event: Any = None, k: str = key) -> None:
                 self.open_tool(k)
