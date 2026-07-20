@@ -782,7 +782,7 @@ class NetworkToolsApp(ctk.CTk):
         lang_combo.pack(side="right")
 
     def _build_sysinfo_bar(self, parent: ctk.CTkFrame) -> None:
-        """Status strip; lebar kolom menyesuaikan teks (wrap hanya jika sempit)."""
+        """Status strip compact; kolom mengikuti teks, tanpa celah expand di tengah."""
         # Sudah ada — jangan rebuild / jangan reload data
         if self._sysinfo_value_labels and parent.winfo_children():
             self._show_sysinfo_strip()
@@ -799,16 +799,18 @@ class NetworkToolsApp(ctk.CTk):
             corner_radius=10,
             border_width=1,
             border_color=COLORS["border"],
+            height=52,
         )
         bar.pack(fill="x", pady=(6, 0))
+        bar.pack_propagate(False)
+        self._sysinfo_bar = bar
 
         rail = ctk.CTkFrame(bar, fg_color=COLORS["accent"], width=4, corner_radius=0)
         rail.pack(side="left", fill="y")
 
         body = ctk.CTkFrame(bar, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=(10, 12), pady=(5, 6))
+        body.pack(fill="both", expand=True, padx=(10, 10), pady=(4, 5))
         self._sysinfo_body = body
-        self._sysinfo_bar = bar
 
         metrics = [
             ("hostname", t("sys.host"), "…", True),
@@ -824,9 +826,9 @@ class NetworkToolsApp(ctk.CTk):
         self._sysinfo_flex_keys = ("cpu", "windows")
 
         for idx, (cache_key, label, placeholder, emphasize) in enumerate(metrics):
-            flex = cache_key in self._sysinfo_flex_keys
+            # Jangan expand — biar tidak ada lubang kosong di tengah bar
             cell = ctk.CTkFrame(body, fg_color="transparent")
-            cell.pack(side="left", fill="y", expand=flex, padx=(0, 2))
+            cell.pack(side="left", padx=(0, 2))
             self._sysinfo_cells[cache_key] = cell
 
             ctk.CTkLabel(
@@ -835,7 +837,7 @@ class NetworkToolsApp(ctk.CTk):
                 font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
                 text_color=COLORS["muted"],
                 anchor="w",
-                height=14,
+                height=12,
             ).pack(anchor="w")
 
             value = ctk.CTkLabel(
@@ -846,11 +848,12 @@ class NetworkToolsApp(ctk.CTk):
                     size=12 if emphasize else 11,
                 ),
                 text_color=COLORS["accent"] if emphasize else COLORS["text"],
-                anchor="nw",
+                anchor="w",
                 justify="left",
                 wraplength=0,
+                height=18,
             )
-            value.pack(anchor="nw", fill="x")
+            value.pack(anchor="w")
             self._sysinfo_value_labels[cache_key] = value
 
             if idx < len(metrics) - 1:
@@ -858,11 +861,12 @@ class NetworkToolsApp(ctk.CTk):
                     body,
                     fg_color=COLORS["border"],
                     width=1,
+                    height=28,
                     corner_radius=0,
                 )
-                sep.pack(side="left", fill="y", padx=4, pady=2)
+                sep.pack(side="left", padx=6, pady=2)
 
-        body.bind("<Configure>", lambda _e: self.after(50, self._relayout_sysinfo))
+        body.bind("<Configure>", lambda _e: self.after(60, self._relayout_sysinfo))
         self.after(120, self._relayout_sysinfo)
 
         self._show_sysinfo_strip()
@@ -873,10 +877,10 @@ class NetworkToolsApp(ctk.CTk):
             self.after(40, self._load_sysinfo_once)
 
     def _relayout_sysinfo(self) -> None:
-        """Sesuaikan wrap: lurus jika muat, wrap jika jendela/kolom sempit."""
+        """Teks lurus jika muat; wrap + bar sedikit lebih tinggi jika sempit."""
         labels = getattr(self, "_sysinfo_value_labels", None) or {}
-        cells = getattr(self, "_sysinfo_cells", None) or {}
         body = getattr(self, "_sysinfo_body", None)
+        bar = getattr(self, "_sysinfo_bar", None)
         flex_keys = getattr(self, "_sysinfo_flex_keys", ("cpu", "windows"))
         if not labels or body is None:
             return
@@ -887,10 +891,10 @@ class NetworkToolsApp(ctk.CTk):
             if avail < 80:
                 return
 
-            # Ukur lebar natural semua nilai (tanpa wrap)
-            for lbl in labels.values():
+            for key, lbl in labels.items():
                 try:
-                    lbl.configure(wraplength=0)
+                    # ukur natural
+                    lbl.configure(wraplength=0, height=18)
                 except Exception:
                     pass
             body.update_idletasks()
@@ -898,47 +902,41 @@ class NetworkToolsApp(ctk.CTk):
             natural: dict[str, int] = {}
             for key, lbl in labels.items():
                 try:
-                    natural[key] = max(int(lbl.winfo_reqwidth()), 40)
+                    natural[key] = max(int(lbl.winfo_reqwidth()), 36)
                 except Exception:
-                    natural[key] = 80
+                    natural[key] = 72
 
-            # Total natural + padding/separator (~12 per item)
-            pad = 12 * max(len(labels) - 1, 0)
+            pad = 14 * max(len(labels) - 1, 0)
             total = sum(natural.values()) + pad
+            need_wrap = total > avail
 
-            if total <= avail:
-                # Semua muat satu baris
+            if not need_wrap:
                 for key in flex_keys:
                     lbl = labels.get(key)
-                    if lbl is not None:
-                        lbl.configure(wraplength=0)
+                    if lbl is not None and int(lbl.cget("wraplength") or 0) != 0:
+                        lbl.configure(wraplength=0, height=18)
+                if bar is not None:
+                    bar.configure(height=52)
                 return
 
-            # Sisakan lebar untuk field pendek; sisanya bagi ke CPU/Windows
             fixed = pad
             for key, w in natural.items():
                 if key not in flex_keys:
                     fixed += w
-            remain = max(avail - fixed, 80)
+            remain = max(avail - fixed, 100)
             flex_need = sum(natural.get(k, 80) for k in flex_keys) or 1
             for key in flex_keys:
                 lbl = labels.get(key)
-                cell = cells.get(key)
                 if lbl is None:
                     continue
-                share = max(int(remain * natural.get(key, 80) / flex_need), 60)
+                share = max(int(remain * natural.get(key, 80) / flex_need) - 4, 70)
                 need = natural.get(key, 80)
                 if need <= share:
-                    if int(lbl.cget("wraplength") or 0) != 0:
-                        lbl.configure(wraplength=0)
+                    lbl.configure(wraplength=0, height=18)
                 else:
-                    try:
-                        cell_w = int(cell.winfo_width()) if cell is not None else share
-                    except Exception:
-                        cell_w = share
-                    wrap = max(min(share, cell_w) - 4, 60)
-                    if int(lbl.cget("wraplength") or 0) != wrap:
-                        lbl.configure(wraplength=wrap)
+                    lbl.configure(wraplength=share, height=0)
+            if bar is not None:
+                bar.configure(height=68)
         except Exception:
             pass
 
