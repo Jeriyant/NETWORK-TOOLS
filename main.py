@@ -234,7 +234,7 @@ class NetworkToolsApp(ctk.CTk):
             pass
 
     def _fit_window_to_screen(self) -> None:
-        """Sesuaikan ukuran jendela agar muat di resolusi kecil."""
+        """Jendela compact agar muat di layar kecil."""
         try:
             self.update_idletasks()
             sw = int(self.winfo_screenwidth())
@@ -242,15 +242,32 @@ class NetworkToolsApp(ctk.CTk):
         except Exception:
             sw, sh = 1366, 768
 
-        # Cadangan taskbar / margin OS
-        max_w = max(sw - 40, 720)
-        max_h = max(sh - 80, 520)
-        win_w = min(980, max_w)
-        win_h = min(700, max_h)
-        min_w = min(780, max(720, max_w - 20))
-        min_h = min(560, max(480, max_h - 20))
+        max_w = max(sw - 40, 640)
+        max_h = max(sh - 80, 480)
+        win_w = min(860, max_w)
+        win_h = min(560, max_h)
+        min_w = min(720, max(640, max_w - 40))
+        min_h = min(480, max(420, max_h - 40))
         self.minsize(min_w, min_h)
-        self.geometry(f"{win_w}x{win_h}")
+        x = max((sw - win_w) // 2, 0)
+        y = 24
+        self.geometry(f"{win_w}x{win_h}+{x}+{y}")
+
+    def _shrink_window_to_content(self) -> None:
+        """Perkecil tinggi jendela mengikuti isi dashboard (tanpa ruang kosong besar)."""
+        try:
+            self.update_idletasks()
+            req_h = int(self.winfo_reqheight())
+            cur_w = int(self.winfo_width())
+            cur_h = int(self.winfo_height())
+            # Cadangan sedikit untuk title bar / margin
+            target_h = min(max(req_h + 8, 420), cur_h)
+            if target_h < cur_h - 20:
+                x = int(self.winfo_x())
+                y = int(self.winfo_y())
+                self.geometry(f"{cur_w}x{target_h}+{x}+{y}")
+        except Exception:
+            pass
 
     def _apply_window_icon(self) -> None:
         """Samakan icon jendela dengan icon file EXE."""
@@ -1093,8 +1110,8 @@ class NetworkToolsApp(ctk.CTk):
         self._trace_combo = None
 
         try:
-            self._header.pack_configure(padx=16, pady=(8, 2))
-            self._content.pack_configure(padx=10, pady=(2, 2))
+            self._header.pack_configure(padx=12, pady=(6, 2))
+            self._content.pack_configure(padx=8, pady=(2, 2))
         except Exception:
             pass
 
@@ -1111,13 +1128,13 @@ class NetworkToolsApp(ctk.CTk):
         ctk.CTkLabel(
             brand,
             text=t("app.brand"),
-            font=ctk.CTkFont(family="Segoe UI", size=22, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"),
             text_color=COLORS["accent"],
         ).pack(anchor="w")
         ctk.CTkLabel(
             brand,
             text=t("app.tagline"),
-            font=ctk.CTkFont(family="Segoe UI", size=12),
+            font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color=COLORS["muted"],
         ).pack(anchor="w", pady=(0, 0))
 
@@ -1126,23 +1143,21 @@ class NetworkToolsApp(ctk.CTk):
 
         self._build_sysinfo_bar(self._sysinfo_strip)
 
-        # Frame biasa (tanpa scrollbar) — tile compact agar muat 1 layar
+        # Tile mengikuti isi (tinggi natural), tidak ditarik memenuhi jendela
         grid = ctk.CTkFrame(self._content, fg_color="transparent")
-        grid.pack(fill="both", expand=True)
+        grid.pack(fill="x", anchor="n")
         tools = tools_for_ui()
 
         try:
-            win_w = max(int(self.winfo_width()), int(self.winfo_screenwidth()) - 80)
+            win_w = max(int(self.winfo_width()), 800)
         except Exception:
-            win_w = 980
-        cols = 3 if win_w < 900 else 4
+            win_w = 860
+        cols = 3 if win_w < 780 else 4
         for i in range(cols):
             grid.grid_columnconfigure(i, weight=1, uniform="tiles")
-        rows = (len(tools) + cols - 1) // cols
-        for r in range(rows):
-            grid.grid_rowconfigure(r, weight=1, uniform="tiles")
+        # Tanpa row weight agar tinggi kotak = isi
 
-        wrap = 140 if cols == 4 else 170
+        wrap = 130 if cols == 4 else 160
         for idx, (key, title, icon, desc) in enumerate(tools):
             r, c = divmod(idx, cols)
             tile = ctk.CTkFrame(
@@ -1152,23 +1167,24 @@ class NetworkToolsApp(ctk.CTk):
                 border_width=1,
                 border_color=COLORS["border"],
             )
-            tile.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
+            # sticky new = lebar kolom sama, tinggi mengikuti isi
+            tile.grid(row=r, column=c, padx=3, pady=3, sticky="new")
             inner = ctk.CTkFrame(tile, fg_color="transparent")
-            inner.pack(fill="both", expand=True, padx=10, pady=7)
+            inner.pack(fill="x", padx=8, pady=6)
             ctk.CTkLabel(
                 inner,
                 text=icon,
-                font=ctk.CTkFont(size=18),
+                font=ctk.CTkFont(size=16),
                 text_color=COLORS["accent"],
-                height=20,
+                height=18,
             ).pack(anchor="w")
             ctk.CTkLabel(
                 inner,
                 text=title,
-                font=ctk.CTkFont(family="Segoe UI Semibold", size=13),
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=12),
                 text_color=COLORS["text"],
-                height=18,
-            ).pack(anchor="w", pady=(2, 0))
+                height=16,
+            ).pack(anchor="w", pady=(1, 0))
             ctk.CTkLabel(
                 inner,
                 text=desc,
@@ -1176,19 +1192,19 @@ class NetworkToolsApp(ctk.CTk):
                 text_color=COLORS["muted"],
                 wraplength=wrap,
                 justify="left",
-                height=28,
+                anchor="w",
             ).pack(anchor="w", pady=(0, 0))
             btn = ctk.CTkButton(
                 inner,
                 text=t("app.open"),
-                width=72,
-                height=26,
+                width=64,
+                height=24,
                 fg_color=COLORS["accent"],
                 hover_color=COLORS["accent_dim"],
                 text_color=COLORS["on_accent"],
                 command=lambda k=key: self.open_tool(k),
             )
-            btn.pack(anchor="w", pady=(6, 0))
+            btn.pack(anchor="w", pady=(5, 0))
 
             def _open(_event: Any = None, k: str = key) -> None:
                 self.open_tool(k)
@@ -1206,6 +1222,9 @@ class NetworkToolsApp(ctk.CTk):
                     child.bind("<Leave>", lambda e, t=tile: t.configure(fg_color=COLORS["tile"]))
                 except Exception:
                     pass
+
+        # Sesuaikan tinggi jendela ke konten agar tidak ada ruang kosong besar
+        self.after(80, self._shrink_window_to_content)
 
     def open_tool(self, key: str) -> None:
         self._stop_runner()
