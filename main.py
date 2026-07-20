@@ -143,7 +143,7 @@ class ConsoleView(ctk.CTkFrame):
         super().__init__(master, fg_color=COLORS["console_bg"], **kwargs)
         self.text = ctk.CTkTextbox(
             self,
-            font=ctk.CTkFont(family="Consolas", size=12),
+            font=ctk.CTkFont(family="Consolas", size=13),
             fg_color=COLORS["console_bg"],
             text_color=COLORS["console_fg"],
             wrap="word",
@@ -175,8 +175,7 @@ class NetworkToolsApp(ctk.CTk):
         self._apply_palette(refresh_ui=False)
 
         self.title(t("app.title", version=APP_VERSION))
-        self.geometry("900x640")
-        self.minsize(760, 520)
+        self._fit_window_to_screen()
         self.configure(fg_color=COLORS["bg"])
         self._apply_window_icon()
 
@@ -199,13 +198,13 @@ class NetworkToolsApp(ctk.CTk):
         self._send_text_payload: str = ""
 
         self._header = ctk.CTkFrame(self, fg_color="transparent")
-        self._header.pack(fill="x", padx=14, pady=(8, 2))
+        self._header.pack(fill="x", padx=16, pady=(10, 2))
         self._sysinfo_strip = ctk.CTkFrame(self, fg_color="transparent")
-        self._sysinfo_strip.pack(fill="x", padx=14, pady=(0, 0))
+        self._sysinfo_strip.pack(fill="x", padx=16, pady=(0, 0))
         self._content = ctk.CTkFrame(self, fg_color="transparent")
         self._content.pack(fill="both", expand=True, padx=12, pady=4)
         self._action_bar = ctk.CTkFrame(self, fg_color="transparent")
-        self._footer = ctk.CTkFrame(self, fg_color=COLORS["panel"], height=30, corner_radius=0)
+        self._footer = ctk.CTkFrame(self, fg_color=COLORS["panel"], height=34, corner_radius=0)
         self._footer.pack(fill="x", side="bottom")
         self._footer.pack_propagate(False)
 
@@ -213,7 +212,7 @@ class NetworkToolsApp(ctk.CTk):
         self._footer_label = ctk.CTkLabel(
             self._footer,
             text=f"Copyright © {year} JERIYANT - BARAMCITY",
-            font=ctk.CTkFont(family="Segoe UI", size=10),
+            font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color=COLORS["muted"],
             justify="center",
         )
@@ -233,6 +232,25 @@ class NetworkToolsApp(ctk.CTk):
             cleanup_update_leftovers()
         except Exception:
             pass
+
+    def _fit_window_to_screen(self) -> None:
+        """Sesuaikan ukuran jendela agar muat di resolusi kecil."""
+        try:
+            self.update_idletasks()
+            sw = int(self.winfo_screenwidth())
+            sh = int(self.winfo_screenheight())
+        except Exception:
+            sw, sh = 1366, 768
+
+        # Cadangan taskbar / margin OS
+        max_w = max(sw - 40, 720)
+        max_h = max(sh - 80, 520)
+        win_w = min(980, max_w)
+        win_h = min(700, max_h)
+        min_w = min(780, max(720, max_w - 20))
+        min_h = min(560, max(480, max_h - 20))
+        self.minsize(min_w, min_h)
+        self.geometry(f"{win_w}x{win_h}")
 
     def _apply_window_icon(self) -> None:
         """Samakan icon jendela dengan icon file EXE."""
@@ -725,16 +743,15 @@ class NetworkToolsApp(ctk.CTk):
     def _header_actions(self, parent: ctk.CTkFrame | None = None) -> None:
         host = parent if parent is not None else self._header
         actions = ctk.CTkFrame(host, fg_color="transparent")
-        actions.pack(side="right", pady=0)
+        actions.pack(side="right", pady=4)
 
         theme_values = i18n_theme_values()
         theme_current = theme_label(self.theme_mode)
         theme_combo = ctk.CTkOptionMenu(
             actions,
             values=theme_values,
-            width=140,
-            height=28,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
+            width=170,
+            height=34,
             fg_color=COLORS["tile"],
             button_color=COLORS["accent"],
             button_hover_color=COLORS["accent_dim"],
@@ -744,16 +761,15 @@ class NetworkToolsApp(ctk.CTk):
             command=self._on_theme_dropdown,
         )
         theme_combo.set(theme_current if theme_current in theme_values else theme_values[0])
-        theme_combo.pack(side="right", padx=(6, 0))
+        theme_combo.pack(side="right", padx=(8, 0))
 
         lang_values = lang_dropdown_values()
         lang_current = t("lang.en") if get_lang() == "en" else t("lang.id")
         lang_combo = ctk.CTkOptionMenu(
             actions,
             values=lang_values,
-            width=120,
-            height=28,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
+            width=170,
+            height=34,
             fg_color=COLORS["tile"],
             button_color=COLORS["accent"],
             button_hover_color=COLORS["accent_dim"],
@@ -780,19 +796,19 @@ class NetworkToolsApp(ctk.CTk):
         bar = ctk.CTkFrame(
             parent,
             fg_color=COLORS["panel"],
-            corner_radius=8,
+            corner_radius=10,
             border_width=1,
             border_color=COLORS["border"],
-            height=56,
+            height=68,
         )
-        bar.pack(fill="x", pady=(4, 0))
+        bar.pack(fill="x", pady=(6, 0))
         bar.pack_propagate(False)
 
-        rail = ctk.CTkFrame(bar, fg_color=COLORS["accent"], width=3, corner_radius=0)
+        rail = ctk.CTkFrame(bar, fg_color=COLORS["accent"], width=4, corner_radius=0)
         rail.pack(side="left", fill="y")
 
         body = ctk.CTkFrame(bar, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=(8, 10), pady=4)
+        body.pack(fill="both", expand=True, padx=(10, 12), pady=6)
 
         metrics = [
             ("hostname", t("sys.host"), "…", True),
@@ -818,7 +834,7 @@ class NetworkToolsApp(ctk.CTk):
             ctk.CTkLabel(
                 cell,
                 text=label,
-                font=ctk.CTkFont(family="Segoe UI", size=8, weight="bold"),
+                font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
                 text_color=COLORS["muted"],
                 anchor="w",
             ).pack(anchor="w")
@@ -828,7 +844,7 @@ class NetworkToolsApp(ctk.CTk):
                 text=placeholder,
                 font=ctk.CTkFont(
                     family="Segoe UI Semibold",
-                    size=11 if emphasize else 10,
+                    size=12 if emphasize else 11,
                 ),
                 text_color=COLORS["accent"] if emphasize else COLORS["text"],
                 anchor="w",
@@ -845,7 +861,7 @@ class NetworkToolsApp(ctk.CTk):
                     width=1,
                     corner_radius=0,
                 )
-                sep.grid(row=0, column=idx * 2 + 1, sticky="ns", padx=4, pady=1)
+                sep.grid(row=0, column=idx * 2 + 1, sticky="ns", padx=4, pady=2)
 
         self._show_sysinfo_strip()
         if self._sysinfo_cache:
@@ -857,7 +873,7 @@ class NetworkToolsApp(ctk.CTk):
     def _show_sysinfo_strip(self) -> None:
         try:
             if not self._sysinfo_strip.winfo_ismapped():
-                self._sysinfo_strip.pack(fill="x", padx=14, pady=(0, 0), before=self._content)
+                self._sysinfo_strip.pack(fill="x", padx=16, pady=(0, 0), before=self._content)
         except Exception:
             pass
 
@@ -1006,7 +1022,7 @@ class NetworkToolsApp(ctk.CTk):
         self._trace_combo = None
 
         try:
-            self._header.pack_configure(padx=14, pady=(8, 2))
+            self._header.pack_configure(padx=16, pady=(10, 2))
             self._content.pack_configure(padx=12, pady=4)
         except Exception:
             pass
@@ -1024,13 +1040,13 @@ class NetworkToolsApp(ctk.CTk):
         ctk.CTkLabel(
             brand,
             text=t("app.brand"),
-            font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=22, weight="bold"),
             text_color=COLORS["accent"],
         ).pack(anchor="w")
         ctk.CTkLabel(
             brand,
             text=t("app.tagline"),
-            font=ctk.CTkFont(family="Segoe UI", size=11),
+            font=ctk.CTkFont(family="Segoe UI", size=12),
             text_color=COLORS["muted"],
         ).pack(anchor="w", pady=(0, 0))
 
@@ -1039,50 +1055,68 @@ class NetworkToolsApp(ctk.CTk):
 
         self._build_sysinfo_bar(self._sysinfo_strip)
 
-        grid = ctk.CTkFrame(self._content, fg_color="transparent")
+        # Scroll agar tetap nyaman di resolusi kecil
+        scroll = ctk.CTkScrollableFrame(
+            self._content,
+            fg_color="transparent",
+            corner_radius=0,
+        )
+        scroll.pack(fill="both", expand=True)
+
+        grid = ctk.CTkFrame(scroll, fg_color="transparent")
         grid.pack(fill="both", expand=True)
         tools = tools_for_ui()
-        for i in range(4):
+
+        # 4 kolom jika lebar cukup, 3 kolom di layar sempit
+        try:
+            win_w = max(int(self.winfo_width()), int(self.winfo_screenwidth()) - 80)
+        except Exception:
+            win_w = 980
+        cols = 3 if win_w < 900 else 4
+        for i in range(cols):
             grid.grid_columnconfigure(i, weight=1, uniform="tiles")
-        rows = (len(tools) + 3) // 4
+        rows = (len(tools) + cols - 1) // cols
         for r in range(rows):
             grid.grid_rowconfigure(r, weight=1, uniform="tiles")
 
+        wrap = 150 if cols == 4 else 180
         for idx, (key, title, icon, desc) in enumerate(tools):
-            r, c = divmod(idx, 4)
+            r, c = divmod(idx, cols)
             tile = ctk.CTkFrame(
                 grid,
                 fg_color=COLORS["tile"],
-                corner_radius=8,
+                corner_radius=10,
                 border_width=1,
                 border_color=COLORS["border"],
             )
-            tile.grid(row=r, column=c, padx=5, pady=5, sticky="nsew")
+            tile.grid(row=r, column=c, padx=6, pady=6, sticky="nsew")
             inner = ctk.CTkFrame(tile, fg_color="transparent")
-            inner.pack(fill="both", expand=True, padx=10, pady=8)
-            ctk.CTkLabel(inner, text=icon, font=ctk.CTkFont(size=20), text_color=COLORS["accent"]).pack(
-                anchor="w"
-            )
+            inner.pack(fill="both", expand=True, padx=12, pady=10)
+            ctk.CTkLabel(
+                inner,
+                text=icon,
+                font=ctk.CTkFont(size=22),
+                text_color=COLORS["accent"],
+            ).pack(anchor="w")
             ctk.CTkLabel(
                 inner,
                 text=title,
-                font=ctk.CTkFont(family="Segoe UI Semibold", size=13),
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=14),
                 text_color=COLORS["text"],
-            ).pack(anchor="w", pady=(4, 1))
+            ).pack(anchor="w", pady=(4, 0))
             ctk.CTkLabel(
                 inner,
                 text=desc,
-                font=ctk.CTkFont(size=10),
+                font=ctk.CTkFont(size=11),
                 text_color=COLORS["muted"],
-                wraplength=150,
+                wraplength=wrap,
                 justify="left",
-            ).pack(anchor="w")
+            ).pack(anchor="w", pady=(1, 0))
             btn = ctk.CTkButton(
                 inner,
                 text=t("app.open"),
-                width=72,
-                height=26,
-                font=ctk.CTkFont(family="Segoe UI", size=11),
+                width=80,
+                height=28,
                 fg_color=COLORS["accent"],
                 hover_color=COLORS["accent_dim"],
                 text_color=COLORS["on_accent"],
@@ -1097,7 +1131,6 @@ class NetworkToolsApp(ctk.CTk):
                 widget.bind("<Enter>", lambda e, t=tile: t.configure(fg_color=COLORS["tile_hover"]))
                 widget.bind("<Leave>", lambda e, t=tile: t.configure(fg_color=COLORS["tile"]))
                 widget.bind("<Button-1>", _open)
-            # Label ikut bisa diklik
             for child in inner.winfo_children():
                 if child is btn:
                     continue
@@ -1116,7 +1149,7 @@ class NetworkToolsApp(ctk.CTk):
         self._clear_frame(self._action_bar)
 
         try:
-            self._header.pack_configure(padx=14, pady=(8, 2))
+            self._header.pack_configure(padx=16, pady=(10, 2))
             self._content.pack_configure(padx=12, pady=4)
         except Exception:
             pass
@@ -1128,7 +1161,7 @@ class NetworkToolsApp(ctk.CTk):
             ctk.CTkLabel(
                 self._header,
                 text=title,
-                font=ctk.CTkFont(family="Segoe UI Semibold", size=16),
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=20),
                 text_color=COLORS["text"],
             ).pack(side="left")
             if key == "speedtest":
@@ -1154,7 +1187,7 @@ class NetworkToolsApp(ctk.CTk):
         ctk.CTkLabel(
             top,
             text=title,
-            font=ctk.CTkFont(family="Segoe UI Semibold", size=16),
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=22),
             text_color=COLORS["text"],
         ).pack(side="left")
         self._header_actions(top)
@@ -1163,32 +1196,30 @@ class NetworkToolsApp(ctk.CTk):
         # Tool-specific controls at top of content
         if key not in AUTO_RUN_TOOLS:
             controls = ctk.CTkFrame(self._content, fg_color="transparent")
-            controls.pack(fill="x", pady=(0, 4))
+            controls.pack(fill="x", pady=(0, 8))
             self._build_tool_controls(key, controls)
 
         self.console = ConsoleView(self._content)
         self.console.pack(fill="both", expand=True)
 
         # Action bar: Kirim + Kembali
-        self._action_bar.pack(fill="x", padx=12, pady=(0, 4), before=self._footer)
+        self._action_bar.pack(fill="x", padx=12, pady=(0, 6), before=self._footer)
         ctk.CTkButton(
             self._action_bar,
             text=t("app.back"),
-            width=100,
-            height=30,
-            font=ctk.CTkFont(family="Segoe UI", size=12),
+            width=120,
+            height=36,
             fg_color=COLORS["danger"],
             hover_color=COLORS["danger_hover"],
             command=self._cancel_to_dashboard,
-        ).pack(side="right", padx=(6, 0))
+        ).pack(side="right", padx=(8, 0))
 
         if key in SEND_TOOLS:
             ctk.CTkButton(
                 self._action_bar,
                 text=t("app.send"),
-                width=100,
-                height=30,
-                font=ctk.CTkFont(family="Segoe UI", size=12),
+                width=120,
+                height=36,
                 fg_color=COLORS["accent"],
                 hover_color=COLORS["accent_dim"],
                 text_color=COLORS["on_accent"],
@@ -1215,23 +1246,21 @@ class NetworkToolsApp(ctk.CTk):
                 self.after(150, fn)
 
     def _pack_tool_action_bar(self, *, text_send: bool = False) -> None:
-        self._action_bar.pack(fill="x", padx=12, pady=(0, 4), before=self._footer)
+        self._action_bar.pack(fill="x", padx=12, pady=(0, 6), before=self._footer)
         ctk.CTkButton(
             self._action_bar,
             text=t("app.back"),
-            width=100,
-            height=30,
-            font=ctk.CTkFont(family="Segoe UI", size=12),
+            width=120,
+            height=36,
             fg_color=COLORS["danger"],
             hover_color=COLORS["danger_hover"],
             command=self._cancel_to_dashboard,
-        ).pack(side="right", padx=(6, 0))
+        ).pack(side="right", padx=(8, 0))
         ctk.CTkButton(
             self._action_bar,
             text=t("app.send"),
-            width=100,
-            height=30,
-            font=ctk.CTkFont(family="Segoe UI", size=12),
+            width=120,
+            height=36,
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_dim"],
             text_color=COLORS["on_accent"],
@@ -1256,7 +1285,7 @@ class NetworkToolsApp(ctk.CTk):
         ctk.CTkLabel(
             top,
             text=t("tool.apps.title"),
-            font=ctk.CTkFont(family="Segoe UI Semibold", size=16),
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=24),
             text_color=COLORS["text"],
         ).pack(side="left")
         self._header_actions(top)
@@ -1269,14 +1298,14 @@ class NetworkToolsApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        summary.pack(fill="x", pady=(0, 6))
+        summary.pack(fill="x", pady=(0, 12))
         sum_row = ctk.CTkFrame(summary, fg_color="transparent")
-        sum_row.pack(fill="x", padx=10, pady=8)
+        sum_row.pack(fill="x", padx=16, pady=14)
 
         count_lbl = ctk.CTkLabel(
             sum_row,
             text=t("apps.loading"),
-            font=ctk.CTkFont(family="Segoe UI Semibold", size=13),
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=15),
             text_color=COLORS["text"],
             anchor="w",
         )
@@ -1285,9 +1314,8 @@ class NetworkToolsApp(ctk.CTk):
         btn_refresh = ctk.CTkButton(
             sum_row,
             text=t("app.refresh"),
-            width=90,
-            height=28,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
+            width=100,
+            height=32,
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_dim"],
             text_color=COLORS["on_accent"],
@@ -1297,14 +1325,14 @@ class NetworkToolsApp(ctk.CTk):
         list_wrap = ctk.CTkFrame(
             self._content,
             fg_color=COLORS["panel"],
-            corner_radius=8,
+            corner_radius=12,
             border_width=1,
             border_color=COLORS["border"],
         )
         list_wrap.pack(fill="both", expand=True, padx=0, pady=0)
 
         table_host = tk.Frame(list_wrap, bg=COLORS["panel"], highlightthickness=0)
-        table_host.pack(fill="both", expand=True, padx=8, pady=8)
+        table_host.pack(fill="both", expand=True, padx=12, pady=12)
 
         style = ttk.Style()
         try:
@@ -1317,8 +1345,8 @@ class NetworkToolsApp(ctk.CTk):
             foreground=COLORS["text"],
             fieldbackground=COLORS["bg"],
             borderwidth=0,
-            rowheight=26,
-            font=("Segoe UI", 10),
+            rowheight=32,
+            font=("Segoe UI", 11),
         )
         style.configure(
             "Apps.Treeview.Heading",
@@ -1326,7 +1354,7 @@ class NetworkToolsApp(ctk.CTk):
             foreground=COLORS["muted"],
             borderwidth=0,
             relief="flat",
-            font=("Segoe UI Semibold", 9),
+            font=("Segoe UI Semibold", 10),
         )
         style.map(
             "Apps.Treeview",
@@ -1415,7 +1443,7 @@ class NetworkToolsApp(ctk.CTk):
         ctk.CTkLabel(
             top,
             text=t("tool.security.title"),
-            font=ctk.CTkFont(family="Segoe UI Semibold", size=16),
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=24),
             text_color=COLORS["text"],
         ).pack(side="left")
         self._header_actions(top)
@@ -1565,7 +1593,7 @@ class NetworkToolsApp(ctk.CTk):
         ctk.CTkLabel(
             top,
             text="IP Scanner",
-            font=ctk.CTkFont(family="Segoe UI Semibold", size=16),
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=24),
             text_color=COLORS["text"],
         ).pack(side="left")
         self._header_actions(top)
@@ -1893,7 +1921,7 @@ class NetworkToolsApp(ctk.CTk):
         ctk.CTkLabel(
             self._header,
             text=title,
-            font=ctk.CTkFont(family="Segoe UI Semibold", size=16),
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=20),
             text_color=COLORS["text"],
         ).pack(side="left")
         actions = ctk.CTkFrame(self._header, fg_color="transparent")
@@ -1901,30 +1929,27 @@ class NetworkToolsApp(ctk.CTk):
         ctk.CTkButton(
             actions,
             text=t("app.back"),
-            width=88,
-            height=28,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
+            width=100,
+            height=32,
             fg_color=COLORS["danger"],
             hover_color=COLORS["danger_hover"],
             command=self._cancel_to_dashboard,
-        ).pack(side="right", padx=(6, 0))
+        ).pack(side="right", padx=(8, 0))
         ctk.CTkButton(
             actions,
             text=t("app.send"),
-            width=88,
-            height=28,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
+            width=100,
+            height=32,
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_dim"],
             text_color=COLORS["on_accent"],
             command=self._send_screenshot,
-        ).pack(side="right", padx=(6, 0))
+        ).pack(side="right", padx=(8, 0))
         ctk.CTkButton(
             actions,
             text=t("app.reload"),
-            width=96,
-            height=28,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
+            width=110,
+            height=32,
             fg_color=COLORS["warn"],
             hover_color=COLORS["warn_hover"],
             text_color=COLORS["on_warn"],
@@ -1936,12 +1961,12 @@ class NetworkToolsApp(ctk.CTk):
             self._content,
             fg_color=COLORS["panel"],
             corner_radius=0,
-            height=40,
+            height=52,
         )
         loading_wrap.pack(fill="x")
         loading_wrap.pack_propagate(False)
         loading_inner = ctk.CTkFrame(loading_wrap, fg_color="transparent")
-        loading_inner.pack(fill="both", expand=True, padx=12, pady=4)
+        loading_inner.pack(fill="both", expand=True, padx=16, pady=8)
         loading_lbl = ctk.CTkLabel(
             loading_inner,
             text=t("app.page_loading"),
@@ -2063,23 +2088,21 @@ class NetworkToolsApp(ctk.CTk):
                 text_color=COLORS["on_accent"],
                 command=lambda: open_speedtest_edge_app(url),
             ).pack(anchor="w", padx=20, pady=(0, 20))
-            self._action_bar.pack(fill="x", padx=12, pady=(0, 4), before=self._footer)
+            self._action_bar.pack(fill="x", padx=12, pady=(0, 6), before=self._footer)
             ctk.CTkButton(
                 self._action_bar,
                 text=t("app.back"),
-                width=100,
-                height=30,
-                font=ctk.CTkFont(family="Segoe UI", size=12),
+                width=120,
+                height=36,
                 fg_color=COLORS["danger"],
                 hover_color=COLORS["danger_hover"],
                 command=self._cancel_to_dashboard,
-            ).pack(side="right", padx=(6, 0))
+            ).pack(side="right", padx=(8, 0))
             ctk.CTkButton(
                 self._action_bar,
                 text=t("app.send"),
-                width=100,
-                height=30,
-                font=ctk.CTkFont(family="Segoe UI", size=12),
+                width=120,
+                height=36,
                 fg_color=COLORS["accent"],
                 hover_color=COLORS["accent_dim"],
                 text_color=COLORS["on_accent"],
@@ -2446,37 +2469,32 @@ class NetworkToolsApp(ctk.CTk):
             self._build_traceroute(parent)
 
     def _build_ping(self, parent: ctk.CTkFrame) -> None:
-        panel = ctk.CTkFrame(parent, fg_color=COLORS["panel"], corner_radius=8)
+        panel = ctk.CTkFrame(parent, fg_color=COLORS["panel"], corner_radius=10)
         panel.pack(fill="x")
-        ctk.CTkLabel(
-            panel,
-            text="Pilih host:",
-            font=ctk.CTkFont(family="Segoe UI", size=11),
-            text_color=COLORS["muted"],
-        ).pack(anchor="w", padx=10, pady=(6, 2))
+        ctk.CTkLabel(panel, text="Pilih host:", text_color=COLORS["muted"]).pack(
+            anchor="w", padx=12, pady=(10, 4)
+        )
         row = ctk.CTkFrame(panel, fg_color="transparent")
-        row.pack(fill="x", padx=10, pady=(0, 8))
+        row.pack(fill="x", padx=12, pady=(0, 12))
 
         values = host_dropdown_values()
         self._ping_combo = ctk.CTkComboBox(
             row,
             values=values,
-            height=30,
+            height=36,
             width=420,
-            font=ctk.CTkFont(family="Segoe UI", size=12),
             dropdown_fg_color=COLORS["panel"],
             button_color=COLORS["accent"],
             button_hover_color=COLORS["accent_dim"],
         )
         self._ping_combo.set(values[0])
-        self._ping_combo.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        self._ping_combo.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
         ctk.CTkButton(
             row,
             text="Mulai Ping",
-            width=100,
-            height=30,
-            font=ctk.CTkFont(family="Segoe UI", size=12),
+            width=120,
+            height=36,
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_dim"],
             text_color=COLORS["on_accent"],
@@ -2515,37 +2533,32 @@ class NetworkToolsApp(ctk.CTk):
         runner.start()
 
     def _build_traceroute(self, parent: ctk.CTkFrame) -> None:
-        panel = ctk.CTkFrame(parent, fg_color=COLORS["panel"], corner_radius=8)
+        panel = ctk.CTkFrame(parent, fg_color=COLORS["panel"], corner_radius=10)
         panel.pack(fill="x")
-        ctk.CTkLabel(
-            panel,
-            text="Pilih host:",
-            font=ctk.CTkFont(family="Segoe UI", size=11),
-            text_color=COLORS["muted"],
-        ).pack(anchor="w", padx=10, pady=(6, 2))
+        ctk.CTkLabel(panel, text="Pilih host:", text_color=COLORS["muted"]).pack(
+            anchor="w", padx=12, pady=(10, 4)
+        )
         row = ctk.CTkFrame(panel, fg_color="transparent")
-        row.pack(fill="x", padx=10, pady=(0, 8))
+        row.pack(fill="x", padx=12, pady=(0, 12))
 
         values = host_dropdown_values()
         self._trace_combo = ctk.CTkComboBox(
             row,
             values=values,
-            height=30,
+            height=36,
             width=420,
-            font=ctk.CTkFont(family="Segoe UI", size=12),
             dropdown_fg_color=COLORS["panel"],
             button_color=COLORS["accent"],
             button_hover_color=COLORS["accent_dim"],
         )
         self._trace_combo.set(values[0])
-        self._trace_combo.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        self._trace_combo.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
         ctk.CTkButton(
             row,
             text="Mulai",
-            width=100,
-            height=30,
-            font=ctk.CTkFont(family="Segoe UI", size=12),
+            width=120,
+            height=36,
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_dim"],
             text_color=COLORS["on_accent"],
