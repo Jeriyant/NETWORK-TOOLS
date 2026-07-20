@@ -799,7 +799,7 @@ class NetworkToolsApp(ctk.CTk):
             corner_radius=10,
             border_width=1,
             border_color=COLORS["border"],
-            height=68,
+            height=74,
         )
         bar.pack(fill="x", pady=(6, 0))
         bar.pack_propagate(False)
@@ -822,7 +822,13 @@ class NetworkToolsApp(ctk.CTk):
         self._sysinfo_value_labels = {}
 
         for i in range(len(metrics)):
-            weight = 2 if metrics[i][0] in {"cpu", "windows"} else 1
+            key = metrics[i][0]
+            if key == "windows":
+                weight = 3
+            elif key == "cpu":
+                weight = 2
+            else:
+                weight = 1
             body.grid_columnconfigure(i * 2, weight=weight, uniform="")
             if i < len(metrics) - 1:
                 body.grid_columnconfigure(i * 2 + 1, weight=0)
@@ -839,6 +845,14 @@ class NetworkToolsApp(ctk.CTk):
                 anchor="w",
             ).pack(anchor="w")
 
+            # Windows/CPU: wrap lebih lebar agar teks tidak terpotong
+            if cache_key == "windows":
+                wrap = 320
+            elif cache_key == "cpu":
+                wrap = 200
+            else:
+                wrap = 0
+
             value = ctk.CTkLabel(
                 cell,
                 text=placeholder,
@@ -847,11 +861,11 @@ class NetworkToolsApp(ctk.CTk):
                     size=12 if emphasize else 11,
                 ),
                 text_color=COLORS["accent"] if emphasize else COLORS["text"],
-                anchor="w",
-                wraplength=160 if cache_key in {"cpu", "windows"} else 0,
+                anchor="nw",
+                wraplength=wrap,
                 justify="left",
             )
-            value.pack(anchor="w", pady=(0, 0))
+            value.pack(anchor="w", fill="x", pady=(0, 0))
             self._sysinfo_value_labels[cache_key] = value
 
             if idx < len(metrics) - 1:
@@ -862,6 +876,22 @@ class NetworkToolsApp(ctk.CTk):
                     corner_radius=0,
                 )
                 sep.grid(row=0, column=idx * 2 + 1, sticky="ns", padx=4, pady=2)
+
+        def _refresh_wrap(_event: Any = None) -> None:
+            """Sesuaikan wraplength Windows/CPU dengan lebar kolom aktual."""
+            for key in ("windows", "cpu"):
+                lbl = self._sysinfo_value_labels.get(key)
+                if lbl is None:
+                    continue
+                try:
+                    parent_w = int(lbl.master.winfo_width())
+                    if parent_w > 40:
+                        lbl.configure(wraplength=max(parent_w - 8, 80))
+                except Exception:
+                    pass
+
+        body.bind("<Configure>", lambda e: self.after(30, _refresh_wrap))
+        self.after(120, _refresh_wrap)
 
         self._show_sysinfo_strip()
         if self._sysinfo_cache:
