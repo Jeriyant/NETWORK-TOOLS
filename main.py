@@ -250,7 +250,10 @@ class NetworkToolsApp(ctk.CTk):
         min_w = min(780, max(720, max_w - 20))
         min_h = min(560, max(480, max_h - 20))
         self.minsize(min_w, min_h)
-        self.geometry(f"{win_w}x{win_h}")
+        # Tengah layar
+        x = max((sw - win_w) // 2, 0)
+        y = max((sh - win_h) // 2, 0)
+        self.geometry(f"{win_w}x{win_h}+{x}+{y}")
 
     def _apply_window_icon(self) -> None:
         """Samakan icon jendela dengan icon file EXE."""
@@ -1133,7 +1136,7 @@ class NetworkToolsApp(ctk.CTk):
                 text=title,
                 font=ctk.CTkFont(family="Segoe UI Semibold", size=14),
                 text_color=COLORS["text"],
-            ).pack(anchor="w", pady=(4, 0))
+            ).pack(anchor="w", pady=(2, 0))
             ctk.CTkLabel(
                 inner,
                 text=desc,
@@ -1141,7 +1144,7 @@ class NetworkToolsApp(ctk.CTk):
                 text_color=COLORS["muted"],
                 wraplength=wrap,
                 justify="left",
-            ).pack(anchor="w", pady=(1, 0))
+            ).pack(anchor="w", pady=(0, 0))
             btn = ctk.CTkButton(
                 inner,
                 text=t("app.open"),
