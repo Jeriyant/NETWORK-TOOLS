@@ -139,6 +139,15 @@ def close_all_anydesk() -> tuple[bool, str]:
     return True, "Semua proses AnyDesk ditutup."
 
 
+def format_anydesk_share_text(anydesk_id: str, local_id: str, local_ip: str) -> str:
+    """Teks untuk clipboard / tempel Telegram."""
+    return (
+        f"ID Anydesk\n{anydesk_id}\n\n"
+        f"ID Lokal\n{local_id}\n\n"
+        f"Alamat IP Lokal\n{local_ip}"
+    )
+
+
 class AnydeskRunner:
     def __init__(
         self,
@@ -200,12 +209,17 @@ class AnydeskRunner:
                 return
 
             self.on_line(f"AnyDesk ID: {anydesk_id}")
-            self.on_line("Menyalin ID ke clipboard...")
+            self.on_line("Menyalin info ke clipboard...")
 
+            from modules.system_info import hostname, primary_ipv4
             from modules.telegram_share import copy_text_to_clipboard, open_telegram
 
-            if copy_text_to_clipboard(anydesk_id):
-                self.on_line("ID tersalin ke clipboard.")
+            local_id = hostname()
+            local_ip = primary_ipv4()
+            share_text = format_anydesk_share_text(anydesk_id, local_id, local_ip)
+
+            if copy_text_to_clipboard(share_text):
+                self.on_line("Info tersalin ke clipboard.")
             else:
                 self.on_line("Gagal menyalin ke clipboard.")
 

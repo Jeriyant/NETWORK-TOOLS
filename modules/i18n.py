@@ -221,6 +221,17 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "No data to send yet. Wait until the list/results finish loading.",
     },
     "send.ok": {"id": "Mengerti", "en": "Got it"},
+    # Anydesk dialog
+    "anydesk.dialog_title": {"id": "AnyDesk ID siap", "en": "AnyDesk ID ready"},
+    "anydesk.dialog_sub": {
+        "id": "Telegram dibuka — blok & salin info di bawah, lalu tempel:",
+        "en": "Telegram opened — select & copy the info below, then paste:",
+    },
+    "anydesk.id_label": {"id": "ID Anydesk", "en": "AnyDesk ID"},
+    "anydesk.local_id_label": {"id": "ID Lokal", "en": "Local ID"},
+    "anydesk.local_ip_label": {"id": "Alamat IP Lokal", "en": "Local IP Address"},
+    "anydesk.copy_all": {"id": "Salin semua", "en": "Copy all"},
+    "anydesk.copied": {"id": "Tersalin ke clipboard", "en": "Copied to clipboard"},
 }
 
 

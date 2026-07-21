@@ -2268,6 +2268,172 @@ class NetworkToolsApp(ctk.CTk):
         self._stop_runner()
         self.show_dashboard()
 
+    def _anydesk_info_block(
+        self, anydesk_id: str, local_id: str, local_ip: str
+    ) -> str:
+        return (
+            f"ID Anydesk\n{anydesk_id}\n\n"
+            f"ID Lokal\n{local_id}\n\n"
+            f"Alamat IP Lokal\n{local_ip}"
+        )
+
+    def _show_anydesk_info_dialog(
+        self,
+        anydesk_id: str,
+        local_id: str,
+        local_ip: str,
+    ) -> None:
+        """Dialog besar: ID Anydesk, ID Lokal, IP — bisa diblok & disalin."""
+        try:
+            import winsound
+
+            winsound.MessageBeep(winsound.MB_ICONASTERISK)
+        except Exception:
+            pass
+
+        dlg_w, dlg_h = 540, 520
+        dlg = ctk.CTkToplevel(self)
+        dlg.title(t("send.dialog_title"))
+        dlg.geometry(f"{dlg_w}x{dlg_h}")
+        dlg.minsize(dlg_w, 480)
+        dlg.resizable(False, False)
+        dlg.configure(fg_color=COLORS["bg"])
+        dlg.transient(self)
+        dlg.attributes("-topmost", True)
+        dlg.attributes("-alpha", 0.0)
+
+        self.update_idletasks()
+        px = self.winfo_rootx() + (self.winfo_width() - dlg_w) // 2
+        py = self.winfo_rooty() + (self.winfo_height() - dlg_h) // 2
+        dlg.geometry(f"{dlg_w}x{dlg_h}+{max(px, 40)}+{max(py + 40, 40)}")
+
+        flash = ctk.CTkFrame(dlg, fg_color=COLORS["accent"], height=6, corner_radius=0)
+        flash.pack(fill="x", side="top")
+
+        frame = ctk.CTkFrame(
+            dlg,
+            fg_color=COLORS["panel"],
+            corner_radius=14,
+            border_width=2,
+            border_color=COLORS["accent"],
+        )
+        frame.pack(fill="both", expand=True, padx=12, pady=12)
+
+        footer = ctk.CTkFrame(frame, fg_color="transparent", height=56)
+        footer.pack(fill="x", side="bottom", padx=12, pady=(4, 12))
+        footer.pack_propagate(False)
+
+        body = ctk.CTkScrollableFrame(frame, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=8, pady=(8, 0))
+
+        ctk.CTkLabel(
+            body,
+            text=t("anydesk.dialog_title"),
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=22),
+            text_color=COLORS["text"],
+        ).pack(anchor="w", padx=14, pady=(8, 2))
+
+        ctk.CTkLabel(
+            body,
+            text=t("anydesk.dialog_sub"),
+            font=ctk.CTkFont(family="Segoe UI", size=13),
+            text_color=COLORS["muted"],
+            wraplength=460,
+            justify="left",
+        ).pack(anchor="w", padx=14, pady=(0, 14))
+
+        value_font = ctk.CTkFont(family="Consolas", size=24, weight="bold")
+        fields: list[tuple[str, str]] = [
+            (t("anydesk.id_label"), anydesk_id),
+            (t("anydesk.local_id_label"), local_id),
+            (t("anydesk.local_ip_label"), local_ip),
+        ]
+        entries: list[ctk.CTkEntry] = []
+
+        for label, value in fields:
+            ctk.CTkLabel(
+                body,
+                text=label,
+                font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+                text_color=COLORS["muted"],
+            ).pack(anchor="w", padx=14, pady=(4, 2))
+            entry = ctk.CTkEntry(
+                body,
+                height=52,
+                font=value_font,
+                text_color=COLORS["accent"],
+                fg_color=COLORS["bg"],
+                border_color=COLORS["border"],
+                border_width=1,
+            )
+            entry.pack(fill="x", padx=14, pady=(0, 8))
+            entry.insert(0, value)
+            entry.bind("<Key>", lambda _e: "break")
+            entry.bind(
+                "<Control-a>",
+                lambda e, ent=entry: (ent.select_range(0, "end"), ent.icursor("end"), "break"),
+            )
+            entries.append(entry)
+
+        copied_lbl = ctk.CTkLabel(
+            body,
+            text="",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color=COLORS["accent"],
+        )
+        copied_lbl.pack(anchor="w", padx=14, pady=(0, 4))
+
+        def copy_all() -> None:
+            from modules.telegram_share import copy_text_to_clipboard
+
+            block = self._anydesk_info_block(anydesk_id, local_id, local_ip)
+            if copy_text_to_clipboard(block):
+                copied_lbl.configure(text=t("anydesk.copied"))
+            entries[0].focus_set()
+            entries[0].select_range(0, "end")
+
+        ctk.CTkButton(
+            footer,
+            text=t("anydesk.copy_all"),
+            width=130,
+            height=40,
+            fg_color=COLORS["tile"],
+            hover_color=COLORS["tile_hover"],
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            command=copy_all,
+        ).pack(side="left", pady=6)
+
+        ctk.CTkButton(
+            footer,
+            text=t("send.ok"),
+            width=150,
+            height=40,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            corner_radius=10,
+            command=dlg.destroy,
+        ).pack(side="right", pady=6)
+
+        def fade_in(step: int = 0) -> None:
+            if not dlg.winfo_exists():
+                return
+            alpha = min(1.0, step / 10)
+            try:
+                dlg.attributes("-alpha", alpha)
+            except Exception:
+                return
+            if step < 10:
+                dlg.after(16, lambda: fade_in(step + 1))
+
+        dlg.after(30, dlg.lift)
+        dlg.after(50, dlg.focus_force)
+        dlg.after(80, lambda: entries[0].focus_set())
+        dlg.after(80, lambda: entries[0].select_range(0, "end"))
+        dlg.after(20, fade_in)
+
     def _show_kirim_dialog(
         self,
         tips: list[str],
@@ -2770,14 +2936,16 @@ class NetworkToolsApp(ctk.CTk):
 
         def _done(anydesk_id: str | None) -> None:
             if anydesk_id:
-                self.after(
-                    0,
-                    lambda: self._show_kirim_dialog(
-                        [f"AnyDesk ID: {anydesk_id} (sudah di clipboard)."],
-                        title="AnyDesk ID siap",
-                        subtitle="Buka chat Telegram, lalu tempel ID:",
-                    ),
-                )
+                from modules.system_info import hostname, primary_ipv4
+
+                aid = anydesk_id
+                lid = hostname()
+                lip = primary_ipv4()
+
+                def show() -> None:
+                    self._show_anydesk_info_dialog(aid, lid, lip)
+
+                self.after(0, show)
 
         self.set_runner_stop(lambda: None)
         AnydeskRunner(on_line=self.log, on_done=_done).start()
