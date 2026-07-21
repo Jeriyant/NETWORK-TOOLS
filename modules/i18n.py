@@ -23,7 +23,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "app.send": {"id": "Kirim", "en": "Send"},
     "app.refresh": {"id": "Refresh", "en": "Refresh"},
     "app.recheck": {"id": "Cek Ulang", "en": "Recheck"},
-    "app.reload": {"id": "Muat Ulang", "en": "Reload"},
+    "app.reload": {"id": "Reload", "en": "Reload"},
     "app.page_loading": {"id": "Memuat halaman…", "en": "Loading page…"},
     "app.startup_loading": {
         "id": "Memuat informasi sistem…",
@@ -159,16 +159,20 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Drag & drop files here to upload  ·  or click Upload",
     },
     "scp.mode_ssh": {
-        "id": "Mode SSH — fokus perintah remote (terminal). Tidak memakai SFTP.",
-        "en": "SSH mode — remote command focus (terminal). Does not use SFTP.",
+        "id": "Mode SSH — perintah remote (tetap dual: explorer + terminal).",
+        "en": "SSH mode — remote commands (dual: explorer + terminal).",
     },
     "scp.mode_scp": {
-        "id": "Mode SCP — explorer via protokol SCP (tanpa subsystem SFTP). Pakai ini jika SFTP error EOF.",
-        "en": "SCP mode — explorer via SCP (no SFTP subsystem). Use this if SFTP hits EOF.",
+        "id": "Mode SCP — preferensi transfer SCP (explorer + SSH tetap aktif).",
+        "en": "SCP mode — prefer SCP transfer (explorer + SSH stay active).",
     },
     "scp.mode_sftp": {
-        "id": "Mode SFTP — explorer via subsystem SFTP. Jika gagal, otomatis fallback shell/SCP.",
-        "en": "SFTP mode — explorer via SFTP. Falls back to shell/SCP if it fails.",
+        "id": "Mode SFTP — preferensi explorer SFTP (SSH command tetap aktif).",
+        "en": "SFTP mode — prefer SFTP explorer (SSH commands stay active).",
+    },
+    "scp.mode_dual": {
+        "id": "Mode dual: explorer file (SFTP/SCP) + perintah SSH aktif bersamaan.",
+        "en": "Dual mode: file explorer (SFTP/SCP) + SSH commands together.",
     },
     "scp.host": {"id": "Alamat IP / Host", "en": "IP Address / Host"},
     "scp.port": {"id": "Port", "en": "Port"},

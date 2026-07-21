@@ -31,7 +31,7 @@ class ScpPanel:
         self.session = SftpSession()
         self._entries: dict[str, Any] = {}  # iid -> RemoteEntry
         self._busy = False
-        self.protocol_var = tk.StringVar(value="SCP")
+        self.protocol_var = tk.StringVar(value="SFTP")
 
         top = ctk.CTkFrame(header, fg_color="transparent")
         top.pack(fill="x")
@@ -110,8 +110,17 @@ class ScpPanel:
         _field(inner, t("scp.user"), self.user_var, 110)
         _field(inner, t("scp.pass"), self.pass_var, 120, show="•")
 
-        btns = ctk.CTkFrame(inner, fg_color="transparent")
-        btns.pack(side="left", padx=(4, 0), pady=(14, 0))
+        # Sejajar kotak input: label spacer + baris tombol height 30
+        btn_cell = ctk.CTkFrame(inner, fg_color="transparent")
+        btn_cell.pack(side="left", padx=(4, 0))
+        ctk.CTkLabel(
+            btn_cell,
+            text=" ",
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            text_color=colors["muted"],
+        ).pack(anchor="w")
+        btns = ctk.CTkFrame(btn_cell, fg_color="transparent")
+        btns.pack(anchor="w", pady=(2, 0))
         self.btn_connect = ctk.CTkButton(
             btns,
             text=t("scp.connect"),
@@ -333,7 +342,7 @@ class ScpPanel:
         self.log_box.pack(fill="both", expand=True, padx=4, pady=4)
         self.log_box.configure(state="disabled")
         self._log(t("scp.need_connect"))
-        self._log(t("scp.mode_scp"))
+        self._log(t("scp.mode_dual"))
 
         self._setup_drag_drop()
         self._apply_protocol_layout()
@@ -346,32 +355,19 @@ class ScpPanel:
 
     def _on_protocol_change(self, _choice: str | None = None) -> None:
         proto = self._protocol()
-        if proto == "SSH":
-            self._log(t("scp.mode_ssh"))
-        elif proto == "SCP":
-            self._log(t("scp.mode_scp"))
-        else:
-            self._log(t("scp.mode_sftp"))
+        self._log(t("scp.mode_dual") + f"  · preferensi transfer: {proto}")
         self._apply_protocol_layout()
-        if self.session.connected and proto in {"SCP", "SFTP"}:
+        if self.session.connected:
             self._refresh()
 
     def _apply_protocol_layout(self) -> None:
-        """SSH = terminal besar; SCP/SFTP = explorer + drop zone."""
-        proto = self._protocol()
+        """Selalu dual: explorer (SFTP/SCP) + perintah SSH."""
         try:
-            if proto == "SSH":
-                self.tools.pack_forget()
-                self.list_wrap.pack_forget()
-                self.cmd_row.pack(fill="x", pady=(0, 4))
-                self.log_host.pack(fill="both", expand=True)
-                self.log_host.configure(height=280)
-            else:
-                self.tools.pack(fill="x", pady=(0, 6))
-                self.list_wrap.pack(fill="both", expand=True, pady=(0, 8))
-                self.cmd_row.pack(fill="x", pady=(0, 4))
-                self.log_host.pack(fill="x")
-                self.log_host.configure(height=120)
+            self.tools.pack(fill="x", pady=(0, 6))
+            self.list_wrap.pack(fill="both", expand=True, pady=(0, 8))
+            self.cmd_row.pack(fill="x", pady=(0, 4))
+            self.log_host.pack(fill="x")
+            self.log_host.configure(height=120)
         except Exception:
             pass
 
@@ -472,23 +468,19 @@ class ScpPanel:
                     return
                 self._set_connected_ui(True)
                 note = getattr(self.session, "connect_note", "") or ""
-                mode = "SFTP" if self.session.sftp_ok else (
-                    "SCP/shell" if proto in {"SCP", "SFTP"} else "SSH"
-                )
+                sftp_flag = "SFTP✓" if self.session.sftp_ok else "SFTP✗"
                 self.status_lbl.configure(
                     text=t("scp.connected", user=user, host=host, port=port)
-                    + f"  [{proto}/{mode}]"
+                    + f"  [SSH✓ · {sftp_flag}]"
                 )
-                self._log(f"Connected ({proto}): {user}@{host}:{port}")
+                self._log(f"Connected (dual SSH+SFTP): {user}@{host}:{port}")
                 if note:
                     self._log(note)
                 banner = getattr(self.session, "last_banner", "") or ""
                 if banner:
                     self._log(f"Banner: {banner}")
-                if proto in {"SCP", "SFTP"}:
-                    self._refresh()
-                else:
-                    self._log(t("scp.mode_ssh"))
+                self._apply_protocol_layout()
+                self._refresh()
 
             self._ui(done)
 
@@ -555,6 +547,8 @@ class ScpPanel:
                     self._log(f"List error: {err}")
                     messagebox.showerror(t("tool.scp.title"), err, parent=self.app)
                     return
+                mode = "SFTP" if self.session.sftp_ok else "shell"
+                self._log(f"Explorer ({mode}): {len(rows)} item · {self.session.cwd}")
                 self._fill(rows)
 
             self._ui(done)

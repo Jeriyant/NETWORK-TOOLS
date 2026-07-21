@@ -1795,17 +1795,36 @@ class NetworkToolsApp(ctk.CTk):
         )
         count_lbl.pack(side="left", fill="x", expand=True)
 
-        btn_refresh = ctk.CTkButton(
+        # Urutan kanan→kiri: Kembali, Kirim, Cek Ulang (kuning + teks hitam, sebelum Kirim)
+        ctk.CTkButton(
             sum_row,
-            text=t("app.refresh"),
+            text=t("app.back"),
+            width=100,
+            height=32,
+            fg_color=COLORS["danger"],
+            hover_color=COLORS["danger_hover"],
+            command=self._cancel_to_dashboard,
+        ).pack(side="right", padx=(8, 0))
+        ctk.CTkButton(
+            sum_row,
+            text=t("app.send"),
             width=100,
             height=32,
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_dim"],
             text_color=COLORS["on_accent"],
+            command=self._send_text_payload_to_telegram,
+        ).pack(side="right", padx=(8, 0))
+        btn_refresh = ctk.CTkButton(
+            sum_row,
+            text=t("app.recheck"),
+            width=110,
+            height=32,
+            fg_color=COLORS.get("warn", "#E6B422"),
+            hover_color=COLORS.get("warn_hover", "#C99A12"),
+            text_color="#1A1400",
         )
-        btn_refresh.pack(side="right")
-        self._pack_inline_send_back(sum_row, text_send=True, height=32, side="right")
+        btn_refresh.pack(side="right", padx=(8, 0))
 
         list_wrap = ctk.CTkFrame(
             self._content,
@@ -2763,18 +2782,37 @@ class NetworkToolsApp(ctk.CTk):
             _draw()
             _start()
 
+        # Urutan kanan→kiri: Kembali, Kirim, Refresh (kuning + teks hitam)
+        ctk.CTkButton(
+            toolbar,
+            text=t("app.back"),
+            width=100,
+            height=30,
+            fg_color=COLORS["danger"],
+            hover_color=COLORS["danger_hover"],
+            command=self._cancel_to_dashboard,
+        ).pack(side="right", padx=(8, 0))
+        ctk.CTkButton(
+            toolbar,
+            text=t("app.send"),
+            width=100,
+            height=30,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+            command=self._send_screenshot,
+        ).pack(side="right", padx=(8, 0))
         btn_refresh = ctk.CTkButton(
             toolbar,
             text=t("app.refresh"),
             width=90,
             height=30,
-            fg_color=COLORS.get("warn", "#E6B422"),
-            hover_color=COLORS.get("warn_hover", "#C99A12"),
-            text_color=COLORS.get("on_warn", "#1A1400"),
+            fg_color="#E6B422",
+            hover_color="#C99A12",
+            text_color="#1A1400",
             command=restart,
         )
         btn_refresh.pack(side="right", padx=(8, 0))
-        self._pack_inline_send_back(toolbar, text_send=False, height=30, side="right")
 
         # Shell + canvas border warna-warni mengelilingi area topologi
         shell = ctk.CTkFrame(self._content, fg_color="transparent")

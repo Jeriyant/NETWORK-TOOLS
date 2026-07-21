@@ -187,11 +187,12 @@ class SftpSession:
             )
 
         attempts: list[dict[str, Any]] = [
-            {"label": "default", "disabled_algorithms": None, "fake_openssh": True},
+            {"label": "default", "disabled_algorithms": None, "fake_openssh": True, "want_sftp": True},
             {
                 "label": "legacy-rsa",
                 "disabled_algorithms": {"pubkeys": ["rsa-sha2-256", "rsa-sha2-512"]},
                 "fake_openssh": True,
+                "want_sftp": True,
             },
             {
                 "label": "legacy-kex",
@@ -206,20 +207,24 @@ class SftpSession:
                     ],
                 },
                 "fake_openssh": True,
+                "want_sftp": True,
             },
-            {"label": "paramiko-banner", "disabled_algorithms": None, "fake_openssh": False},
+            {"label": "paramiko-banner", "disabled_algorithms": None, "fake_openssh": False, "want_sftp": True},
             {
                 "label": "sshclient",
                 "use_sshclient": True,
                 "disabled_algorithms": {"pubkeys": ["rsa-sha2-256", "rsa-sha2-512"]},
                 "fake_openssh": True,
+                "want_sftp": True,
             },
+            # Terakhir: SSH saja jika SFTP memutus koneksi (EOF)
+            {"label": "ssh-only", "disabled_algorithms": None, "fake_openssh": True, "want_sftp": False},
         ]
 
         last_exc: BaseException | None = None
         for attempt in attempts:
             try:
-                want_sftp = protocol == "SFTP"
+                want_sftp = bool(attempt.get("want_sftp", True))
                 if attempt.get("use_sshclient"):
                     client, transport, sftp, cwd, note = self._connect_via_sshclient(
                         host=host,
@@ -365,17 +370,12 @@ class SftpSession:
         want_sftp: bool,
         protocol: str,
     ) -> tuple[paramiko.SFTPClient | None, str]:
-        """SFTP hanya dicoba bila protokol = SFTP.
+        """Selalu coba SFTP agar explorer terisi; SSH command tetap tersedia.
 
-        SCP/SSH: jangan invoke subsystem sftp — sering memutus koneksi
-        (EOF during negotiation) pada server yang menonaktifkan SFTP.
+        Jika SFTP gagal (EOF subsystem), session SSH tetap hidup + fallback shell/SCP.
         """
         if not want_sftp:
-            if protocol == "SCP":
-                if SCPClient is None:
-                    return None, "Mode SCP — modul scp belum terpasang"
-                return None, "Mode SCP — transfer via protokol scp (tanpa SFTP)"
-            return None, "Mode SSH — shell saja (tanpa SFTP)"
+            return None, f"Mode {protocol} — tanpa SFTP"
         return self._try_open_sftp(transport, timeout)
 
     def _authenticate(
@@ -420,26 +420,45 @@ class SftpSession:
         self, transport: paramiko.Transport, timeout: float
     ) -> tuple[paramiko.SFTPClient | None, str]:
         errors: list[str] = []
+        # from_transport
         try:
             sftp = paramiko.SFTPClient.from_transport(transport)
             if sftp is not None:
-                return sftp, "SFTP siap"
+                # smoke-test: listdir home
+                try:
+                    sftp.listdir(".")
+                except Exception as smoke:
+                    try:
+                        sftp.close()
+                    except Exception:
+                        pass
+                    raise smoke
+                return sftp, "SFTP siap (dual dengan SSH)"
         except Exception as exc:
             errors.append(str(exc))
 
+        # channel subsystem
         try:
             chan = transport.open_session(timeout=timeout)
             chan.invoke_subsystem("sftp")
-            # beri waktu server kirim versi SFTP
-            time.sleep(0.15)
+            time.sleep(0.2)
             sftp = paramiko.SFTPClient(chan)
-            return sftp, "SFTP siap (channel)"
+            try:
+                sftp.listdir(".")
+            except Exception as smoke:
+                try:
+                    sftp.close()
+                except Exception:
+                    pass
+                raise smoke
+            return sftp, "SFTP siap via channel (dual dengan SSH)"
         except Exception as exc:
             errors.append(str(exc))
 
-        # SSH OK, SFTP tidak — tetap lanjut (fallback SCP/shell)
         detail = "; ".join(errors) if errors else "unknown"
-        return None, f"SFTP tidak tersedia ({detail}) — pakai fallback SCP/shell"
+        if not transport.is_active():
+            raise SSHException(f"Transport mati setelah SFTP gagal: {detail}")
+        return None, f"SFTP gagal ({detail}) — explorer pakai shell/SCP, SSH tetap aktif"
 
     def _resolve_cwd(
         self, sftp: paramiko.SFTPClient | None, transport: paramiko.Transport
@@ -452,16 +471,179 @@ class SftpSession:
                     return sftp.getcwd() or "/"
                 except Exception:
                     pass
-        # shell pwd
+        # shell pwd / echo $HOME / echo /
         try:
-            code, out, _err = self._exec_on_transport(transport, "pwd; echo __END__")
+            _code, out, _err = self._exec_on_transport(
+                transport, "pwd 2>/dev/null; echo; echo \"$HOME\"; echo /"
+            )
             for line in (out or "").splitlines():
                 line = line.strip()
-                if line.startswith("/") and line != "__END__":
+                if line.startswith("/") and len(line) < 512:
                     return line
         except Exception:
             pass
         return "/"
+
+    def _exec_on_transport(
+        self,
+        transport: paramiko.Transport,
+        command: str,
+        timeout: float = 60.0,
+    ) -> tuple[int, str, str]:
+        chan = transport.open_session(timeout=timeout)
+        try:
+            chan.set_combine_stderr(False)
+        except Exception:
+            pass
+        chan.settimeout(timeout)
+        chan.exec_command(command)
+        out_chunks: list[str] = []
+        err_chunks: list[str] = []
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            got = False
+            if chan.recv_ready():
+                out_chunks.append(chan.recv(8192).decode("utf-8", errors="replace"))
+                got = True
+            if chan.recv_stderr_ready():
+                err_chunks.append(chan.recv_stderr(8192).decode("utf-8", errors="replace"))
+                got = True
+            if chan.exit_status_ready() and not chan.recv_ready() and not chan.recv_stderr_ready():
+                break
+            if not got:
+                time.sleep(0.05)
+        code = chan.recv_exit_status()
+        try:
+            chan.close()
+        except Exception:
+            pass
+        return code, "".join(out_chunks), "".join(err_chunks)
+
+    def list_dir(self, path: str | None = None) -> list[RemoteEntry]:
+        path = path or self.cwd or "/"
+        if self._sftp is not None:
+            try:
+                return self._list_sftp(path)
+            except Exception:
+                # SFTP putus di tengah jalan → fallback shell
+                pass
+        return self._list_shell(path)
+
+    def _list_sftp(self, path: str) -> list[RemoteEntry]:
+        sftp = self._sftp
+        assert sftp is not None
+        with self._lock:
+            attrs = sftp.listdir_attr(path)
+        entries: list[RemoteEntry] = []
+        for a in attrs:
+            name = a.filename
+            if name in (".", ".."):
+                continue
+            mode = int(getattr(a, "st_mode", 0) or 0)
+            is_dir = stat.S_ISDIR(mode)
+            full = path.rstrip("/") + "/" + name if path != "/" else "/" + name
+            entries.append(
+                RemoteEntry(
+                    name=name,
+                    path=full,
+                    is_dir=is_dir,
+                    size=int(getattr(a, "st_size", 0) or 0),
+                    mtime=float(getattr(a, "st_mtime", 0) or 0),
+                    mode=mode,
+                )
+            )
+        entries.sort(key=lambda e: (not e.is_dir, e.name.lower()))
+        return entries
+
+    def _list_shell(self, path: str) -> list[RemoteEntry]:
+        """Fallback listing via shell jika SFTP tidak ada."""
+        tr = self._require_transport()
+        q = shlex.quote(path)
+        # Beberapa busybox tidak dukung --time-style
+        cmds = [
+            f"ls -la --time-style=long-iso {q}",
+            f"ls -la {q}",
+            f"ls -1Ap {q}",
+            f"ls -1 {q}",
+        ]
+        text = ""
+        with self._lock:
+            for cmd in cmds:
+                code, out, err = self._exec_on_transport(tr, f"{cmd} 2>&1")
+                blob = (out or "") + (err or "")
+                if blob.strip() and "No such file" not in blob and "cannot access" not in blob:
+                    text = blob
+                    break
+                if not text:
+                    text = blob
+
+        entries: list[RemoteEntry] = []
+        # Format panjang klasik GNU/BusyBox
+        pat_long = re.compile(
+            r"^([d\-lbcps])"
+            r"([rwxsStT\-]{9})\s+"
+            r"\d+\s+\S+\s+\S+\s+"
+            r"(\d+)\s+"
+            r"(?:\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}|\S+\s+\d+\s+[\d:]+)\s+"
+            r"(.+)$"
+        )
+        for line in text.splitlines():
+            line = line.rstrip()
+            if not line or line.lower().startswith("total "):
+                continue
+            m = pat_long.match(line)
+            if m:
+                kind = m.group(1)
+                size = int(m.group(3))
+                name = m.group(4).strip()
+                if " -> " in name:
+                    name = name.split(" -> ", 1)[0].strip()
+                if name in (".", ".."):
+                    continue
+                is_dir = kind == "d"
+                full = path.rstrip("/") + "/" + name if path != "/" else "/" + name
+                entries.append(
+                    RemoteEntry(
+                        name=name,
+                        path=full,
+                        is_dir=is_dir,
+                        size=size,
+                        mtime=0.0,
+                        mode=0,
+                    )
+                )
+                continue
+            # Format singkat: name atau name/
+            name = line.strip()
+            if not name or name in (".", ".."):
+                continue
+            if name.startswith("ls:"):
+                continue
+            is_dir = name.endswith("/")
+            name = name.rstrip("/")
+            if not name or name in (".", ".."):
+                continue
+            full = path.rstrip("/") + "/" + name if path != "/" else "/" + name
+            entries.append(
+                RemoteEntry(
+                    name=name,
+                    path=full,
+                    is_dir=is_dir,
+                    size=0,
+                    mtime=0.0,
+                    mode=0,
+                )
+            )
+        # dedupe by name
+        seen: set[str] = set()
+        uniq: list[RemoteEntry] = []
+        for e in entries:
+            if e.name in seen:
+                continue
+            seen.add(e.name)
+            uniq.append(e)
+        uniq.sort(key=lambda e: (not e.is_dir, e.name.lower()))
+        return uniq
 
     def disconnect(self) -> None:
         with self._lock:
@@ -503,107 +685,6 @@ class SftpSession:
         if name.startswith("/"):
             return name
         return f"{base}/{name}" if base else f"/{name}"
-
-    def _exec_on_transport(
-        self,
-        transport: paramiko.Transport,
-        command: str,
-        timeout: float = 60.0,
-    ) -> tuple[int, str, str]:
-        chan = transport.open_session(timeout=timeout)
-        chan.settimeout(timeout)
-        chan.exec_command(command)
-        out_chunks: list[str] = []
-        err_chunks: list[str] = []
-        while True:
-            if chan.recv_ready():
-                out_chunks.append(chan.recv(8192).decode("utf-8", errors="replace"))
-            if chan.recv_stderr_ready():
-                err_chunks.append(chan.recv_stderr(8192).decode("utf-8", errors="replace"))
-            if chan.exit_status_ready() and not chan.recv_ready() and not chan.recv_stderr_ready():
-                break
-        code = chan.recv_exit_status()
-        try:
-            chan.close()
-        except Exception:
-            pass
-        return code, "".join(out_chunks), "".join(err_chunks)
-
-    def list_dir(self, path: str | None = None) -> list[RemoteEntry]:
-        path = path or self.cwd or "/"
-        if self._sftp is not None:
-            return self._list_sftp(path)
-        return self._list_shell(path)
-
-    def _list_sftp(self, path: str) -> list[RemoteEntry]:
-        sftp = self._sftp
-        assert sftp is not None
-        with self._lock:
-            attrs = sftp.listdir_attr(path)
-        entries: list[RemoteEntry] = []
-        for a in attrs:
-            name = a.filename
-            if name in (".", ".."):
-                continue
-            mode = int(getattr(a, "st_mode", 0) or 0)
-            is_dir = stat.S_ISDIR(mode)
-            full = path.rstrip("/") + "/" + name if path != "/" else "/" + name
-            entries.append(
-                RemoteEntry(
-                    name=name,
-                    path=full,
-                    is_dir=is_dir,
-                    size=int(getattr(a, "st_size", 0) or 0),
-                    mtime=float(getattr(a, "st_mtime", 0) or 0),
-                    mode=mode,
-                )
-            )
-        entries.sort(key=lambda e: (not e.is_dir, e.name.lower()))
-        return entries
-
-    def _list_shell(self, path: str) -> list[RemoteEntry]:
-        """Fallback listing via `ls -la` jika SFTP tidak ada."""
-        tr = self._require_transport()
-        q = shlex.quote(path)
-        cmd = f"ls -la --time-style=long-iso {q} 2>/dev/null || ls -la {q}"
-        with self._lock:
-            _code, out, err = self._exec_on_transport(tr, cmd)
-        text = out or err or ""
-        entries: list[RemoteEntry] = []
-        # -rw-r--r-- 1 user group 123 2024-01-01 12:00 name
-        # atau: -rw-r--r-- 1 user group 123 Jan 1 12:00 name
-        pat = re.compile(
-            r"^([drwlxs\-])([rwxsStT\-]{9})\s+\d+\s+\S+\s+\S+\s+(\d+)\s+"
-            r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}|\S+\s+\d+\s+[\d:]+)\s+(.+)$"
-        )
-        for line in text.splitlines():
-            line = line.rstrip()
-            if not line or line.startswith("total "):
-                continue
-            m = pat.match(line)
-            if not m:
-                continue
-            kind = m.group(1)
-            size = int(m.group(3))
-            name = m.group(5).strip()
-            if " -> " in name:
-                name = name.split(" -> ", 1)[0].strip()
-            if name in (".", ".."):
-                continue
-            is_dir = kind == "d"
-            full = path.rstrip("/") + "/" + name if path != "/" else "/" + name
-            entries.append(
-                RemoteEntry(
-                    name=name,
-                    path=full,
-                    is_dir=is_dir,
-                    size=size,
-                    mtime=0.0,
-                    mode=0,
-                )
-            )
-        entries.sort(key=lambda e: (not e.is_dir, e.name.lower()))
-        return entries
 
     def chdir(self, path: str, *, record_history: bool = True) -> str:
         path = (path or "/").strip() or "/"
