@@ -658,18 +658,130 @@ class ScpPanel:
 
     @staticmethod
     def _is_clear_seq(text: str) -> bool:
-        """BusyBox/xterm clear biasanya \\x1b[H\\x1b[J, bukan hanya \\x1b[2J."""
+        """Deteksi clear layar penuh.
+
+        Jangan anggap \\x1b[J / \\x1b[0J saja sebagai clear — itu sering dipakai
+        saat backspace/redraw baris (erase dari kursor), dan dulu membuat
+        seluruh terminal kosong saat Backspace.
+        """
         if not text:
             return False
-        if "\x1bc" in text:  # RIS
+        if "\x1bc" in text:  # RIS — reset penuh
             return True
-        # CSI J / 0J / 1J / 2J / 3J (erase display)
-        if re.search(r"\x1b\[[0-9;]*J", text):
+        # Erase *entire* display
+        if re.search(r"\x1b\[(?:\d+;)*2J", text) or re.search(
+            r"\x1b\[(?:\d+;)*3J", text
+        ):
             return True
-        # cursor home + erase (kadang terpisah token)
-        if "\x1b[H" in text and ("\x1b[J" in text or "\x1b[0J" in text):
+        # Pola `clear` BusyBox/xterm: cursor home lalu erase (J/0J/2J)
+        if "\x1b[H" in text and re.search(r"\x1b\[[0-9;]*J", text):
             return True
         return False
+
+    def _term_bs_one(self) -> None:
+        """Hapus satu karakter di akhir baris saat ini (echo backspace)."""
+        try:
+            idx = self.term.index("end-1c")
+            if idx == self.term.index("end-1c linestart"):
+                return
+            self.term.delete("end-2c")
+        except Exception:
+            pass
+
+    def _term_cr_rewrite(self) -> None:
+        """\\r — siap tulis ulang baris saat ini (shell biasanya reprint prompt+teks)."""
+        try:
+            ls = self.term.index("end-1c linestart")
+            self.term.delete(ls, "end")
+        except Exception:
+            pass
+
+    def _term_erase_in_line(self, params: str) -> None:
+        """CSI n K — hapus sebagian baris (0/none=ke kanan, 1=ke kiri, 2=seluruh baris)."""
+        mode = params if params else "0"
+        try:
+            if mode == "2":
+                ls = self.term.index("end-1c linestart")
+                self.term.delete(ls, "end")
+            elif mode == "1":
+                # hapus dari awal baris sampai sebelum char terakhir (aproksimasi)
+                ls = self.term.index("end-1c linestart")
+                self.term.delete(ls, "end-1c")
+            else:
+                # 0: hapus dari kursor ke akhir baris ≈ hapus sisa di akhir widget line
+                pass
+        except Exception:
+            pass
+
+    def _term_write_plain(self, text: str) -> None:
+        """Terapkan output shell biasa: hormati \\r/\\b/CSI K, jangan strip dulu."""
+        i = 0
+        n = len(text)
+        while i < n:
+            ch = text[i]
+            if ch == "\x1b" and i + 1 < n:
+                nxt = text[i + 1]
+                if nxt == "[":
+                    j = i + 2
+                    while j < n and not (64 <= ord(text[j]) <= 126):
+                        j += 1
+                    if j < n:
+                        final = text[j]
+                        params = text[i + 2 : j]
+                        if final == "K":
+                            self._term_erase_in_line(params.split(";")[-1] if params else "")
+                        elif final == "D":
+                            try:
+                                count = int(params) if params else 1
+                            except ValueError:
+                                count = 1
+                            for _ in range(max(1, count)):
+                                self._term_bs_one()
+                        elif final == "C":
+                            pass  # cursor forward — abaikan di mode append
+                        elif final in "mHfABCDEFGsu":
+                            pass  # SGR / cursor — abaikan untuk plain append
+                        # CSI J 0/1 ditangani sebagai no-op di sini (bukan wipe terminal)
+                        i = j + 1
+                        continue
+                elif nxt == "]":
+                    # OSC … BEL / ST
+                    j = i + 2
+                    while j < n and text[j] not in ("\x07", "\x1b"):
+                        j += 1
+                    if j < n and text[j] == "\x1b" and j + 1 < n and text[j + 1] == "\\":
+                        i = j + 2
+                    else:
+                        i = j + 1 if j < n else n
+                    continue
+                else:
+                    i += 2
+                    continue
+            if ch == "\r":
+                # Jangan jadi \\n — itu merusak baris; siap reprint
+                if i + 1 < n and text[i + 1] == "\n":
+                    self.term.insert("end", "\n")
+                    i += 2
+                    continue
+                self._term_cr_rewrite()
+                i += 1
+                continue
+            if ch in ("\x08", "\x7f"):
+                self._term_bs_one()
+                i += 1
+                continue
+            if ch == "\n":
+                self.term.insert("end", "\n")
+                i += 1
+                continue
+            if ch == "\x07":
+                i += 1
+                continue
+            if ch == "\t" or (ch >= " " and ch != "\x7f"):
+                self.term.insert("end", ch)
+                i += 1
+                continue
+            i += 1
 
     def _wipe_term_keep_prompt(self, text: str = "") -> None:
         """Kosongkan widget terminal; sisakan plain text (biasanya prompt)."""
@@ -744,20 +856,7 @@ class ScpPanel:
                 self._paint_term_cursor(cy, cx)
                 self._term_mark = self.term.index("end-1c")
             else:
-                plain = strip_plain(text)
-                plain = plain.replace("\r\n", "\n").replace("\r", "\n")
-                for ch in plain:
-                    if ch in ("\x08", "\x7f"):
-                        try:
-                            self.term.delete("end-2c")
-                        except Exception:
-                            pass
-                    elif ch == "\n":
-                        self.term.insert("end", "\n")
-                    elif ch == "\x07":
-                        pass
-                    elif ch:
-                        self.term.insert("end", ch)
+                self._term_write_plain(text)
                 self.term.see("end")
                 self._term_mark = self.term.index("end-1c")
 
@@ -944,7 +1043,7 @@ class ScpPanel:
             elif event.keysym == "BackSpace":
                 if self._typed_line:
                     self._typed_line = self._typed_line[:-1]
-                # Shell/BusyBox biasanya erase=^H; nano/vim lebih suka DEL
+                # nano/vim: DEL; shell/BusyBox: biasanya ^H — kirim satu byte saja
                 if self._term_fullscreen:
                     self._shell_chan.send("\x7f")
                 else:
@@ -956,18 +1055,17 @@ class ScpPanel:
             elif event.keysym == "Escape":
                 self._typed_line = ""
                 self._shell_chan.send("\x1b")
-            elif ch == "\x08":
-                # Beberapa layout kirim Backspace sebagai char tanpa keysym BackSpace
+            elif ch in ("\x08", "\x7f") and event.keysym not in {
+                "BackSpace",
+                "Delete",
+            }:
+                # Char-only backspace (bukan keysym BackSpace — hindari double-send)
                 if self._typed_line:
                     self._typed_line = self._typed_line[:-1]
-                if self._term_fullscreen:
+                if self._term_fullscreen or ch == "\x7f":
                     self._shell_chan.send("\x7f")
                 else:
                     self._shell_chan.send("\x08")
-            elif ch == "\x7f":
-                if self._typed_line:
-                    self._typed_line = self._typed_line[:-1]
-                self._shell_chan.send("\x7f")
             elif ch:
                 if ch.isprintable() and not self._term_fullscreen:
                     self._typed_line += ch
