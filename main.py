@@ -2782,28 +2782,11 @@ class NetworkToolsApp(ctk.CTk):
             _draw()
             _start()
 
-        # Urutan kanan→kiri: Kembali, Kirim, Refresh (kuning + teks hitam)
-        ctk.CTkButton(
-            toolbar,
-            text=t("app.back"),
-            width=100,
-            height=30,
-            fg_color=COLORS["danger"],
-            hover_color=COLORS["danger_hover"],
-            command=self._cancel_to_dashboard,
-        ).pack(side="right", padx=(8, 0))
-        ctk.CTkButton(
-            toolbar,
-            text=t("app.send"),
-            width=100,
-            height=30,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_dim"],
-            text_color=COLORS["on_accent"],
-            command=self._send_screenshot,
-        ).pack(side="right", padx=(8, 0))
+        # LTR di frame kanan: Refresh | Kirim | Kembali (Refresh bisa di-hide saat loading)
+        actions = ctk.CTkFrame(toolbar, fg_color="transparent")
+        actions.pack(side="right")
         btn_refresh = ctk.CTkButton(
-            toolbar,
+            actions,
             text=t("app.refresh"),
             width=90,
             height=30,
@@ -2812,7 +2795,26 @@ class NetworkToolsApp(ctk.CTk):
             text_color="#1A1400",
             command=restart,
         )
-        btn_refresh.pack(side="right", padx=(8, 0))
+        btn_refresh.pack(side="left", padx=(0, 8))
+        ctk.CTkButton(
+            actions,
+            text=t("app.send"),
+            width=100,
+            height=30,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+            command=self._send_screenshot,
+        ).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(
+            actions,
+            text=t("app.back"),
+            width=100,
+            height=30,
+            fg_color=COLORS["danger"],
+            hover_color=COLORS["danger_hover"],
+            command=self._cancel_to_dashboard,
+        ).pack(side="left")
 
         # Shell + canvas border warna-warni mengelilingi area topologi
         shell = ctk.CTkFrame(self._content, fg_color="transparent")
@@ -2850,14 +2852,18 @@ class NetworkToolsApp(ctk.CTk):
         def set_trace_loading(active: bool) -> None:
             try:
                 if active:
-                    btn_refresh.configure(state="disabled")
+                    btn_refresh.pack_forget()
                     trace_load.place(relx=0, rely=0, relwidth=1, relheight=1)
                     trace_bar.start()
                     trace_load.lift()
                 else:
                     trace_bar.stop()
                     trace_load.place_forget()
-                    btn_refresh.configure(state="normal")
+                    others = [w for w in actions.winfo_children() if w is not btn_refresh]
+                    if others:
+                        btn_refresh.pack(side="left", padx=(0, 8), before=others[0])
+                    else:
+                        btn_refresh.pack(side="left", padx=(0, 8))
             except Exception:
                 pass
 

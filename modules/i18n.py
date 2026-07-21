@@ -23,15 +23,15 @@ _STRINGS: dict[str, dict[str, str]] = {
     "app.send": {"id": "Kirim", "en": "Send"},
     "app.refresh": {"id": "Refresh", "en": "Refresh"},
     "app.recheck": {"id": "Cek Ulang", "en": "Recheck"},
-    "app.reload": {"id": "Reload", "en": "Reload"},
+    "app.reload": {"id": "Muat Ulang", "en": "Reload"},
     "app.page_loading": {"id": "Memuat halaman…", "en": "Loading page…"},
     "app.startup_loading": {
         "id": "Memuat informasi sistem…",
         "en": "Loading system info…",
     },
     "trace.loading": {
-        "id": "Menjalankan traceroute…",
-        "en": "Running traceroute…",
+        "id": "Menjalankan Traceroute, Harap Tunggu",
+        "en": "Running Traceroute, please wait",
     },
     "app.start_scan": {"id": "Mulai Scan", "en": "Start Scan"},
     "app.stop": {"id": "Stop", "en": "Stop"},

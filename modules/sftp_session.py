@@ -503,12 +503,17 @@ class SftpSession:
         deadline = time.time() + timeout
         while time.time() < deadline:
             got = False
-            if chan.recv_ready():
-                out_chunks.append(chan.recv(8192).decode("utf-8", errors="replace"))
-                got = True
-            if chan.recv_stderr_ready():
-                err_chunks.append(chan.recv_stderr(8192).decode("utf-8", errors="replace"))
-                got = True
+            try:
+                if chan.recv_ready():
+                    out_chunks.append(chan.recv(8192).decode("utf-8", errors="replace"))
+                    got = True
+                if chan.recv_stderr_ready():
+                    err_chunks.append(
+                        chan.recv_stderr(8192).decode("utf-8", errors="replace")
+                    )
+                    got = True
+            except (socket.timeout, TimeoutError, OSError):
+                pass
             if chan.exit_status_ready() and not chan.recv_ready() and not chan.recv_stderr_ready():
                 break
             if not got:
@@ -560,39 +565,68 @@ class SftpSession:
         """Fallback listing via shell jika SFTP tidak ada."""
         tr = self._require_transport()
         q = shlex.quote(path)
-        # Beberapa busybox tidak dukung --time-style
-        cmds = [
-            f"ls -la --time-style=long-iso {q}",
-            f"ls -la {q}",
-            f"ls -1Ap {q}",
-            f"ls -1 {q}",
-        ]
+        # Format mesin: D|name / F|name — lebih andal daripada parse ls -la
+        script = (
+            f"cd {q} || exit 1; "
+            r"for x in * .[!.]* ..?*; do "
+            r'[ ! -e "$x" ] && continue; '
+            r'[ "$x" = "." ] && continue; '
+            r'[ "$x" = ".." ] && continue; '
+            r'if [ -d "$x" ]; then printf "D|%s\n" "$x"; '
+            r'else printf "F|%s\n" "$x"; fi; '
+            r"done"
+        )
         text = ""
         with self._lock:
-            for cmd in cmds:
-                code, out, err = self._exec_on_transport(tr, f"{cmd} 2>&1")
-                blob = (out or "") + (err or "")
-                if blob.strip() and "No such file" not in blob and "cannot access" not in blob:
-                    text = blob
-                    break
-                if not text:
-                    text = blob
+            code, out, err = self._exec_on_transport(tr, script)
+            text = (out or "") + (err or "")
+            if code != 0 or not any(
+                ln.startswith(("D|", "F|")) for ln in text.splitlines()
+            ):
+                # fallback ls klasik
+                for cmd in (
+                    f"LC_ALL=C ls -la {q}",
+                    f"ls -la {q}",
+                    f"ls -1A {q}",
+                ):
+                    _c, o2, e2 = self._exec_on_transport(tr, f"{cmd} 2>&1")
+                    blob = (o2 or "") + (e2 or "")
+                    if blob.strip() and "No such file" not in blob:
+                        text = blob
+                        break
 
         entries: list[RemoteEntry] = []
-        # Format panjang klasik GNU/BusyBox
-        pat_long = re.compile(
-            r"^([d\-lbcps])"
-            r"([rwxsStT\-]{9})\s+"
-            r"\d+\s+\S+\s+\S+\s+"
-            r"(\d+)\s+"
-            r"(?:\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}|\S+\s+\d+\s+[\d:]+)\s+"
-            r"(.+)$"
-        )
         for line in text.splitlines():
-            line = line.rstrip()
+            line = line.rstrip("\r")
             if not line or line.lower().startswith("total "):
                 continue
-            m = pat_long.match(line)
+            if line.startswith(("D|", "F|")):
+                is_dir = line.startswith("D|")
+                name = line[2:].strip()
+                if not name or name in (".", ".."):
+                    continue
+                full = path.rstrip("/") + "/" + name if path != "/" else "/" + name
+                entries.append(
+                    RemoteEntry(
+                        name=name,
+                        path=full,
+                        is_dir=is_dir,
+                        size=0,
+                        mtime=0.0,
+                        mode=0,
+                    )
+                )
+                continue
+            # ls -la (mode boleh berakhir . atau +)
+            m = re.match(
+                r"^([d\-lbcps])"
+                r"([rwxsStT\-.]{9,11})\+?\s+"
+                r"\d+\s+\S+\s+\S+\s+"
+                r"(\d+)\s+"
+                r"(?:\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}|\S+\s+\d+\s+[\d:]+)\s+"
+                r"(.+)$",
+                line,
+            )
             if m:
                 kind = m.group(1)
                 size = int(m.group(3))
@@ -601,28 +635,30 @@ class SftpSession:
                     name = name.split(" -> ", 1)[0].strip()
                 if name in (".", ".."):
                     continue
-                is_dir = kind == "d"
                 full = path.rstrip("/") + "/" + name if path != "/" else "/" + name
                 entries.append(
                     RemoteEntry(
                         name=name,
                         path=full,
-                        is_dir=is_dir,
+                        is_dir=kind == "d",
                         size=size,
                         mtime=0.0,
                         mode=0,
                     )
                 )
                 continue
-            # Format singkat: name atau name/
+            # ls -1
             name = line.strip()
-            if not name or name in (".", ".."):
-                continue
-            if name.startswith("ls:"):
+            if (
+                not name
+                or name in (".", "..")
+                or name.startswith("ls:")
+                or "cannot " in name.lower()
+            ):
                 continue
             is_dir = name.endswith("/")
             name = name.rstrip("/")
-            if not name or name in (".", ".."):
+            if not name:
                 continue
             full = path.rstrip("/") + "/" + name if path != "/" else "/" + name
             entries.append(
@@ -635,7 +671,7 @@ class SftpSession:
                     mode=0,
                 )
             )
-        # dedupe by name
+
         seen: set[str] = set()
         uniq: list[RemoteEntry] = []
         for e in entries:

@@ -143,7 +143,7 @@ class ScpPanel:
         )
         self.status_lbl.pack(fill="x", padx=12, pady=(0, 8))
 
-        # --- Split: kiri explorer | kanan terminal ---
+        # --- Split: kiri explorer | kanan terminal (tk.Frame agar PanedWindow expand benar) ---
         split = tk.PanedWindow(
             content,
             orient=tk.HORIZONTAL,
@@ -154,22 +154,25 @@ class ScpPanel:
         )
         split.pack(fill="both", expand=True)
 
+        left_host = tk.Frame(split, bg=colors["panel"], highlightthickness=0)
+        right_host = tk.Frame(split, bg="#0C0C0C", highlightthickness=0)
+        split.add(left_host, minsize=300, stretch="always")
+        split.add(right_host, minsize=300, stretch="always")
+
         left = ctk.CTkFrame(
-            split,
+            left_host,
             fg_color=colors["panel"],
-            corner_radius=8,
-            border_width=1,
-            border_color=colors["border"],
+            corner_radius=0,
+            border_width=0,
         )
+        left.pack(fill="both", expand=True)
         right = ctk.CTkFrame(
-            split,
+            right_host,
             fg_color="#0C0C0C",
-            corner_radius=8,
-            border_width=1,
-            border_color=colors["border"],
+            corner_radius=0,
+            border_width=0,
         )
-        split.add(left, minsize=280, stretch="always")
-        split.add(right, minsize=280, stretch="always")
+        right.pack(fill="both", expand=True)
 
         # LEFT: toolbar + path + tree
         left_inner = ctk.CTkFrame(left, fg_color="transparent")
@@ -222,15 +225,16 @@ class ScpPanel:
         self.btn_mkfile = _tbtn(t("scp.new_file"), self._new_file, 80)
         self.btn_upload = _tbtn(t("scp.upload"), self._upload, 70)
 
-        ctk.CTkLabel(
+        self.drop_hint = ctk.CTkLabel(
             left_inner,
             text=t("scp.drop_hint"),
             font=ctk.CTkFont(family="Segoe UI", size=10),
             text_color=colors["muted"],
             anchor="w",
-        ).pack(fill="x", pady=(0, 4))
+        )
+        self.drop_hint.pack(fill="x", pady=(0, 4))
 
-        host = tk.Frame(left_inner, bg=colors["panel"], highlightthickness=0)
+        host = tk.Frame(left_inner, bg=colors["bg"], highlightthickness=1, highlightbackground=colors["border"])
         host.pack(fill="both", expand=True)
         self._tree_host = host
 
@@ -613,8 +617,8 @@ class ScpPanel:
                 self._log(f"Terhubung: {user}@{host}:{port}  [{sftp_flag}]")
                 if note:
                     self._log(note)
-                self._start_shell()
-                self._refresh()
+                # Isi explorer dulu, baru buka shell interaktif
+                self._refresh(then_shell=True)
 
             self._ui(done)
 
@@ -660,13 +664,25 @@ class ScpPanel:
     def _fill(self, rows: list[Any]) -> None:
         self.tree.delete(*self.tree.get_children())
         self._entries.clear()
-        self.path_var.set(self.session.cwd)
+        self.path_var.set(self.session.cwd or "/")
 
         display: list[Any] = []
         parent = self._parent_entry()
         if parent is not None:
             display.append(parent)
         display.extend(rows)
+
+        # Sembunyikan petunjuk drag-drop saat sudah ada isi / sudah connect
+        try:
+            if self.session.connected:
+                self.drop_hint.configure(
+                    text=f"{len(rows)} item  ·  {self.session.cwd}"
+                    + ("  ·  SFTP" if self.session.sftp_ok else "  ·  shell")
+                )
+            else:
+                self.drop_hint.configure(text=t("scp.drop_hint"))
+        except Exception:
+            pass
 
         if not display:
             self._log(t("scp.empty"))
@@ -693,7 +709,7 @@ class ScpPanel:
             )
             self._entries[iid] = row
 
-    def _refresh(self) -> None:
+    def _refresh(self, *, then_shell: bool = False) -> None:
         if not self._require_conn():
             return
 
@@ -702,6 +718,16 @@ class ScpPanel:
             rows: list[Any] = []
             try:
                 rows = self.session.list_dir()
+                if not rows:
+                    for alt in ("/",):
+                        try:
+                            if (self.session.cwd or "/") != alt:
+                                self.session.chdir(alt, record_history=False)
+                            rows = self.session.list_dir()
+                            if rows:
+                                break
+                        except Exception:
+                            continue
             except Exception as exc:
                 err = str(exc)
 
@@ -709,8 +735,14 @@ class ScpPanel:
                 if err:
                     self._log(f"List error: {err}")
                     messagebox.showerror(t("tool.scp.title"), err, parent=self.app)
-                    return
-                self._fill(rows)
+                else:
+                    self._log(
+                        f"Explorer: {len(rows)} item · {self.session.cwd}"
+                        + (" (SFTP)" if self.session.sftp_ok else " (shell)")
+                    )
+                    self._fill(rows)
+                if then_shell:
+                    self._start_shell()
 
             self._ui(done)
 
