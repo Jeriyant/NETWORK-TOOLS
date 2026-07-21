@@ -623,33 +623,51 @@ class ScpPanel:
 
     # ----- terminal -----
     def _term_write(self, text: str) -> None:
-        """Tulis ke terminal; fullscreen (nano/vim) pakai buffer ANSI."""
+        """Tulis ke terminal; fullscreen (nano/vim) pakai pyte screen."""
         try:
             self.term.configure(state="normal")
-            # Deteksi masuk/keluar alternate screen / clear
             enter_fs = (
                 "\x1b[?1049h" in text
                 or "\x1b[?47h" in text
+                or "\x1b[?1047h" in text
                 or "\x1b[2J" in text
-                or "\x1b[H" in text
-                or "\x1bc" in text
             )
-            leave_fs = "\x1b[?1049l" in text or "\x1b[?47l" in text
-            if enter_fs:
+            leave_fs = (
+                "\x1b[?1049l" in text
+                or "\x1b[?47l" in text
+                or "\x1b[?1047l" in text
+            )
+            # Heuristik: banyak CUP → aplikasi fullscreen
+            if not self._term_fullscreen and text.count("\x1b[") >= 3 and (
+                "\x1b[" in text and ("H" in text or "f" in text)
+            ):
+                if "nano" in text.lower() or "GNU nano" in text or enter_fs:
+                    enter_fs = True
+
+            if enter_fs and not self._term_fullscreen:
                 self._term_fullscreen = True
-                cols = max(40, int(self.term.winfo_width() / 8) or 100)
-                rows = max(10, int(self.term.winfo_height() / 16) or 30)
+                cols = max(40, int(self.term.winfo_width() / 7) or 100)
+                rows = max(12, int(self.term.winfo_height() / 16) or 30)
                 self._ansi.resize(rows, cols)
+                self._ansi.clear()
+                try:
+                    self.session.resize_shell(cols, rows)
+                except Exception:
+                    pass
             if leave_fs:
                 self._term_fullscreen = False
                 self._ansi.clear()
 
-            if self._term_fullscreen or enter_fs:
+            if self._term_fullscreen:
                 self._ansi.feed(text)
                 screen = self._ansi.render()
                 self.term.delete("1.0", "end")
                 self.term.insert("1.0", screen)
-                self.term.see("end")
+                # Jangan auto-scroll ke bawah saat nano — biarkan top terlihat
+                try:
+                    self.term.see("1.0")
+                except Exception:
+                    pass
                 self._term_mark = self.term.index("end-1c")
             else:
                 plain = strip_plain(text)
@@ -837,9 +855,18 @@ class ScpPanel:
 
     def _start_shell(self) -> None:
         self._stop_shell()
+        def _term_cols_rows() -> tuple[int, int]:
+            try:
+                # Consolas 11 ≈ 7x16 px per cell
+                cols = max(40, int(self.term.winfo_width() / 7) or 100)
+                rows = max(12, int(self.term.winfo_height() / 16) or 30)
+                return cols, rows
+            except Exception:
+                return 100, 30
+
+        cols, rows = _term_cols_rows()
+        self._ansi.resize(rows, cols)
         try:
-            cols = max(40, int(self.term.winfo_width() / 8) or 100)
-            rows = max(10, int(self.term.winfo_height() / 16) or 30)
             self._shell_chan = self.session.open_shell(width=cols, height=rows)
         except Exception as exc:
             self._term_write(f"\nGagal buka shell: {exc}\n")
@@ -848,6 +875,7 @@ class ScpPanel:
 
         self.term.configure(state="normal")
         self._shell_stop.clear()
+        self._term_fullscreen = False
 
         def reader() -> None:
             chan = self._shell_chan
@@ -870,7 +898,6 @@ class ScpPanel:
         self._shell_thread = threading.Thread(target=reader, daemon=True)
         self._shell_thread.start()
         self.term.focus_set()
-        # Sync ukuran PTY (penting untuk nano)
         try:
             self.session.resize_shell(cols, rows)
         except Exception:
@@ -881,8 +908,8 @@ class ScpPanel:
         if self._shell_chan is None:
             return
         try:
-            cols = max(40, int(self.term.winfo_width() / 8) or 100)
-            rows = max(10, int(self.term.winfo_height() / 16) or 30)
+            cols = max(40, int(self.term.winfo_width() / 7) or 100)
+            rows = max(12, int(self.term.winfo_height() / 16) or 30)
             self._ansi.resize(rows, cols)
             self.session.resize_shell(cols, rows)
         except Exception:

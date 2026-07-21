@@ -147,7 +147,7 @@ SEND_TOOLS = {"ping", "traceroute", "dns", "ipscan", "speedtest", "apps", "secur
 TEXT_SEND_TOOLS = frozenset({"apps", "ipscan"})
 # Kirim/Kembali digabung di baris kontrol (bukan footer)
 INLINE_ACTION_TOOLS = frozenset(
-    {"ping", "traceroute", "ipscan", "apps", "security", "printer", "scp", "fixrdp", "refresh"}
+    {"ping", "traceroute", "ipscan", "apps", "security", "printer", "scp", "fixrdp", "refresh", "anydesk"}
 )
 
 
@@ -1704,8 +1704,12 @@ class NetworkToolsApp(ctk.CTk):
         ).pack(side="left")
         self._build_sysinfo_bar(self._sysinfo_strip)
 
-        # Tool-specific controls at top of content
-        if key not in AUTO_RUN_TOOLS:
+        # AnyDesk: Kirim/Kembali langsung di bawah bar info
+        if key == "anydesk":
+            controls = ctk.CTkFrame(self._content, fg_color="transparent")
+            controls.pack(fill="x", pady=(0, 8))
+            self._pack_inline_actions(controls, side="right", height=36)
+        elif key not in AUTO_RUN_TOOLS:
             controls = ctk.CTkFrame(self._content, fg_color="transparent")
             controls.pack(fill="x", pady=(0, 8))
             self._build_tool_controls(key, controls)
@@ -2050,7 +2054,7 @@ class NetworkToolsApp(ctk.CTk):
             tree.delete(*tree.get_children())
             InstalledAppsRunner(on_apps=on_apps, on_error=on_error).start()
 
-        def _run_action(action: str = "clean") -> None:
+        def _run_action(_action: str = "uninstall") -> None:
             app = _selected_app()
             if app is None:
                 messagebox.showinfo(t("tool.apps.title"), t("apps.select"), parent=self)
@@ -2058,7 +2062,7 @@ class NetworkToolsApp(ctk.CTk):
             name = app.get("name", "")
             if not messagebox.askyesno(
                 t("tool.apps.title"),
-                t("apps.confirm_clean", name=name),
+                t("apps.confirm_uninstall", name=name),
                 parent=self,
             ):
                 return
@@ -2068,8 +2072,8 @@ class NetworkToolsApp(ctk.CTk):
             def done(_ok: bool) -> None:
                 self.after(400, load)
 
-            # Uninstall = uninstall bersih
-            AppActionRunner("clean", app, on_line=self.log, on_done=done).start()
+            # Sama seperti Uninstall di Control Panel / Settings (UI uninstaller resmi)
+            AppActionRunner("uninstall", app, on_line=self.log, on_done=done).start()
 
         def on_right(event: Any) -> None:
             row = tree.identify_row(event.y)
@@ -2531,62 +2535,84 @@ class NetworkToolsApp(ctk.CTk):
                 ("ifIndex", details.get("ifindex") or "—"),
             ]
 
+            # Tinggi otomatis: header + baris + footer (tanpa scrollbar)
+            dlg_w = 520
+            row_h = 36
+            dlg_h = 56 + 28 + (len(rows) * row_h) + 64 + 28
             dlg = ctk.CTkToplevel(self)
             dlg.title(t("network.status"))
-            dlg.geometry("480x420")
-            dlg.minsize(420, 360)
+            dlg.geometry(f"{dlg_w}x{dlg_h}")
+            dlg.minsize(dlg_w, dlg_h)
+            dlg.resizable(False, False)
             dlg.configure(fg_color=COLORS["bg"])
             dlg.transient(self)
             dlg.attributes("-topmost", True)
             self.update_idletasks()
-            px = self.winfo_rootx() + (self.winfo_width() - 480) // 2
-            py = self.winfo_rooty() + (self.winfo_height() - 420) // 2
-            dlg.geometry(f"480x420+{max(px, 40)}+{max(py, 40)}")
+            px = self.winfo_rootx() + (self.winfo_width() - dlg_w) // 2
+            py = self.winfo_rooty() + (self.winfo_height() - dlg_h) // 2
+            dlg.geometry(f"{dlg_w}x{dlg_h}+{max(px, 40)}+{max(py, 40)}")
+
+            flash = ctk.CTkFrame(
+                dlg, fg_color=COLORS["accent"], height=6, corner_radius=0
+            )
+            flash.pack(fill="x", side="top")
 
             frame = ctk.CTkFrame(
                 dlg,
                 fg_color=COLORS["panel"],
-                corner_radius=12,
-                border_width=1,
-                border_color=COLORS["border"],
+                corner_radius=14,
+                border_width=2,
+                border_color=COLORS["accent"],
             )
-            frame.pack(fill="both", expand=True, padx=14, pady=14)
+            frame.pack(fill="both", expand=True, padx=12, pady=12)
+
+            footer = ctk.CTkFrame(frame, fg_color="transparent", height=52)
+            footer.pack(fill="x", side="bottom", padx=12, pady=(4, 12))
+            footer.pack_propagate(False)
+
+            body = ctk.CTkFrame(frame, fg_color="transparent")
+            body.pack(fill="both", expand=True, padx=8, pady=(8, 0))
 
             ctk.CTkLabel(
-                frame,
+                body,
                 text=t("network.status"),
-                font=ctk.CTkFont(family="Segoe UI Semibold", size=16),
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=18),
                 text_color=COLORS["text"],
                 anchor="w",
-            ).pack(fill="x", padx=14, pady=(12, 8))
+            ).pack(fill="x", padx=14, pady=(4, 8))
 
-            body = ctk.CTkScrollableFrame(frame, fg_color="transparent")
-            body.pack(fill="both", expand=True, padx=8, pady=(0, 8))
-            body.grid_columnconfigure(0, weight=0, minsize=110)
-            body.grid_columnconfigure(1, weight=1)
+            grid = ctk.CTkFrame(body, fg_color="transparent")
+            grid.pack(fill="both", expand=True, padx=6, pady=(0, 4))
+            grid.grid_columnconfigure(0, weight=0, minsize=100)
+            grid.grid_columnconfigure(1, weight=1)
 
             for i, (label, value) in enumerate(rows):
                 ctk.CTkLabel(
-                    body,
+                    grid,
                     text=label,
                     font=ctk.CTkFont(family="Segoe UI", size=12),
                     text_color=COLORS["muted"],
                     anchor="w",
-                ).grid(row=i, column=0, sticky="nw", padx=(6, 10), pady=4)
+                ).grid(row=i, column=0, sticky="w", padx=(8, 10), pady=3)
                 val_box = ctk.CTkEntry(
-                    body,
+                    grid,
                     font=ctk.CTkFont(family="Consolas", size=12),
                     fg_color=COLORS["bg"],
                     border_color=COLORS["border"],
                     text_color=COLORS["text"],
                     height=28,
                 )
-                val_box.grid(row=i, column=1, sticky="ew", padx=(0, 6), pady=4)
+                val_box.grid(row=i, column=1, sticky="ew", padx=(0, 8), pady=3)
                 val_box.insert(0, value or "—")
                 val_box.configure(state="readonly")
 
-            footer = ctk.CTkFrame(frame, fg_color="transparent")
-            footer.pack(fill="x", padx=12, pady=(4, 12))
+            tip = ctk.CTkLabel(
+                footer,
+                text="",
+                font=ctk.CTkFont(family="Segoe UI", size=11),
+                text_color=COLORS["accent"],
+                anchor="w",
+            )
 
             def _copy_all() -> None:
                 text = "\n".join(f"{k}: {v}" for k, v in rows)
@@ -2597,35 +2623,32 @@ class NetworkToolsApp(ctk.CTk):
                 except Exception:
                     tip.configure(text="Copy gagal.")
 
-            tip = ctk.CTkLabel(
-                footer,
-                text="",
-                font=ctk.CTkFont(family="Segoe UI", size=11),
-                text_color=COLORS.get("ok", "#12B76A"),
-                anchor="w",
-            )
-            tip.pack(side="left", fill="x", expand=True)
-
+            # Salin semua (box style notifikasi AnyDesk) → Tutup merah
             ctk.CTkButton(
                 footer,
                 text=t("network.info.copy"),
-                width=120,
-                height=34,
-                fg_color=COLORS["accent"],
-                hover_color=COLORS["accent_dim"],
-                text_color=COLORS["on_accent"],
+                width=130,
+                height=40,
+                fg_color=COLORS["tile"],
+                hover_color=COLORS["tile_hover"],
+                text_color=COLORS["text"],
+                font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+                corner_radius=10,
                 command=_copy_all,
-            ).pack(side="right", padx=(8, 0))
+            ).pack(side="left", pady=6)
+            tip.pack(side="left", fill="x", expand=True, padx=(10, 8))
             ctk.CTkButton(
                 footer,
                 text=t("network.info.close"),
-                width=90,
-                height=34,
-                fg_color=COLORS["border"],
-                hover_color=COLORS["muted"],
-                text_color=COLORS["text"],
+                width=110,
+                height=40,
+                fg_color=COLORS["danger"],
+                hover_color=COLORS["danger_hover"],
+                text_color="#FFFFFF",
+                font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+                corner_radius=10,
                 command=dlg.destroy,
-            ).pack(side="right")
+            ).pack(side="right", pady=6)
 
             dlg.after(80, dlg.lift)
             dlg.after(100, dlg.focus_force)

@@ -106,12 +106,33 @@ def _anydesk_process_running() -> bool:
         return False
 
 
-def _force_kill_anydesk() -> str:
-    """Tutup paksa semua proses AnyDesk.exe."""
+def _force_kill_anydesk(exe: Path | None = None) -> str:
+    """Tutup AnyDesk: CLI stop → taskkill → elevated taskkill bila perlu."""
+    import ctypes
+
     creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    notes: list[str] = []
+
+    if exe is not None and exe.is_file():
+        for flag in ("--stop", "--shutdown"):
+            try:
+                subprocess.run(
+                    [str(exe), flag],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=15,
+                    creationflags=creation,
+                )
+                notes.append(f"AnyDesk {flag}")
+            except Exception as exc:
+                notes.append(f"{flag}: {exc}")
+        time.sleep(0.6)
+
     try:
         completed = subprocess.run(
-            ["taskkill", "/IM", "AnyDesk.exe", "/F"],
+            ["taskkill", "/F", "/IM", "AnyDesk.exe", "/T"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -120,16 +141,56 @@ def _force_kill_anydesk() -> str:
             creationflags=creation,
         )
         out = ((completed.stdout or "") + (completed.stderr or "")).strip()
-        return out or f"taskkill exit {completed.returncode}"
+        # Ringkas: jangan spam Access Denied per-PID
+        if "Access is denied" in out or "akses ditolak" in out.lower():
+            notes.append("taskkill: sebagian proses terkunci (butuh elevasi)…")
+        elif out:
+            # Ambil baris sukses saja
+            ok_lines = [
+                ln
+                for ln in out.splitlines()
+                if "SUCCESS" in ln.upper() or "berhasil" in ln.lower()
+            ]
+            notes.append("; ".join(ok_lines) if ok_lines else "taskkill dijalankan.")
+        else:
+            notes.append(f"taskkill exit {completed.returncode}")
     except Exception as exc:
-        return str(exc)
+        notes.append(str(exc))
+
+    time.sleep(0.4)
+    if _anydesk_process_running():
+        notes.append("Menjalankan taskkill sebagai Administrator…")
+        try:
+            # SW_HIDE = 0; rc > 32 = success
+            rc = int(
+                ctypes.windll.shell32.ShellExecuteW(
+                    None,
+                    "runas",
+                    "taskkill.exe",
+                    "/F /IM AnyDesk.exe /T",
+                    None,
+                    0,
+                )
+            )
+            if rc <= 32:
+                notes.append(f"Elevasi dibatalkan / gagal (kode {rc}).")
+            else:
+                time.sleep(2.0)
+                notes.append("taskkill elevated OK.")
+        except Exception as exc:
+            notes.append(f"Elevasi: {exc}")
+
+    if _anydesk_process_running():
+        notes.append("Peringatan: AnyDesk masih berjalan (service mungkin terkunci).")
+    else:
+        notes.append("AnyDesk berhasil ditutup.")
+    return "\n".join(notes)
 
 
 def _start_anydesk_tray(exe: Path) -> tuple[bool, str]:
     """Jalankan AnyDesk di system tray saja (--tray / --control)."""
     creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     last = "Gagal start tray"
-    # Urutan: --tray (systray), lalu --control (tray icon process resmi)
     for args in (
         [str(exe), "--tray"],
         [str(exe), "--control"],
@@ -213,29 +274,30 @@ class AnydeskRunner:
 
             self.on_line(f"Menemukan: {exe}")
 
-            # Tutup paksa dulu agar window utama tidak nyangkut, lalu tray bersih
-            if _anydesk_process_running():
-                self.on_line("Menutup paksa AnyDesk yang sedang berjalan…")
-                self.on_line(_force_kill_anydesk())
-                time.sleep(1.0)
+            # Alur: tutup paksa → tray → baca ID → notifikasi
+            self.on_line("1/3 Menutup paksa AnyDesk…")
+            for line in _force_kill_anydesk(exe).splitlines():
+                if line.strip():
+                    self.on_line(f"  {line}")
+            time.sleep(0.8)
 
-            self.on_line("Menyalakan service + system tray…")
+            self.on_line("2/3 Menjalankan AnyDesk mode tray…")
             _ensure_service(exe)
             ok, msg = _start_anydesk_tray(exe)
-            self.on_line(msg if ok else f"Tray: {msg}")
+            self.on_line(f"  {msg}" if ok else f"  Tray: {msg}")
             time.sleep(1.5)
 
-            self.on_line("Membaca AnyDesk ID…")
-            anydesk_id = self._poll_id(exe, rounds=8, delay=1.2)
+            self.on_line("3/3 Membaca AnyDesk ID…")
+            anydesk_id = self._poll_id(exe, rounds=10, delay=1.2)
 
             if not anydesk_id:
-                self.on_line("ID belum ada — coba tray ulang…")
+                self.on_line("  ID belum ada — coba tray ulang…")
                 _start_anydesk_tray(exe)
                 anydesk_id = self._poll_id(exe, rounds=8, delay=1.5)
 
             if not anydesk_id:
                 self.on_line("AnyDesk ID belum tersedia.")
-                self.on_line("Pastikan AnyDesk terpasang & online di system tray, lalu coba lagi.")
+                self.on_line("Pastikan AnyDesk terpasang & online di system tray.")
                 return
 
             self.on_line(f"AnyDesk ID: {anydesk_id}")
@@ -256,7 +318,7 @@ class AnydeskRunner:
             if _anydesk_process_running():
                 self.on_line("AnyDesk di system tray (tanpa jendela utama).")
             self.on_line("")
-            self.on_line("Selesai — notifikasi siap. Tekan Kirim untuk buka Telegram.")
+            self.on_line("Selesai — menampilkan notifikasi.")
         except Exception as exc:
             self.on_line(f"Error: {exc}")
         finally:
