@@ -220,11 +220,11 @@ def _clean_environ() -> dict[str, str]:
 
 def apply_update_and_restart(downloaded_exe: Path, kind: str | None = None) -> None:
     """
-    Pasang update cepat: hanya ganti file EXE lalu jalankan ulang.
+    Pasang update cepat: hanya ganti file EXE.
 
     1. Salin ke ``NetworkTools.exe.new`` selagi app masih jalan.
     2. Setelah PID keluar: rename exe→.old, .new→exe, hapus .old.
-    3. Start ulang ``NetworkTools.exe`` otomatis.
+    3. Tidak auto-start (hindari error); buka manual setelah update.
     """
     if not getattr(sys, "frozen", False):
         raise RuntimeError("Auto-replace hanya tersedia pada build .exe")
@@ -309,10 +309,7 @@ del /F /Q "%TEMPSRC%" >nul 2>&1
 del /F /Q "%TARGET%.old" >nul 2>&1
 echo OK> "%OKLOG%"
 
-rem Tunggu 5 detik agar handle file lepas, lalu jalankan ulang app
-timeout /t 5 /nobreak >nul 2>&1
-start "" "%TARGET%"
-
+rem Tidak auto-start (bisa error); user buka EXE manual
 del /F /Q "{vbs}" >nul 2>&1
 del /F /Q "%~f0" >nul 2>&1
 """

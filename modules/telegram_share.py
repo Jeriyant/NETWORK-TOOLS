@@ -260,7 +260,7 @@ def open_telegram(telegram_exe: str = "", *, background: bool = False) -> bool:
         return False
 
 
-# --- UI automation ala AutoHotkey (Windows) ---
+# --- UI automation ala AutoHotkey (Windows / WScript.Shell SendKeys) ---
 
 def _telegram_group_name() -> str:
     try:
@@ -271,161 +271,213 @@ def _telegram_group_name() -> str:
         return "Monitoring jaringan"
 
 
+def _telegram_pids() -> list[int]:
+    """PID proses Telegram.exe yang sedang jalan."""
+    creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    pids: list[int] = []
+    try:
+        completed = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq Telegram.exe", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=creation,
+            timeout=15,
+        )
+        for line in (completed.stdout or "").splitlines():
+            # "Telegram.exe","1234","Session Name","Session#","Mem Usage"
+            parts = [p.strip().strip('"') for p in line.split(",")]
+            if len(parts) >= 2 and parts[0].lower() == "telegram.exe":
+                try:
+                    pids.append(int(parts[1]))
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    return pids
+
+
 def _find_telegram_hwnd() -> int:
-    """Cari HWND jendela utama Telegram Desktop."""
+    """Cari HWND milik proses Telegram.exe (judul bisa nama chat, bukan 'Telegram')."""
     if os.name != "nt":
         return 0
     import ctypes
     from ctypes import wintypes
 
     user32 = ctypes.windll.user32
-    found: list[int] = []
+    pids = set(_telegram_pids())
+    if not pids:
+        return 0
 
+    found: list[int] = []
     EnumWindowsProc = ctypes.WINFUNCTYPE(
         ctypes.c_bool, wintypes.HWND, wintypes.LPARAM
     )
+    get_pid = wintypes.DWORD()
 
     def _cb(hwnd: int, _lp: int) -> bool:
         if not user32.IsWindowVisible(hwnd):
             return True
-        length = user32.GetWindowTextLengthW(hwnd)
-        if length <= 0:
+        # Skip child / tool windows tanpa title besar — ambil yang punya ukuran wajar
+        rect = wintypes.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
             return True
-        buf = ctypes.create_unicode_buffer(length + 1)
-        user32.GetWindowTextW(hwnd, buf, length + 1)
-        title = (buf.value or "").strip()
-        # Telegram Desktop: judul biasanya "Telegram" atau nama chat
-        if title.lower() == "telegram" or title.startswith("Telegram"):
-            found.append(int(hwnd))
-            return False
-        # Juga cocokkan class Qt*
-        cls = ctypes.create_unicode_buffer(256)
-        user32.GetClassNameW(hwnd, cls, 256)
-        cname = (cls.value or "").lower()
-        if "telegram" in cname and "qt" in cname:
+        w = rect.right - rect.left
+        h = rect.bottom - rect.top
+        if w < 200 or h < 200:
+            return True
+        get_pid.value = 0
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(get_pid))
+        if int(get_pid.value) in pids:
             found.append(int(hwnd))
             return False
         return True
 
     user32.EnumWindows(EnumWindowsProc(_cb), 0)
-    if found:
-        return found[0]
-
-    # Fallback: proses Telegram.exe → EnumWindows lagi longgar
-    def _cb2(hwnd: int, _lp: int) -> bool:
-        if not user32.IsWindowVisible(hwnd):
-            return True
-        length = user32.GetWindowTextLengthW(hwnd)
-        if length < 1:
-            return True
-        buf = ctypes.create_unicode_buffer(length + 1)
-        user32.GetWindowTextW(hwnd, buf, length + 1)
-        title = (buf.value or "").lower()
-        if "telegram" in title:
-            found.append(int(hwnd))
-            return False
-        return True
-
-    user32.EnumWindows(EnumWindowsProc(_cb2), 0)
     return found[0] if found else 0
 
 
 def _activate_hwnd(hwnd: int) -> bool:
+    """Paksa foreground (AttachThreadInput — SetForegroundWindow sering gagal dari Tk)."""
     if not hwnd:
         return False
     import ctypes
     from ctypes import wintypes
 
     user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
     SW_RESTORE = 9
     try:
+        try:
+            user32.AllowSetForegroundWindow(-1)  # ASFW_ANY
+        except Exception:
+            pass
+        fg = user32.GetForegroundWindow()
+        pid_fg = wintypes.DWORD()
+        pid_tg = wintypes.DWORD()
+        tid_fg = user32.GetWindowThreadProcessId(fg, ctypes.byref(pid_fg))
+        tid_tg = user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid_tg))
+        tid_cur = kernel32.GetCurrentThreadId()
+        attached = False
+        if tid_fg and tid_fg != tid_cur:
+            attached = bool(user32.AttachThreadInput(tid_cur, tid_fg, True))
+        if tid_tg and tid_tg != tid_cur and tid_tg != tid_fg:
+            user32.AttachThreadInput(tid_cur, tid_tg, True)
         user32.ShowWindow(hwnd, SW_RESTORE)
+        user32.BringWindowToTop(hwnd)
         user32.SetForegroundWindow(hwnd)
+        user32.SetActiveWindow(hwnd)
+        if attached:
+            user32.AttachThreadInput(tid_cur, tid_fg, False)
+        if tid_tg and tid_tg != tid_cur and tid_tg != tid_fg:
+            user32.AttachThreadInput(tid_cur, tid_tg, False)
         return True
     except Exception:
-        return False
+        try:
+            user32.ShowWindow(hwnd, SW_RESTORE)
+            user32.SetForegroundWindow(hwnd)
+            return True
+        except Exception:
+            return False
 
 
-def _send_vk(vk: int, *, ctrl: bool = False, shift: bool = False, alt: bool = False) -> None:
-    import ctypes
-
-    user32 = ctypes.windll.user32
-    KEYEVENTF_KEYUP = 0x0002
-    VK_CONTROL, VK_SHIFT, VK_MENU = 0x11, 0x10, 0x12
-
-    if ctrl:
-        user32.keybd_event(VK_CONTROL, 0, 0, 0)
-    if shift:
-        user32.keybd_event(VK_SHIFT, 0, 0, 0)
-    if alt:
-        user32.keybd_event(VK_MENU, 0, 0, 0)
-    user32.keybd_event(vk, 0, 0, 0)
-    user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
-    if alt:
-        user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
-    if shift:
-        user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)
-    if ctrl:
-        user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
-
-
-def _send_text_keys(text: str) -> None:
-    """Ketik teks (ASCII/Latin) via VkKeyScanW + keybd_event."""
-    import ctypes
-
-    user32 = ctypes.windll.user32
-    KEYEVENTF_KEYUP = 0x0002
-    VK_SHIFT = 0x10
+def _sendkeys_escape(text: str) -> str:
+    """Escape karakter khusus SendKeys."""
+    out: list[str] = []
     for ch in text:
-        if ch == "\n":
-            _send_vk(0x0D)
-            continue
-        scanned = user32.VkKeyScanW(ord(ch))
-        if scanned == -1 or scanned == 0xFFFF:
-            continue
-        vk = scanned & 0xFF
-        need_shift = bool(scanned & 0x100)
-        if need_shift:
-            user32.keybd_event(VK_SHIFT, 0, 0, 0)
-        user32.keybd_event(vk, 0, 0, 0)
-        user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
-        if need_shift:
-            user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)
+        if ch in "+^%~(){}[]":
+            out.append("{" + ch + "}")
+        else:
+            out.append(ch)
+    return "".join(out)
 
 
-def _click_hwnd_bottom(hwnd: int, *, right: bool = False) -> bool:
-    """Klik kiri/kanan di area input pesan (bawah jendela)."""
-    import ctypes
-    from ctypes import wintypes
+def _release_our_focus(root: Any | None) -> None:
+    """Lepas Always-on-Top / fokus Network Tools agar Telegram bisa dikontrol."""
+    if root is None:
+        return
+    try:
+        root.attributes("-topmost", False)
+    except Exception:
+        pass
+    try:
+        root.lower()
+    except Exception:
+        pass
+    try:
+        root.update_idletasks()
+    except Exception:
+        pass
 
-    user32 = ctypes.windll.user32
-    rect = wintypes.RECT()
-    if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-        return False
-    x = (rect.left + rect.right) // 2
-    y = max(rect.top + 80, rect.bottom - 52)
-    user32.SetCursorPos(x, y)
-    if right:
-        down, up = 0x0008, 0x0010  # RIGHTDOWN / RIGHTUP
-    else:
-        down, up = 0x0002, 0x0004  # LEFTDOWN / LEFTUP
-    user32.mouse_event(down, 0, 0, 0, 0)
-    user32.mouse_event(up, 0, 0, 0, 0)
-    return True
+
+def _run_vbs_sendkeys(group_name: str, telegram_pid: int) -> tuple[bool, str]:
+    """Jalankan otomasi via WScript.Shell SendKeys (paling dekat AutoHotkey)."""
+    import time
+
+    safe = _sendkeys_escape(group_name)
+    # PID AppActivate paling andal; fallback judul
+    vbs = f"""Option Explicit
+Dim sh, ok, i
+Set sh = CreateObject("WScript.Shell")
+ok = False
+For i = 1 To 8
+  ok = sh.AppActivate({int(telegram_pid)})
+  If ok Then Exit For
+  ok = sh.AppActivate("Telegram")
+  If ok Then Exit For
+  WScript.Sleep 400
+Next
+WScript.Sleep 900
+' Quick search / switcher
+sh.SendKeys "^k"
+WScript.Sleep 700
+sh.SendKeys "{safe}"
+WScript.Sleep 900
+sh.SendKeys "{{ENTER}}"
+WScript.Sleep 1200
+' Pastikan fokus kotak pesan lalu paste + kirim
+sh.SendKeys "^v"
+WScript.Sleep 500
+sh.SendKeys "{{ENTER}}"
+WScript.Sleep 300
+"""
+    path = Path(tempfile.gettempdir()) / f"network_tools_tg_send_{os.getpid()}.vbs"
+    try:
+        path.write_text(vbs, encoding="utf-8")
+        creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        completed = subprocess.run(
+            ["wscript.exe", "//B", "//Nologo", str(path)],
+            capture_output=True,
+            text=True,
+            creationflags=creation,
+            timeout=60,
+        )
+        time.sleep(0.3)
+        if completed.returncode != 0:
+            return False, f"SendKeys gagal (exit {completed.returncode})."
+        return True, f'Grup "{group_name}" dibuka; ditempel & dikirim.'
+    except Exception as exc:
+        return False, str(exc)
+    finally:
+        try:
+            path.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def paste_and_send_to_telegram_group(
     group_name: str = "",
     telegram_exe: str = "",
     *,
-    settle_sec: float = 1.2,
+    settle_sec: float = 1.5,
+    root: Any | None = None,
 ) -> tuple[bool, str]:
     """
     Seperti AutoHotkey:
-    1. Buka/aktifkan Telegram
-    2. Cari grup (Ctrl+K) → Enter
-    3. Klik kanan di kotak pesan → Paste (Tempel) / Ctrl+V
-    4. Enter untuk kirim
+    1. Buka/aktifkan Telegram.exe
+    2. Ctrl+K → cari grup → Enter
+    3. Ctrl+V → Enter (kirim)
     """
     import time
 
@@ -433,68 +485,37 @@ def paste_and_send_to_telegram_group(
         return False, "Otomasi Telegram hanya di Windows."
 
     name = (group_name or _telegram_group_name()).strip() or "Monitoring jaringan"
+    _release_our_focus(root)
+
     opened = open_telegram(telegram_exe, background=False)
-    if not opened:
+    if not opened and not _telegram_pids():
         return False, "Telegram Desktop tidak ditemukan."
 
-    time.sleep(max(0.8, settle_sec))
-    hwnd = 0
-    for _ in range(20):
-        hwnd = _find_telegram_hwnd()
-        if hwnd:
+    time.sleep(max(1.0, settle_sec))
+    pids = _telegram_pids()
+    for _ in range(25):
+        if pids:
             break
-        time.sleep(0.25)
-    if not hwnd:
-        return False, "Jendela Telegram tidak ditemukan."
+        time.sleep(0.3)
+        pids = _telegram_pids()
+    if not pids:
+        return False, "Proses Telegram.exe tidak ditemukan."
 
-    _activate_hwnd(hwnd)
-    time.sleep(0.4)
-
-    VK_RETURN = 0x0D
-    VK_ESCAPE = 0x1B
-    ord_k = 0x4B
-    ord_v = 0x56
-    ord_t = 0x54  # Tempel
-
-    _send_vk(VK_ESCAPE)
-    time.sleep(0.2)
-
-    # Quick Switcher: Ctrl+K → ketik nama grup → Enter
-    _send_vk(ord_k, ctrl=True)
-    time.sleep(0.5)
-    _send_text_keys(name)
-    time.sleep(0.75)
-    _send_vk(VK_RETURN)
-    time.sleep(1.0)
-
-    _activate_hwnd(hwnd)
+    hwnd = _find_telegram_hwnd()
+    if hwnd:
+        _activate_hwnd(hwnd)
+        time.sleep(0.5)
+    _release_our_focus(root)
     time.sleep(0.3)
 
-    # Fokus kotak pesan
-    _click_hwnd_bottom(hwnd, right=False)
-    time.sleep(0.25)
-
-    # Klik kanan → Tempel (locale ID); cadangan Ctrl+V
-    _click_hwnd_bottom(hwnd, right=True)
-    time.sleep(0.4)
-    _send_vk(ord_t)
-    time.sleep(0.35)
-    # Cadangan andal
-    _send_vk(VK_ESCAPE)
-    time.sleep(0.1)
-    _send_vk(ord_v, ctrl=True)
-    time.sleep(0.35)
-
-    # Kirim
-    _send_vk(VK_RETURN)
-    time.sleep(0.25)
-
-    return True, f'Grup "{name}" dibuka; ditempel & dikirim.'
+    ok, msg = _run_vbs_sendkeys(name, pids[0])
+    return ok, msg
 
 
 def send_via_telegram(
     screenshot: Path,
     telegram_exe: str = "",
+    root: Any | None = None,
 ) -> tuple[bool, list[str]]:
     """Copy screenshot, buka Telegram → grup Monitoring jaringan → paste & kirim."""
     tips: list[str] = []
@@ -509,7 +530,7 @@ def send_via_telegram(
         tips.append(f"Clipboard gagal. File tersimpan: {screenshot}")
         return copied, tips
 
-    ok, msg = paste_and_send_to_telegram_group(telegram_exe=telegram_exe)
+    ok, msg = paste_and_send_to_telegram_group(telegram_exe=telegram_exe, root=root)
     tips.append(msg if ok else f"Otomasi gagal: {msg}. Tempel manual (Ctrl+V).")
     if not ok:
         open_telegram(telegram_exe)
@@ -530,7 +551,7 @@ def send_text_via_telegram(
         tips.append("Gagal menyalin teks ke clipboard.")
         return copied, tips
 
-    ok, msg = paste_and_send_to_telegram_group(telegram_exe=telegram_exe)
+    ok, msg = paste_and_send_to_telegram_group(telegram_exe=telegram_exe, root=root)
     tips.append(msg if ok else f"Otomasi gagal: {msg}. Tempel manual (Ctrl+V).")
     if not ok:
         open_telegram(telegram_exe)
@@ -607,6 +628,7 @@ def send_apps_file_via_telegram(
     text: str,
     telegram_exe: str = "",
     filename: str = "Daftar_Aplikasi.txt",
+    root: Any | None = None,
 ) -> tuple[bool, list[str], Path | None]:
     """
     Buat Daftar_Aplikasi.txt, salin FILE ke clipboard, buka Telegram.
@@ -633,7 +655,9 @@ def send_apps_file_via_telegram(
 
     telegram = _find_telegram(telegram_exe)
     if telegram and copied:
-        ok, msg = paste_and_send_to_telegram_group(telegram_exe=telegram_exe)
+        ok, msg = paste_and_send_to_telegram_group(
+            telegram_exe=telegram_exe, root=root
+        )
         tips.append(msg if ok else f"Otomasi gagal: {msg}. Tempel file manual (Ctrl+V).")
     elif telegram:
         subprocess.Popen([telegram], shell=False)

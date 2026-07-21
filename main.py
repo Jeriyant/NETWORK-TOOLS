@@ -4889,7 +4889,7 @@ class NetworkToolsApp(ctk.CTk):
             copy_text_to_clipboard(block, root=self)
 
             def _run() -> None:
-                ok, msg = paste_and_send_to_telegram_group()
+                ok, msg = paste_and_send_to_telegram_group(root=self)
                 tip = (
                     t("anydesk.telegram_opened")
                     if ok
@@ -5151,7 +5151,7 @@ class NetworkToolsApp(ctk.CTk):
                 except Exception:
                     pass
                 self._speedtest_click_job = None
-            _ok, tips = send_via_telegram(path)
+            _ok, tips = send_via_telegram(path, root=self)
             try:
                 from modules.ui_sounds import play_camera_shutter
 
@@ -5196,7 +5196,7 @@ class NetworkToolsApp(ctk.CTk):
         # Daftar Aplikasi: buat file .txt lalu salin FILE ke clipboard
         if self._current_tool == "apps":
             try:
-                _ok, tips, path = send_apps_file_via_telegram(text)
+                _ok, tips, path = send_apps_file_via_telegram(text, root=self)
                 self._show_kirim_dialog(
                     tips,
                     title="File dikirim",
