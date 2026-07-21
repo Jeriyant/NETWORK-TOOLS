@@ -90,9 +90,9 @@ def get_anydesk_id_cli(exe: Path) -> str | None:
 
 
 def _taskkill_anydesk() -> str:
-    """taskkill /F /IM AnyDesk.exe /T (best-effort, tanpa Admin)."""
+    """taskkill /F /IM AnyDesk.exe /T (best-effort, tanpa Admin). Error Access Denied diabaikan."""
     try:
-        completed = subprocess.run(
+        subprocess.run(
             ["taskkill", "/F", "/IM", "AnyDesk.exe", "/T"],
             capture_output=True,
             text=True,
@@ -101,14 +101,10 @@ def _taskkill_anydesk() -> str:
             timeout=20,
             creationflags=_creation(),
         )
-        out = ((completed.stdout or "") + (completed.stderr or "")).strip()
-        if not out:
-            return f"taskkill exit {completed.returncode}"
-        # Ringkas baris error/sukses
-        lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
-        return "\n".join(lines[:6])
-    except Exception as exc:
-        return str(exc)
+        # Jangan tampilkan ERROR/Access Denied — alur tetap lanjut
+        return "OK"
+    except Exception:
+        return "OK"
 
 
 def _start_anydesk(exe: Path) -> tuple[bool, str]:
@@ -172,11 +168,9 @@ class AnydeskRunner:
             self.on_line(f"Menemukan: {exe}")
             self.on_line("")
 
-            self.on_line("1/3 taskkill AnyDesk.exe…")
-            msg = _taskkill_anydesk()
-            for line in msg.splitlines():
-                if line.strip():
-                    self.on_line(f"  {line}")
+            self.on_line("1/3 Menutup AnyDesk lama…")
+            _taskkill_anydesk()
+            self.on_line("  Selesai.")
             time.sleep(1.0)
 
             self.on_line("2/3 Menjalankan AnyDesk.exe…")
