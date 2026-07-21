@@ -71,7 +71,7 @@ from modules.traceroute_runner import TracerouteRunner
 from modules.trace_topology import TracerouteTopologyRunner
 
 # Tools that require Administrator (UAC)
-ADMIN_TOOLS = frozenset({"refresh", "printer", "fixrdp"})
+ADMIN_TOOLS = frozenset({"refresh", "printer", "fixrdp", "anydesk"})
 # Langsung jalan saat menu dibuka (tanpa tombol Jalankan)
 AUTO_RUN_TOOLS = frozenset({"anydesk"})
 
@@ -578,6 +578,8 @@ class NetworkToolsApp(ctk.CTk):
                 self._elevate_network_action = (action, payload)
             else:
                 self._elevate_auto_fix_refresh = True
+        elif key == "anydesk":
+            self._elevate_auto_run_anydesk = True
         self.open_tool(key)
 
     def _show_startup_loading(self) -> None:
@@ -1476,6 +1478,7 @@ class NetworkToolsApp(ctk.CTk):
             self._scp_session = None
 
     def show_dashboard(self) -> None:
+        self._set_anydesk_topmost(False)
         self._stop_runner()
         self._current_tool = None
         self.console = None
@@ -1616,6 +1619,8 @@ class NetworkToolsApp(ctk.CTk):
     def open_tool(self, key: str) -> None:
         self._stop_runner()
         self._current_tool = key
+        if key != "anydesk":
+            self._set_anydesk_topmost(False)
         self._clear_frame(self._header)
         self._clear_frame(self._content)
         self._clear_frame(self._action_bar)
@@ -1704,15 +1709,19 @@ class NetworkToolsApp(ctk.CTk):
         ).pack(side="left")
         self._build_sysinfo_bar(self._sysinfo_strip)
 
-        # AnyDesk: Kirim/Kembali langsung di bawah bar info
+        # AnyDesk: Kirim/Kembali di bawah bar info + Always on Top
         if key == "anydesk":
+            self._set_anydesk_topmost(True)
             controls = ctk.CTkFrame(self._content, fg_color="transparent")
             controls.pack(fill="x", pady=(0, 8))
             self._pack_inline_send_back(controls, side="right", height=36)
         elif key not in AUTO_RUN_TOOLS:
+            self._set_anydesk_topmost(False)
             controls = ctk.CTkFrame(self._content, fg_color="transparent")
             controls.pack(fill="x", pady=(0, 8))
             self._build_tool_controls(key, controls)
+        else:
+            self._set_anydesk_topmost(False)
 
         self.console = ConsoleView(self._content)
         self.console.pack(fill="both", expand=True)
@@ -4542,6 +4551,7 @@ class NetworkToolsApp(ctk.CTk):
             self._speedtest_click_job = self.after(1500, self._speedtest_auto_start)
 
     def _cancel_to_dashboard(self) -> None:
+        self._set_anydesk_topmost(False)
         # Bersihkan tooltip SSH yang bisa tertinggal
         try:
             sess_ui = getattr(self, "_scp_panel", None)
@@ -4841,9 +4851,7 @@ class NetworkToolsApp(ctk.CTk):
             else:
                 copied_lbl.configure(text=t("anydesk.telegram_missing"))
             try:
-                self.lift()
-                self.attributes("-topmost", True)
-                self.after(800, lambda: self.attributes("-topmost", False))
+                self._set_anydesk_topmost(True)
             except Exception:
                 pass
 
@@ -5192,8 +5200,8 @@ class NetworkToolsApp(ctk.CTk):
                 "Setelah Hubungkan, ketik langsung di terminal hitam."
             ),
             "anydesk": (
-                "Alur otomatis: tutup paksa AnyDesk → mode tray → baca ID → notifikasi.\n"
-                "Tombol Kirim membuka Telegram; Kembali ke dashboard."
+                "Alur (Admin/UAC): taskkill AnyDesk.exe → jalankan AnyDesk.exe → notifikasi ID.\n"
+                "Jendela & notifikasi Always on Top selama menu AnyDesk aktif."
             ),
         }
         for line in hints.get(key, "").split("\n"):
@@ -5402,19 +5410,31 @@ class NetworkToolsApp(ctk.CTk):
             on_done=lambda: self._notify_tool_done("done.fixrdp"),
         ).start()
 
+    def _set_anydesk_topmost(self, enabled: bool) -> None:
+        """Saat menu AnyDesk aktif: jendela utama Always on Top."""
+        self._anydesk_topmost = bool(enabled)
+        try:
+            self.attributes("-topmost", bool(enabled))
+            if enabled:
+                self.lift()
+                self.focus_force()
+        except Exception:
+            pass
+
     def _start_anydesk(self) -> None:
+        # UAC dulu — setelah elevasi app dibuka ulang ke menu AnyDesk
+        if not self._ensure_admin_for("anydesk", resume_action="run"):
+            return
+
+        self._set_anydesk_topmost(True)
         self._stop_runner()
         if self.console:
             self.console.clear()
 
         def _done(anydesk_id: str | None) -> None:
-            # Jaga jendela app di depan (AnyDesk/Telegram di latar)
             def _keep_front() -> None:
                 try:
-                    self.lift()
-                    self.focus_force()
-                    self.attributes("-topmost", True)
-                    self.after(1200, lambda: self.attributes("-topmost", False))
+                    self._set_anydesk_topmost(True)
                 except Exception:
                     pass
 
