@@ -29,7 +29,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "app.stop": {"id": "Stop", "en": "Stop"},
     "app.run": {"id": "Jalankan", "en": "Run"},
     "app.select_host": {"id": "Pilih host:", "en": "Select host:"},
-    "app.start_ping": {"id": "Mulai Ping", "en": "Start Ping"},
+    "app.start_ping": {"id": "Mulai", "en": "Start"},
     "app.start_trace": {"id": "Mulai", "en": "Start"},
     # Theme / language
     "theme.system": {"id": "Tema: Windows", "en": "Theme: Windows"},

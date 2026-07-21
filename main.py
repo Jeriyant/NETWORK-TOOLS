@@ -123,6 +123,8 @@ DASH_TILE_BTN_TEXT = "#1E293B"
 
 SEND_TOOLS = {"ping", "traceroute", "dns", "ipscan", "speedtest", "apps", "security"}
 TEXT_SEND_TOOLS = frozenset({"apps", "ipscan"})
+# Kirim/Kembali digabung di baris kontrol (bukan footer)
+INLINE_ACTION_TOOLS = frozenset({"ping", "traceroute", "ipscan", "apps", "security"})
 
 
 def _hide_window_close_button(window: Any) -> None:
@@ -223,6 +225,8 @@ class NetworkToolsApp(ctk.CTk):
         self._security_items: list[Any] = []
         self._send_text_payload: str = ""
         self._dash_palette_cycle = random.sample(DASH_TILE_PALETTE, k=len(DASH_TILE_PALETTE))
+        self._hover_tile_id: int | None = None
+        self._geom_save_job: str | None = None
 
         self._header = ctk.CTkFrame(self, fg_color="transparent")
         self._sysinfo_strip = ctk.CTkFrame(self, fg_color="transparent")
@@ -247,6 +251,7 @@ class NetworkToolsApp(ctk.CTk):
         self._sysinfo_strip.pack(fill="x", padx=16, pady=(0, 0))
         self._content.pack(fill="both", expand=True, padx=12, pady=4)
         self.bind("<Configure>", self._on_main_window_configure)
+        self.protocol("WM_DELETE_WINDOW", self._on_app_close)
 
         self.show_dashboard()
         # Pastikan window utama tidak terkunci dari sesi update sebelumnya
@@ -264,7 +269,7 @@ class NetworkToolsApp(ctk.CTk):
             pass
 
     def _fit_window_to_screen(self) -> None:
-        """Ukuran awal dashboard compact."""
+        """Ukuran awal dashboard; pakai posisi tersimpan bila masih di layar."""
         try:
             self.update_idletasks()
             sw = int(self.winfo_screenwidth())
@@ -278,11 +283,29 @@ class NetworkToolsApp(ctk.CTk):
         self._dash_min_h = 460
         self._tool_min_w = self._dash_min_w
         self._tool_min_h = min(520, max(480, sh - 100))
-        self._dash_w = win_w
         self._side_pad = 16
         self.minsize(self._dash_min_w, self._dash_min_h)
-        x = max((sw - win_w) // 2, 0)
-        y = 24
+
+        prefs = load_prefs()
+        try:
+            saved_w = int(prefs.get("win_w") or 0)
+            saved_h = int(prefs.get("win_h") or 0)
+            saved_x = int(prefs.get("win_x"))
+            saved_y = int(prefs.get("win_y"))
+        except Exception:
+            saved_w = saved_h = 0
+            saved_x = saved_y = -1
+
+        if saved_w >= 640 and saved_h >= 400:
+            win_w = min(max(saved_w, self._dash_min_w), sw)
+            win_h = min(max(saved_h, self._dash_min_h), sh)
+        self._dash_w = win_w
+
+        if saved_x >= 0 and saved_y >= 0 and saved_x < sw - 80 and saved_y < sh - 80:
+            x, y = saved_x, saved_y
+        else:
+            x = max((sw - win_w) // 2, 0)
+            y = 24
         self.geometry(f"{win_w}x{win_h}+{x}+{y}")
 
     def _fit_dashboard_window(self) -> None:
@@ -300,8 +323,8 @@ class NetworkToolsApp(ctk.CTk):
 
             sw = int(self.winfo_screenwidth())
             w = int(getattr(self, "_dash_w", 0) or min(1000, max(sw - 40, 720)))
-            x = max((sw - w) // 2, 0)
-            y = max(int(self.winfo_y()), 24)
+            x = int(self.winfo_x())
+            y = max(int(self.winfo_y()), 0)
             self.minsize(min(720, w), min(460, h))
             self.geometry(f"{w}x{h}+{x}+{y}")
             self.after(30, self._refresh_tile_wrap)
@@ -328,12 +351,63 @@ class NetworkToolsApp(ctk.CTk):
         except Exception:
             pass
 
+    def _schedule_save_geometry(self) -> None:
+        if self._geom_save_job is not None:
+            try:
+                self.after_cancel(self._geom_save_job)
+            except Exception:
+                pass
+        self._geom_save_job = self.after(400, self._save_window_geometry)
+
+    def _save_window_geometry(self) -> None:
+        self._geom_save_job = None
+        try:
+            self.update_idletasks()
+            if bool(self.wm_state() == "iconic"):
+                return
+            w = int(self.winfo_width())
+            h = int(self.winfo_height())
+            x = int(self.winfo_x())
+            y = int(self.winfo_y())
+            if w < 200 or h < 150:
+                return
+            self._dash_w = w
+            save_prefs(
+                theme=self.theme_mode,
+                lang=get_lang(),
+                win_w=w,
+                win_h=h,
+                win_x=x,
+                win_y=y,
+            )
+        except Exception:
+            pass
+
+    def _on_app_close(self) -> None:
+        self._save_window_geometry()
+        try:
+            self.destroy()
+        except Exception:
+            pass
+
     def _on_main_window_configure(self, event: Any = None) -> None:
         if event is not None and event.widget is not self:
             return
+        self._schedule_save_geometry()
         if self._current_tool is not None:
             return
         self._ensure_footer_visible()
+
+    def _play_tile_hover(self, tile_id: int) -> None:
+        if self._hover_tile_id == tile_id:
+            return
+        self._hover_tile_id = tile_id
+        try:
+            from modules.ui_sounds import play_hover_click
+
+            play_hover_click()
+        except Exception:
+            pass
 
     def _apply_window_icon(self) -> None:
         """Samakan icon jendela dengan icon file EXE."""
@@ -358,7 +432,18 @@ class NetworkToolsApp(ctk.CTk):
             pass
 
     def _persist_prefs(self) -> None:
-        save_prefs(theme=self.theme_mode, lang=get_lang())
+        try:
+            self.update_idletasks()
+            save_prefs(
+                theme=self.theme_mode,
+                lang=get_lang(),
+                win_w=int(self.winfo_width()),
+                win_h=int(self.winfo_height()),
+                win_x=int(self.winfo_x()),
+                win_y=int(self.winfo_y()),
+            )
+        except Exception:
+            save_prefs(theme=self.theme_mode, lang=get_lang())
 
     def _maybe_resume_elevated_tool(self) -> None:
         """Setelah UAC, buka ulang tool & jalankan otomatis."""
@@ -1283,6 +1368,7 @@ class NetworkToolsApp(ctk.CTk):
 
             def _tile_enter(_event: Any = None, bg=tile_hover, t=tile) -> None:
                 t.configure(fg_color=bg)
+                self._play_tile_hover(id(t))
 
             def _tile_leave(_event: Any = None, bg=tile_bg, t=tile) -> None:
                 t.configure(fg_color=bg)
@@ -1314,6 +1400,10 @@ class NetworkToolsApp(ctk.CTk):
         self._clear_frame(self._header)
         self._clear_frame(self._content)
         self._clear_frame(self._action_bar)
+        try:
+            self._action_bar.pack_forget()
+        except Exception:
+            pass
 
         try:
             self._header.pack_configure(padx=16, pady=(10, 2))
@@ -1372,33 +1462,34 @@ class NetworkToolsApp(ctk.CTk):
         self.console = ConsoleView(self._content)
         self.console.pack(fill="both", expand=True)
 
-        # Action bar: Kirim + Kembali
-        self._action_bar.pack(fill="x", padx=12, pady=(0, 6), before=self._footer)
-        ctk.CTkButton(
-            self._action_bar,
-            text=t("app.back"),
-            width=120,
-            height=36,
-            fg_color=COLORS["danger"],
-            hover_color=COLORS["danger_hover"],
-            command=self._cancel_to_dashboard,
-        ).pack(side="right", padx=(8, 0))
-
-        if key in SEND_TOOLS:
+        # Action bar footer hanya untuk tool tanpa Kirim/Kembali inline
+        if key not in INLINE_ACTION_TOOLS:
+            self._action_bar.pack(fill="x", padx=12, pady=(0, 6), before=self._footer)
             ctk.CTkButton(
                 self._action_bar,
-                text=t("app.send"),
+                text=t("app.back"),
                 width=120,
                 height=36,
-                fg_color=COLORS["accent"],
-                hover_color=COLORS["accent_dim"],
-                text_color=COLORS["on_accent"],
-                command=(
-                    self._send_text_payload_to_telegram
-                    if key in TEXT_SEND_TOOLS
-                    else self._send_screenshot
-                ),
-            ).pack(side="right")
+                fg_color=COLORS["danger"],
+                hover_color=COLORS["danger_hover"],
+                command=self._cancel_to_dashboard,
+            ).pack(side="right", padx=(8, 0))
+
+            if key in SEND_TOOLS:
+                ctk.CTkButton(
+                    self._action_bar,
+                    text=t("app.send"),
+                    width=120,
+                    height=36,
+                    fg_color=COLORS["accent"],
+                    hover_color=COLORS["accent_dim"],
+                    text_color=COLORS["on_accent"],
+                    command=(
+                        self._send_text_payload_to_telegram
+                        if key in TEXT_SEND_TOOLS
+                        else self._send_screenshot
+                    ),
+                ).pack(side="right")
 
         self._seed_console(key)
 
@@ -1440,6 +1531,60 @@ class NetworkToolsApp(ctk.CTk):
                 else self._send_screenshot
             ),
         ).pack(side="right")
+
+    def _pack_inline_send_back(
+        self,
+        parent: ctk.CTkFrame,
+        *,
+        text_send: bool = False,
+        height: int = 36,
+        side: str = "left",
+    ) -> None:
+        """Tombol Kirim + Kembali di baris kontrol tool."""
+        send_cmd = (
+            self._send_text_payload_to_telegram if text_send else self._send_screenshot
+        )
+        if side == "right":
+            ctk.CTkButton(
+                parent,
+                text=t("app.back"),
+                width=100,
+                height=height,
+                fg_color=COLORS["danger"],
+                hover_color=COLORS["danger_hover"],
+                command=self._cancel_to_dashboard,
+            ).pack(side="right", padx=(8, 0))
+            ctk.CTkButton(
+                parent,
+                text=t("app.send"),
+                width=100,
+                height=height,
+                fg_color=COLORS["accent"],
+                hover_color=COLORS["accent_dim"],
+                text_color=COLORS["on_accent"],
+                command=send_cmd,
+            ).pack(side="right", padx=(8, 0))
+            return
+
+        ctk.CTkButton(
+            parent,
+            text=t("app.send"),
+            width=100,
+            height=height,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+            command=send_cmd,
+        ).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(
+            parent,
+            text=t("app.back"),
+            width=100,
+            height=height,
+            fg_color=COLORS["danger"],
+            hover_color=COLORS["danger_hover"],
+            command=self._cancel_to_dashboard,
+        ).pack(side="left", padx=(8, 0))
 
     def _open_apps_list_view(self) -> None:
         """Daftar aplikasi terinstall — tabel rapi + Kirim teks ke Telegram."""
@@ -1490,6 +1635,7 @@ class NetworkToolsApp(ctk.CTk):
             text_color=COLORS["on_accent"],
         )
         btn_refresh.pack(side="right")
+        self._pack_inline_send_back(sum_row, text_send=True, height=32, side="right")
 
         list_wrap = ctk.CTkFrame(
             self._content,
@@ -1559,8 +1705,6 @@ class NetworkToolsApp(ctk.CTk):
 
         tree.tag_configure("odd", background=COLORS["bg"])
         tree.tag_configure("even", background=COLORS["panel"])
-
-        self._pack_tool_action_bar(text_send=True)
 
         def _fill(apps: list[dict[str, str]]) -> None:
             self._apps_list = apps
@@ -1637,11 +1781,10 @@ class NetworkToolsApp(ctk.CTk):
             text_color=COLORS["on_accent"],
         )
         btn_refresh.pack(side="right")
+        self._pack_inline_send_back(toolbar, text_send=False, height=32, side="right")
 
         cards = ctk.CTkFrame(self._content, fg_color="transparent")
         cards.pack(fill="both", expand=True)
-
-        self._pack_tool_action_bar(text_send=False)
 
         def _status_color(ok: bool, status: str) -> tuple[str, str]:
             st = (status or "").upper()
@@ -1857,6 +2000,7 @@ class NetworkToolsApp(ctk.CTk):
             state="disabled",
         )
         btn_stop.pack(side="left", padx=(8, 0))
+        self._pack_inline_send_back(tools, text_send=True, height=32, side="left")
 
         # Header kolom + scroll list (font sama seperti Daftar Aplikasi)
         list_wrap = ctk.CTkFrame(
@@ -1901,7 +2045,6 @@ class NetworkToolsApp(ctk.CTk):
         self._ipscan_found: list[tuple[str, str, bool]] = []
         self._ipscan_meta: dict[str, str] = {}
         self._send_text_payload = ""
-        self._pack_tool_action_bar(text_send=True)
 
         def _rebuild_payload() -> None:
             from modules.system_info import hostname as get_hostname
@@ -2586,16 +2729,19 @@ class NetworkToolsApp(ctk.CTk):
         tips: list[str],
         title: str = "Siap dikirim",
         subtitle: str = "Buka chat Telegram, lalu tempel:",
+        *,
+        sound: bool = True,
     ) -> None:
         """Notifikasi singkat: tempel dengan Ctrl+V atau Paste."""
         import math
 
-        try:
-            import winsound
+        if sound:
+            try:
+                import winsound
 
-            winsound.MessageBeep(winsound.MB_ICONASTERISK)
-        except Exception:
-            pass
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)
+            except Exception:
+                pass
 
         dlg_w, dlg_h = 480, 300
         dlg = ctk.CTkToplevel(self)
@@ -2790,10 +2936,17 @@ class NetworkToolsApp(ctk.CTk):
                     pass
                 self._speedtest_click_job = None
             _ok, tips = send_via_telegram(path)
+            try:
+                from modules.ui_sounds import play_camera_shutter
+
+                play_camera_shutter()
+            except Exception:
+                pass
             self._show_kirim_dialog(
                 tips,
                 title="Screenshot siap",
                 subtitle="Buka chat Telegram, lalu tempel gambar:",
+                sound=False,
             )
         except Exception as exc:
             if self._runner_stop:
@@ -2862,7 +3015,7 @@ class NetworkToolsApp(ctk.CTk):
         if not self.console:
             return
         hints = {
-            "ping": "Pilih host dari daftar, lalu Mulai Ping. Tekan Kembali untuk ke dashboard.",
+            "ping": "Pilih host dari daftar, lalu Mulai. Tekan Kembali untuk ke dashboard.",
             "traceroute": "Pilih host dari dropdown, lalu Mulai. Perintah: tracert -d <alamat>",
             "dns": "DNS leak test di browser bawaan aplikasi.",
             "ipscan": "Scan host hidup di subnet PC ini.",
@@ -2924,14 +3077,15 @@ class NetworkToolsApp(ctk.CTk):
 
         ctk.CTkButton(
             row,
-            text="Mulai Ping",
-            width=120,
+            text=t("app.start_ping"),
+            width=100,
             height=36,
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_dim"],
             text_color=COLORS["on_accent"],
             command=self._start_ping,
         ).pack(side="left")
+        self._pack_inline_send_back(row, text_send=False, height=36, side="left")
 
     def _parse_host_choice(self, choice: str) -> tuple[str, str]:
         """Return (name, ip) from 'Name - IP' dropdown text."""
@@ -2988,14 +3142,15 @@ class NetworkToolsApp(ctk.CTk):
 
         ctk.CTkButton(
             row,
-            text="Mulai",
-            width=120,
+            text=t("app.start_trace"),
+            width=100,
             height=36,
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_dim"],
             text_color=COLORS["on_accent"],
             command=self._start_traceroute,
         ).pack(side="left")
+        self._pack_inline_send_back(row, text_send=False, height=36, side="left")
 
     # ----- runners -----
     def _start_traceroute(self) -> None:
