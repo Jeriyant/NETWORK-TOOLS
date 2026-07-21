@@ -232,6 +232,24 @@ _STRINGS: dict[str, dict[str, str]] = {
     "anydesk.local_ip_label": {"id": "Alamat IP Lokal", "en": "Local IP Address"},
     "anydesk.copy_all": {"id": "Salin semua", "en": "Copy all"},
     "anydesk.copied": {"id": "Tersalin ke clipboard", "en": "Copied to clipboard"},
+    # Done notifications
+    "done.title": {"id": "Proses selesai", "en": "Process complete"},
+    "done.refresh": {
+        "id": "Refresh Network sudah selesai.",
+        "en": "Refresh Network has finished.",
+    },
+    "done.printer": {
+        "id": "Fix Printer sudah selesai.",
+        "en": "Fix Printer has finished.",
+    },
+    "done.cache": {
+        "id": "Clear Cache sudah selesai.",
+        "en": "Clear Cache has finished.",
+    },
+    "done.fixrdp": {
+        "id": "Fix RDP sudah selesai.",
+        "en": "Fix RDP has finished.",
+    },
 }
 
 

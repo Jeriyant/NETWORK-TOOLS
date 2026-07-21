@@ -2318,6 +2318,103 @@ class NetworkToolsApp(ctk.CTk):
         self._stop_runner()
         self.show_dashboard()
 
+    def _show_done_dialog(self, message: str, title: str | None = None) -> None:
+        """Notifikasi sederhana saat proses tool selesai."""
+        try:
+            import winsound
+
+            winsound.MessageBeep(winsound.MB_ICONASTERISK)
+        except Exception:
+            pass
+
+        dlg_w, dlg_h = 420, 220
+        dlg = ctk.CTkToplevel(self)
+        dlg.title(t("app.brand"))
+        dlg.geometry(f"{dlg_w}x{dlg_h}")
+        dlg.minsize(dlg_w, 200)
+        dlg.resizable(False, False)
+        dlg.configure(fg_color=COLORS["bg"])
+        dlg.transient(self)
+        dlg.attributes("-topmost", True)
+        dlg.attributes("-alpha", 0.0)
+
+        self.update_idletasks()
+        px = self.winfo_rootx() + (self.winfo_width() - dlg_w) // 2
+        py = self.winfo_rooty() + (self.winfo_height() - dlg_h) // 2
+        dlg.geometry(f"{dlg_w}x{dlg_h}+{max(px, 40)}+{max(py + 40, 40)}")
+
+        flash = ctk.CTkFrame(dlg, fg_color=COLORS["ok"], height=6, corner_radius=0)
+        flash.pack(fill="x", side="top")
+
+        frame = ctk.CTkFrame(
+            dlg,
+            fg_color=COLORS["panel"],
+            corner_radius=14,
+            border_width=2,
+            border_color=COLORS["ok"],
+        )
+        frame.pack(fill="both", expand=True, padx=12, pady=12)
+
+        footer = ctk.CTkFrame(frame, fg_color="transparent", height=52)
+        footer.pack(fill="x", side="bottom", padx=12, pady=(4, 12))
+        footer.pack_propagate(False)
+
+        body = ctk.CTkFrame(frame, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=8, pady=(8, 0))
+
+        ctk.CTkLabel(
+            body,
+            text=title or t("done.title"),
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=20),
+            text_color=COLORS["text"],
+        ).pack(anchor="w", padx=14, pady=(10, 6))
+
+        ctk.CTkLabel(
+            body,
+            text=message,
+            font=ctk.CTkFont(family="Segoe UI", size=14),
+            text_color=COLORS["muted"],
+            wraplength=360,
+            justify="left",
+        ).pack(anchor="w", padx=14, pady=(0, 8))
+
+        ctk.CTkButton(
+            footer,
+            text=t("send.ok"),
+            width=140,
+            height=38,
+            fg_color=COLORS["ok"],
+            hover_color=COLORS["ok_dim"],
+            text_color=COLORS["on_ok"],
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            corner_radius=10,
+            command=dlg.destroy,
+        ).pack(side="right", pady=6)
+
+        def fade_in(step: int = 0) -> None:
+            if not dlg.winfo_exists():
+                return
+            alpha = min(1.0, step / 10)
+            try:
+                dlg.attributes("-alpha", alpha)
+            except Exception:
+                return
+            if step < 10:
+                dlg.after(16, lambda: fade_in(step + 1))
+
+        dlg.after(30, dlg.lift)
+        dlg.after(50, dlg.focus_force)
+        dlg.after(20, fade_in)
+
+    def _notify_tool_done(self, message_key: str) -> None:
+        """Tampilkan dialog selesai dari thread worker (aman ke UI thread)."""
+        msg = t(message_key)
+
+        def show() -> None:
+            self._show_done_dialog(msg)
+
+        self.after(0, show)
+
     def _anydesk_info_block(
         self, anydesk_id: str, local_id: str, local_ip: str
     ) -> str:
@@ -2951,7 +3048,11 @@ class NetworkToolsApp(ctk.CTk):
         self._stop_runner()
         if self.console:
             self.console.clear()
-        runner = RefreshNetworkRunner(NETWORK_ADAPTER, on_line=self.log)
+        runner = RefreshNetworkRunner(
+            NETWORK_ADAPTER,
+            on_line=self.log,
+            on_done=lambda: self._notify_tool_done("done.refresh"),
+        )
         self.set_runner_stop(lambda: None)
         runner.start()
 
@@ -2961,7 +3062,10 @@ class NetworkToolsApp(ctk.CTk):
         self._stop_runner()
         if self.console:
             self.console.clear()
-        FixPrinterRunner(on_line=self.log).start()
+        FixPrinterRunner(
+            on_line=self.log,
+            on_done=lambda: self._notify_tool_done("done.printer"),
+        ).start()
 
     def _start_cache(self) -> None:
         if not self._ensure_admin_for("cache"):
@@ -2969,7 +3073,10 @@ class NetworkToolsApp(ctk.CTk):
         self._stop_runner()
         if self.console:
             self.console.clear()
-        ClearCacheRunner(on_line=self.log).start()
+        ClearCacheRunner(
+            on_line=self.log,
+            on_done=lambda: self._notify_tool_done("done.cache"),
+        ).start()
 
     def _start_fix_rdp(self) -> None:
         if not self._ensure_admin_for("fixrdp"):
@@ -2977,7 +3084,10 @@ class NetworkToolsApp(ctk.CTk):
         self._stop_runner()
         if self.console:
             self.console.clear()
-        FixRdpRunner(on_line=self.log).start()
+        FixRdpRunner(
+            on_line=self.log,
+            on_done=lambda: self._notify_tool_done("done.fixrdp"),
+        ).start()
 
     def _start_anydesk(self) -> None:
         self._stop_runner()
