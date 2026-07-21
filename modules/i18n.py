@@ -154,9 +154,13 @@ _STRINGS: dict[str, dict[str, str]] = {
     "scp.proto.ssh": {"id": "SSH", "en": "SSH"},
     "scp.proto.scp": {"id": "SCP", "en": "SCP"},
     "scp.proto.sftp": {"id": "SFTP", "en": "SFTP"},
+    "scp.save": {"id": "Simpan", "en": "Save"},
+    "scp.clear_saved": {"id": "Hapus", "en": "Clear"},
+    "scp.saved_ok": {"id": "Parameter koneksi disimpan.", "en": "Connection parameters saved."},
+    "scp.cleared_ok": {"id": "Parameter tersimpan dihapus.", "en": "Saved parameters cleared."},
     "scp.drop_hint": {
-        "id": "Drop file = upload  ·  drop folder = download file terpilih  ·  seret file remote = download",
-        "en": "Drop files = upload  ·  drop folder = download selected  ·  drag remote file = download",
+        "id": "Drop file Windows → upload  ·  seret file remote → Windows (download)",
+        "en": "Drop Windows files → upload  ·  drag remote file → Windows (download)",
     },
     "scp.mode_ssh": {
         "id": "Mode SSH — perintah remote (tetap dual: explorer + terminal).",

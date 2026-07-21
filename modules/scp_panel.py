@@ -62,6 +62,7 @@ class ScpPanel:
         self.port_var = tk.StringVar(value="22")
         self.user_var = tk.StringVar(value="")
         self.pass_var = tk.StringVar(value="")
+        self._load_saved_params()
 
         def _field(
             parent: Any, label: str, var: tk.StringVar, width: int, show: str | None = None
@@ -104,7 +105,7 @@ class ScpPanel:
         self.btn_connect = ctk.CTkButton(
             btns,
             text=t("scp.connect"),
-            width=110,
+            width=100,
             height=30,
             fg_color=colors["accent"],
             hover_color=colors["accent_dim"],
@@ -115,7 +116,7 @@ class ScpPanel:
         self.btn_disconnect = ctk.CTkButton(
             btns,
             text=t("scp.disconnect"),
-            width=100,
+            width=90,
             height=30,
             fg_color=colors["danger"],
             hover_color=colors["danger_hover"],
@@ -123,10 +124,32 @@ class ScpPanel:
             state="disabled",
         )
         self.btn_disconnect.pack(side="left", padx=(0, 6))
+        self.btn_save = ctk.CTkButton(
+            btns,
+            text=t("scp.save"),
+            width=80,
+            height=30,
+            fg_color="#16A34A",
+            hover_color="#15803D",
+            text_color="#FFFFFF",
+            command=self._save_params,
+        )
+        self.btn_save.pack(side="left", padx=(0, 6))
+        self.btn_clear_saved = ctk.CTkButton(
+            btns,
+            text=t("scp.clear_saved"),
+            width=70,
+            height=30,
+            fg_color="#EA580C",
+            hover_color="#C2410C",
+            text_color="#FFFFFF",
+            command=self._clear_saved_params,
+        )
+        self.btn_clear_saved.pack(side="left", padx=(0, 6))
         self.btn_back = ctk.CTkButton(
             btns,
             text=t("app.back"),
-            width=90,
+            width=80,
             height=30,
             fg_color=colors["danger"],
             hover_color=colors["danger_hover"],
@@ -206,7 +229,9 @@ class ScpPanel:
             cmd: Callable[[], None],
             tip: str,
             *,
-            color: str | None = None,
+            color: str,
+            hover: str | None = None,
+            text_color: str = "#FFFFFF",
         ) -> ctk.CTkButton:
             b = ctk.CTkButton(
                 self.tools,
@@ -214,28 +239,42 @@ class ScpPanel:
                 width=34,
                 height=28,
                 font=ctk.CTkFont(family="Segoe UI Emoji", size=14),
-                fg_color=color or colors["bg"],
-                hover_color=colors.get("accent_dim", colors["accent"]),
-                text_color="#1A1400" if color else colors["text"],
-                border_width=0 if color else 1,
-                border_color=colors["border"],
+                fg_color=color,
+                hover_color=hover or color,
+                text_color=text_color,
+                border_width=0,
                 command=cmd,
             )
             b.pack(side="left", padx=(0, 3))
             self._bind_tooltip(b, tip)
             return b
 
-        self.btn_up = _icon_btn("↑", self._go_up, t("scp.up"))
+        # Warna berbeda per aksi
+        self.btn_up = _icon_btn("↑", self._go_up, t("scp.up"), color="#3B82F6", hover="#2563EB")
         self.btn_ref = _icon_btn(
-            "↻", self._refresh, t("scp.refresh"), color=colors.get("warn", "#E6B422")
+            "↻",
+            self._refresh,
+            t("scp.refresh"),
+            color="#E6B422",
+            hover="#C99A12",
+            text_color="#1A1400",
         )
-        self.btn_mkdir = _icon_btn("📁+", self._new_folder, t("scp.new_folder"))
-        self.btn_mkfile = _icon_btn("📄+", self._new_file, t("scp.new_file"))
-        self.btn_upload = _icon_btn("⬆", self._upload, t("scp.upload"))
-        self.btn_download = _icon_btn("⬇", self._download, t("scp.download"))
+        self.btn_mkdir = _icon_btn(
+            "📁+", self._new_folder, t("scp.new_folder"), color="#16A34A", hover="#15803D"
+        )
+        self.btn_mkfile = _icon_btn(
+            "📄+", self._new_file, t("scp.new_file"), color="#0D9488", hover="#0F766E"
+        )
+        self.btn_upload = _icon_btn(
+            "⬆", self._upload, t("scp.upload"), color="#8B5CF6", hover="#7C3AED"
+        )
+        self.btn_download = _icon_btn(
+            "⬇", self._download, t("scp.download"), color="#F97316", hover="#EA580C"
+        )
 
         self._drag_start: tuple[int, int] | None = None
         self._drag_entry: Any | None = None
+        self._drag_armed = False
 
         self.drop_hint = ctk.CTkLabel(
             left_inner,
@@ -379,8 +418,8 @@ class ScpPanel:
 
         self._term_write(
             t("scp.need_connect") + "\n"
-            "Explorer: ikon ↑ ↻ 📁+ 📄+ ⬆ ⬇  ·  drop file=upload, drop folder=download\n"
-            "Terminal: klik kanan untuk Copy / Paste.\n"
+            "Terminal interaktif — klik kanan: Copy / Paste.\n"
+            "Explorer: drop file Windows = upload · seret file remote ke Windows = download.\n"
         )
         self.term.configure(state="disabled")
 
@@ -629,9 +668,55 @@ class ScpPanel:
         self._shell_thread = None
 
     # ----- helpers -----
+    def _status(self, text: str) -> None:
+        """Status explorer di bar petunjuk (bukan terminal / status koneksi)."""
+        try:
+            self.drop_hint.configure(text=text)
+        except Exception:
+            pass
+
     def _log(self, text: str) -> None:
-        """Status/pesan → terminal (bukan input terpisah)."""
+        """Hanya untuk pesan koneksi / shell — bukan aktivitas explorer."""
         self._term_write(text.rstrip() + "\n")
+
+    def _load_saved_params(self) -> None:
+        try:
+            from modules.prefs import load_prefs
+
+            p = load_prefs()
+            if p.get("ssh_host"):
+                self.host_var.set(str(p.get("ssh_host", "")))
+            if p.get("ssh_port"):
+                self.port_var.set(str(p.get("ssh_port", "22")))
+            if p.get("ssh_user"):
+                self.user_var.set(str(p.get("ssh_user", "")))
+            if p.get("ssh_pass") is not None:
+                self.pass_var.set(str(p.get("ssh_pass", "")))
+        except Exception:
+            pass
+
+    def _save_params(self) -> None:
+        from modules.prefs import save_prefs
+
+        save_prefs(
+            ssh_host=self.host_var.get().strip(),
+            ssh_port=(self.port_var.get() or "22").strip() or "22",
+            ssh_user=self.user_var.get().strip(),
+            ssh_pass=self.pass_var.get() or "",
+        )
+        self._status(t("scp.saved_ok"))
+        messagebox.showinfo(t("tool.scp.title"), t("scp.saved_ok"), parent=self.app)
+
+    def _clear_saved_params(self) -> None:
+        from modules.prefs import save_prefs
+
+        save_prefs(ssh_host="", ssh_port="22", ssh_user="", ssh_pass="")
+        self.host_var.set("")
+        self.port_var.set("22")
+        self.user_var.set("")
+        self.pass_var.set("")
+        self._status(t("scp.cleared_ok"))
+        messagebox.showinfo(t("tool.scp.title"), t("scp.cleared_ok"), parent=self.app)
 
     def _ui(self, fn: Callable[[], None]) -> None:
         self.app.after(0, fn)
@@ -689,7 +774,7 @@ class ScpPanel:
             pass
 
     def _handle_drop_paths(self, paths: list[str]) -> None:
-        """Drop file lokal = upload; drop folder lokal = download file terpilih ke folder itu."""
+        """Drop dari Windows Explorer → upload file ke remote."""
         if not self.session.connected:
             messagebox.showinfo(t("tool.scp.title"), t("scp.need_connect"), parent=self.app)
             return
@@ -697,22 +782,10 @@ class ScpPanel:
         from pathlib import Path as _Path
 
         files = [p for p in paths if _Path(p).is_file()]
-        dirs = [p for p in paths if _Path(p).is_dir()]
-
-        if files:
-            self._upload_paths(files)
-
-        if dirs:
-            entry = self._selected()
-            if entry is None or entry.name == ".." or entry.is_dir:
-                messagebox.showinfo(
-                    t("tool.scp.title"),
-                    "Pilih file remote dulu, lalu lepas folder lokal untuk download ke folder itu.",
-                    parent=self.app,
-                )
-                return
-            dest = str(_Path(dirs[0]) / entry.name)
-            self._download_to(entry, dest)
+        if not files:
+            self._status("Drop diabaikan — lepas file (bukan folder) untuk upload.")
+            return
+        self._upload_paths(files)
 
     def _on_tree_press(self, event: Any) -> None:
         row = self.tree.identify_row(event.y)
@@ -721,47 +794,105 @@ class ScpPanel:
             self.tree.focus(row)
         self._drag_start = (event.x_root, event.y_root)
         self._drag_entry = self._selected()
+        self._drag_armed = False
 
     def _on_tree_motion(self, event: Any) -> None:
-        if self._drag_start is None:
+        if self._drag_start is None or self._drag_armed:
+            return
+        entry = self._drag_entry
+        if entry is None or entry.name == ".." or entry.is_dir:
             return
         dx = abs(event.x_root - self._drag_start[0])
         dy = abs(event.y_root - self._drag_start[1])
-        if dx + dy > 12:
-            try:
-                self.tree.configure(cursor="hand2")
-            except Exception:
-                pass
+        if dx + dy < 16:
+            return
+        if not self.session.connected:
+            return
+        self._drag_armed = True
+        try:
+            self.tree.configure(cursor="hand2")
+        except Exception:
+            pass
+        self._begin_drag_out(entry)
 
-    def _on_tree_release(self, event: Any) -> None:
+    def _on_tree_release(self, _event: Any) -> None:
         try:
             self.tree.configure(cursor="")
         except Exception:
             pass
-        start = self._drag_start
-        entry = self._drag_entry
-        self._drag_start = None
-        self._drag_entry = None
-        if start is None or entry is None:
-            return
-        if entry.name == ".." or entry.is_dir:
-            return
-        dx = abs(event.x_root - start[0])
-        dy = abs(event.y_root - start[1])
-        # Seret jauh = download (pilih folder lokal)
-        if dx + dy < 40:
-            return
-        if not self.session.connected:
-            return
-        folder = filedialog.askdirectory(
-            parent=self.app,
-            title=t("scp.download") + " — pilih folder lokal",
-        )
-        if not folder:
-            return
+        if not self._drag_armed:
+            self._drag_start = None
+            self._drag_entry = None
+
+    def _begin_drag_out(self, entry: Any) -> None:
+        """Download ke temp lalu OLE drag ke Windows Explorer."""
+        import tempfile
         from pathlib import Path as _Path
 
-        self._download_to(entry, str(_Path(folder) / entry.name))
+        self._status(f"Menyiapkan drag download: {entry.name}…")
+
+        def worker() -> None:
+            tmp_dir = _Path(tempfile.gettempdir()) / "NetworkToolsDnD"
+            try:
+                tmp_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            dest = tmp_dir / entry.name
+            try:
+                if dest.exists():
+                    dest.unlink()
+            except Exception:
+                pass
+            err = None
+            try:
+                self.session.download(entry.path, str(dest))
+            except Exception as exc:
+                err = str(exc)
+
+            def done() -> None:
+                if err:
+                    self._status(f"Download gagal: {err}")
+                    messagebox.showerror(t("tool.scp.title"), err, parent=self.app)
+                    self._drag_armed = False
+                    self._drag_start = None
+                    self._drag_entry = None
+                    return
+                self._status(f"Seret ke folder Windows: {entry.name}")
+                ok = False
+                try:
+                    from modules.win_file_drag import drag_files
+
+                    ok = bool(drag_files([str(dest)]))
+                except Exception as exc:
+                    self._status(f"Drag OLE gagal ({exc}) — pilih folder…")
+                    folder = filedialog.askdirectory(
+                        parent=self.app,
+                        title=t("scp.download") + " — pilih folder lokal",
+                    )
+                    if folder:
+                        target = str(_Path(folder) / entry.name)
+                        try:
+                            import shutil
+
+                            shutil.copy2(str(dest), target)
+                            self._status(f"Downloaded → {target}")
+                        except Exception as e2:
+                            self._status(f"Copy gagal: {e2}")
+                    self._drag_armed = False
+                    self._drag_start = None
+                    self._drag_entry = None
+                    return
+                if ok:
+                    self._status(f"Download selesai: {entry.name}")
+                else:
+                    self._status("Drag dibatalkan.")
+                self._drag_armed = False
+                self._drag_start = None
+                self._drag_entry = None
+
+            self._ui(done)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     # ----- connection -----
     def _connect(self) -> None:
@@ -874,7 +1005,7 @@ class ScpPanel:
             pass
 
         if not display:
-            self._log(t("scp.empty"))
+            self._status(t("scp.empty"))
             return
 
         for idx, row in enumerate(display):
@@ -922,13 +1053,9 @@ class ScpPanel:
 
             def done() -> None:
                 if err:
-                    self._log(f"List error: {err}")
+                    self._status(f"List error: {err}")
                     messagebox.showerror(t("tool.scp.title"), err, parent=self.app)
                 else:
-                    self._log(
-                        f"Explorer: {len(rows)} item · {self.session.cwd}"
-                        + (" (SFTP)" if self.session.sftp_ok else " (shell)")
-                    )
                     self._fill(rows)
                 if then_shell:
                     self._start_shell()
@@ -953,7 +1080,7 @@ class ScpPanel:
 
             def done() -> None:
                 if err:
-                    self._log(f"Path error: {err}")
+                    self._status(f"Path error: {err}")
                     messagebox.showerror(t("tool.scp.title"), err, parent=self.app)
                     self.path_var.set(self.session.cwd)
                     return
@@ -972,7 +1099,7 @@ class ScpPanel:
                 self.session.go_up()
                 rows = self.session.list_dir()
             except Exception as exc:
-                self._ui(lambda: self._log(f"Up error: {exc}"))
+                self._ui(lambda: self._status(f"Up error: {exc}"))
                 return
             self._ui(lambda: self._fill(rows))
 
@@ -1032,7 +1159,7 @@ class ScpPanel:
                     lambda: messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app)
                 )
                 return
-            self._ui(lambda: (self._log(f"mkdir {path}"), self._fill(rows)))
+            self._ui(lambda: (self._status(f"mkdir {path}"), self._fill(rows)))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1052,7 +1179,7 @@ class ScpPanel:
                     lambda: messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app)
                 )
                 return
-            self._ui(lambda: (self._log(f"create {path}"), self._fill(rows)))
+            self._ui(lambda: (self._status(f"create {path}"), self._fill(rows)))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1080,7 +1207,7 @@ class ScpPanel:
                     lambda: messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app)
                 )
                 return
-            self._ui(lambda: (self._log(f"rename → {path}"), self._fill(rows)))
+            self._ui(lambda: (self._status(f"rename → {path}"), self._fill(rows)))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1106,7 +1233,7 @@ class ScpPanel:
                     lambda: messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app)
                 )
                 return
-            self._ui(lambda: (self._log(f"deleted {entry.path}"), self._fill(rows)))
+            self._ui(lambda: (self._status(f"deleted {entry.path}"), self._fill(rows)))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1117,9 +1244,9 @@ class ScpPanel:
         try:
             self.app.clipboard_clear()
             self.app.clipboard_append(entry.path)
-            self._log(f"Copied path: {entry.path}")
+            self._status(f"Copied path: {entry.path}")
         except Exception as exc:
-            self._log(f"Copy failed: {exc}")
+            self._status(f"Copy failed: {exc}")
 
     def _copy_name(self) -> None:
         entry = self._selected()
@@ -1128,9 +1255,9 @@ class ScpPanel:
         try:
             self.app.clipboard_clear()
             self.app.clipboard_append(entry.name)
-            self._log(f"Copied name: {entry.name}")
+            self._status(f"Copied name: {entry.name}")
         except Exception as exc:
-            self._log(f"Copy failed: {exc}")
+            self._status(f"Copy failed: {exc}")
 
     def _download(self) -> None:
         entry = self._selected()
@@ -1153,7 +1280,7 @@ class ScpPanel:
         self._download_to(entry, dest)
 
     def _download_to(self, entry: Any, dest: str) -> None:
-        self._log(f"Download {entry.path} → {dest}")
+        self._status(f"Download {entry.path} → {dest}")
 
         def worker() -> None:
             try:
@@ -1162,8 +1289,9 @@ class ScpPanel:
                 self._ui(
                     lambda: messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app)
                 )
+                self._ui(lambda: self._status(f"Download gagal: {exc}"))
                 return
-            self._ui(lambda: self._log(f"Downloaded → {dest}"))
+            self._ui(lambda: self._status(f"Downloaded → {dest}"))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1186,10 +1314,10 @@ class ScpPanel:
 
         files = [p for p in paths if _Path(p).is_file()]
         if not files:
-            self._log("Drop diabaikan — tidak ada file untuk di-upload.")
+            self._status("Drop diabaikan — tidak ada file untuk di-upload.")
             return
 
-        self._log(f"Upload {len(files)} file…")
+        self._status(f"Upload {len(files)} file…")
 
         def worker() -> None:
             ok = 0
@@ -1197,9 +1325,9 @@ class ScpPanel:
                 try:
                     remote = self.session.upload(p)
                     ok += 1
-                    self._ui(lambda r=remote: self._log(f"Uploaded → {r}"))
+                    self._ui(lambda r=remote: self._status(f"Uploaded → {r}"))
                 except Exception as exc:
-                    self._ui(lambda e=str(exc): self._log(f"Upload fail: {e}"))
+                    self._ui(lambda e=str(exc): self._status(f"Upload fail: {e}"))
             try:
                 rows = self.session.list_dir()
             except Exception:
@@ -1207,7 +1335,7 @@ class ScpPanel:
             self._ui(
                 lambda: (
                     self._fill(rows),
-                    self._log(f"Upload selesai ({ok}/{len(files)})"),
+                    self._status(f"Upload selesai ({ok}/{len(files)})"),
                 )
             )
 

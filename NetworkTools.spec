@@ -14,6 +14,7 @@ hiddenimports = [
     "paramiko",
     "scp",
     "windnd",
+    "modules.win_file_drag",
 ]
 
 for pkg in ("customtkinter", "webview", "pythonnet", "clr_loader", "paramiko", "scp"):
