@@ -2006,11 +2006,17 @@ class NetworkToolsApp(ctk.CTk):
             for idx, app in enumerate(apps):
                 tag = "even" if idx % 2 == 0 else "odd"
                 photo = None
-                if idx < 150:
-                    try:
-                        photo = load_icon_photo(app.get("icon", ""), size=20)
-                    except Exception:
-                        photo = None
+                try:
+                    photo = load_icon_photo(
+                        app.get("icon", ""),
+                        size=20,
+                        install_location=app.get("install_location", ""),
+                        uninstall=app.get("uninstall", "")
+                        or app.get("quiet_uninstall", ""),
+                        name=app.get("name", ""),
+                    )
+                except Exception:
+                    photo = None
                 if photo is not None:
                     self._app_icon_refs.append(photo)
                 iid = tree.insert(
@@ -2333,12 +2339,12 @@ class NetworkToolsApp(ctk.CTk):
 
         grid = ctk.CTkScrollableFrame(self._content, fg_color="transparent")
         grid.pack(fill="both", expand=True)
-        cols = 3
+        cols = 4
         for i in range(cols):
             grid.grid_columnconfigure(i, weight=1, uniform="net_cards")
 
         log_host = ctk.CTkFrame(
-            self._content, fg_color=COLORS["console_bg"], height=140, corner_radius=8
+            self._content, fg_color=COLORS["console_bg"], height=110, corner_radius=8
         )
         log_host.pack(fill="x", pady=(8, 0))
         log_host.pack_propagate(False)
@@ -2366,6 +2372,8 @@ class NetworkToolsApp(ctk.CTk):
                 status_lbl.configure(text=t("network.empty"))
                 return
             status_lbl.configure(text=t("network.count", n=len(rows)))
+            text_fg = COLORS["text"]
+            muted_fg = COLORS["muted"]
             for idx, row in enumerate(rows):
                 r, c = divmod(idx, cols)
                 st = row.get("status") or "—"
@@ -2376,70 +2384,80 @@ class NetworkToolsApp(ctk.CTk):
                     "down",
                     "not present",
                 )
-                # Box kusam jika adapter disable / down
                 if disabled:
-                    card_bg = COLORS.get("tile", COLORS["panel"])
-                    # Blend ke abu-abu
                     card_bg = COLORS.get("border", "#3A3A3A")
-                    text_col = COLORS.get("muted", "#888888")
-                    border_col = COLORS.get("muted", "#666666")
+                    name_col = muted_fg
+                    border_col = muted_fg
                 else:
                     card_bg = COLORS["panel"]
-                    text_col = COLORS["text"]
+                    name_col = text_fg
                     border_col = COLORS["border"]
+
                 card = ctk.CTkFrame(
                     grid,
                     fg_color=card_bg,
-                    corner_radius=12,
+                    corner_radius=10,
                     border_width=1,
                     border_color=border_col,
+                    height=86,
                 )
-                card.grid(row=r, column=c, sticky="nsew", padx=6, pady=6)
+                card.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
+                card.grid_propagate(False)
                 card_widgets.append(card)
 
-                head = ctk.CTkFrame(card, fg_color="transparent")
-                head.pack(fill="x", padx=12, pady=(12, 4))
+                inner = ctk.CTkFrame(card, fg_color="transparent")
+                inner.pack(fill="both", expand=True, padx=10, pady=8)
+
+                head = ctk.CTkFrame(inner, fg_color="transparent")
+                head.pack(fill="x")
+                name_l = (row.get("name") or "").lower()
+                desc_l = (row.get("desc") or "").lower()
+                if "wi-fi" in name_l or "wifi" in name_l or "wireless" in desc_l:
+                    ic = "📶"
+                elif "ethernet" in name_l or "ethernet" in desc_l:
+                    ic = "🔌"
+                else:
+                    ic = "🖧"
                 ctk.CTkLabel(
                     head,
-                    text="●",
+                    text=ic,
                     font=ctk.CTkFont(size=14),
-                    text_color=_status_color(st),
-                    width=18,
+                    text_color=COLORS["accent"] if not disabled else muted_fg,
+                    width=22,
                 ).pack(side="left")
                 ctk.CTkLabel(
                     head,
                     text=row.get("name") or "—",
-                    font=ctk.CTkFont(family="Segoe UI Semibold", size=13),
-                    text_color=text_col,
+                    font=ctk.CTkFont(family="Segoe UI Semibold", size=12),
+                    text_color=name_col,
                     anchor="w",
-                ).pack(side="left", fill="x", expand=True)
+                ).pack(side="left", fill="x", expand=True, padx=(4, 6))
+                dot = ctk.CTkFrame(
+                    head,
+                    width=14,
+                    height=14,
+                    corner_radius=7,
+                    fg_color=_status_color(st),
+                )
+                dot.pack(side="right")
+                dot.pack_propagate(False)
 
+                speed = row.get("speed") or "—"
                 ctk.CTkLabel(
-                    card,
-                    text=row.get("desc") or "—",
+                    inner,
+                    text=f"{st} · {speed}",
                     font=ctk.CTkFont(family="Segoe UI", size=10),
-                    text_color=COLORS["muted"],
-                    anchor="w",
-                    wraplength=220,
-                    justify="left",
-                ).pack(fill="x", padx=12, pady=(0, 6))
-
-                meta = ctk.CTkFrame(card, fg_color="transparent")
-                meta.pack(fill="x", padx=12, pady=(0, 12))
-                ctk.CTkLabel(
-                    meta,
-                    text=f"{st} · {row.get('speed') or '—'}",
-                    font=ctk.CTkFont(family="Segoe UI", size=11),
                     text_color=_status_color(st),
                     anchor="w",
-                ).pack(fill="x")
+                ).pack(anchor="w", fill="x", pady=(2, 0))
+                mac = row.get("mac") or "—"
                 ctk.CTkLabel(
-                    meta,
-                    text=row.get("mac") or "—",
+                    inner,
+                    text=mac,
                     font=ctk.CTkFont(family="Consolas", size=10),
-                    text_color=COLORS["muted"],
+                    text_color=muted_fg,
                     anchor="w",
-                ).pack(fill="x", pady=(2, 0))
+                ).pack(anchor="w", fill="x", pady=(2, 0))
 
                 def _bind_adapter_menu(widget: Any, adapter: dict[str, str]) -> None:
                     def on_right(event: Any, ad=adapter) -> str:
@@ -2472,6 +2490,11 @@ class NetworkToolsApp(ctk.CTk):
                     for child in widget.winfo_children():
                         try:
                             child.bind("<Button-3>", on_right)
+                            for gchild in child.winfo_children():
+                                try:
+                                    gchild.bind("<Button-3>", on_right)
+                                except Exception:
+                                    pass
                         except Exception:
                             pass
 
