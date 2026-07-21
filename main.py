@@ -1186,33 +1186,49 @@ class NetworkToolsApp(ctk.CTk):
             tile = ctk.CTkFrame(
                 grid,
                 fg_color=COLORS["tile"],
-                corner_radius=8,
+                corner_radius=12,
                 border_width=1,
                 border_color=COLORS["border"],
             )
             tile.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
+            accent_strip = ctk.CTkFrame(
+                tile, fg_color=COLORS["accent_dim"], height=5, corner_radius=12
+            )
+            accent_strip.pack(fill="x", side="top", padx=0, pady=0)
+
             inner = ctk.CTkFrame(tile, fg_color="transparent")
-            inner.pack(fill="both", expand=True, padx=10, pady=8)
-            ctk.CTkLabel(
+            inner.pack(fill="both", expand=True, padx=12, pady=(10, 10))
+
+            icon_box = ctk.CTkFrame(
                 inner,
+                fg_color=COLORS["tile_hover"],
+                corner_radius=10,
+                border_width=1,
+                border_color=COLORS["border"],
+            )
+            icon_box.pack(anchor="w", fill="x", pady=(0, 10))
+            ctk.CTkLabel(
+                icon_box,
                 text=icon,
                 font=ctk.CTkFont(size=18),
                 text_color=COLORS["accent"],
                 height=20,
-            ).pack(anchor="w")
+            ).pack(anchor="w", padx=10, pady=6)
+
             ctk.CTkLabel(
                 inner,
                 text=title,
-                font=ctk.CTkFont(family="Segoe UI Semibold", size=13),
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=14),
                 text_color=COLORS["text"],
                 height=18,
-            ).pack(anchor="w", pady=(2, 0))
+            ).pack(anchor="w", pady=(0, 2))
+
             desc_lbl = ctk.CTkLabel(
                 inner,
                 text=desc,
                 font=ctk.CTkFont(size=10),
                 text_color=COLORS["muted"],
-                wraplength=140,
+                wraplength=180,
                 justify="left",
                 anchor="nw",
             )
@@ -1221,29 +1237,38 @@ class NetworkToolsApp(ctk.CTk):
             btn = ctk.CTkButton(
                 inner,
                 text=t("app.open"),
-                width=70,
-                height=26,
-                fg_color=COLORS["accent"],
-                hover_color=COLORS["accent_dim"],
+                width=92,
+                height=28,
+                fg_color=COLORS["accent_dim"],
+                hover_color=COLORS["accent"],
                 text_color=COLORS["on_accent"],
+                corner_radius=10,
                 command=lambda k=key: self.open_tool(k),
             )
-            btn.pack(anchor="w", pady=(6, 0))
+            btn.pack(anchor="w", pady=(10, 0))
 
             def _open(_event: Any = None, k: str = key) -> None:
                 self.open_tool(k)
 
-            for widget in (tile, inner):
-                widget.bind("<Enter>", lambda e, t=tile: t.configure(fg_color=COLORS["tile_hover"]))
-                widget.bind("<Leave>", lambda e, t=tile: t.configure(fg_color=COLORS["tile"]))
+            def _tile_enter(_event: Any = None) -> None:
+                tile.configure(fg_color=COLORS["tile_hover"], border_color=COLORS["accent_dim"])
+                accent_strip.configure(fg_color=COLORS["accent"])
+
+            def _tile_leave(_event: Any = None) -> None:
+                tile.configure(fg_color=COLORS["tile"], border_color=COLORS["border"])
+                accent_strip.configure(fg_color=COLORS["accent_dim"])
+
+            for widget in (tile, inner, accent_strip, icon_box):
+                widget.bind("<Enter>", _tile_enter)
+                widget.bind("<Leave>", _tile_leave)
                 widget.bind("<Button-1>", _open)
             for child in inner.winfo_children():
                 if child is btn:
                     continue
                 try:
                     child.bind("<Button-1>", _open)
-                    child.bind("<Enter>", lambda e, t=tile: t.configure(fg_color=COLORS["tile_hover"]))
-                    child.bind("<Leave>", lambda e, t=tile: t.configure(fg_color=COLORS["tile"]))
+                    child.bind("<Enter>", lambda e: _tile_enter(e))
+                    child.bind("<Leave>", lambda e: _tile_leave(e))
                 except Exception:
                     pass
 
