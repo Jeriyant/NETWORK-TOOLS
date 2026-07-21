@@ -2196,53 +2196,64 @@ class NetworkToolsApp(ctk.CTk):
                 card = ctk.CTkFrame(
                     cards,
                     fg_color=COLORS["panel"],
-                    corner_radius=12,
+                    corner_radius=10,
                     border_width=1,
                     border_color=COLORS["border"],
                 )
-                card.pack(fill="x", pady=(0, 10))
+                card.pack(fill="x", pady=(0, 8))
                 inner = ctk.CTkFrame(card, fg_color="transparent")
-                inner.pack(fill="x", padx=16, pady=14)
+                inner.pack(fill="x", padx=14, pady=10)
+
+                head = ctk.CTkFrame(inner, fg_color="transparent")
+                head.pack(fill="x")
 
                 ctk.CTkLabel(
-                    inner,
+                    head,
                     text=item.get("label", "—"),
-                    font=ctk.CTkFont(family="Segoe UI Semibold", size=16),
+                    font=ctk.CTkFont(family="Segoe UI Semibold", size=14),
                     text_color=COLORS["text"],
-                    anchor="center",
-                    justify="center",
-                ).pack(fill="x")
+                    anchor="w",
+                ).pack(side="left", fill="x", expand=True, padx=(0, 10))
 
                 st = str(item.get("status", "UNKNOWN"))
                 fg, on = _status_color(bool(item.get("ok")), st)
+                # Pill kecil — teks di tengah via pack expand
                 badge = ctk.CTkFrame(
-                    inner,
+                    head,
                     fg_color=fg,
-                    corner_radius=10,
-                    height=36,
+                    corner_radius=6,
+                    height=22,
                 )
-                badge.pack(fill="x", pady=(10, 0))
+                badge.pack(side="right")
                 badge.pack_propagate(False)
-                ctk.CTkLabel(
+                lbl = ctk.CTkLabel(
                     badge,
                     text=st,
-                    font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+                    font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
                     text_color=on,
                     anchor="center",
                     justify="center",
-                ).pack(expand=True, fill="both", padx=8, pady=4)
+                )
+                lbl.pack(expand=True, fill="both", padx=10, pady=0)
+                # Lebar mengikuti teks + padding
+                try:
+                    badge.update_idletasks()
+                    tw = max(56, int(lbl.winfo_reqwidth()) + 20)
+                    badge.configure(width=tw)
+                except Exception:
+                    badge.configure(width=72)
 
                 detail = str(item.get("detail", "") or "").strip()
                 if detail:
                     ctk.CTkLabel(
                         inner,
                         text=detail,
-                        font=ctk.CTkFont(family="Segoe UI", size=13),
+                        font=ctk.CTkFont(family="Segoe UI", size=12),
                         text_color=COLORS["muted"],
-                        anchor="center",
-                        justify="center",
+                        anchor="w",
+                        justify="left",
                         wraplength=720,
-                    ).pack(fill="x", pady=(10, 0))
+                    ).pack(fill="x", pady=(6, 0))
 
         def on_result(items: list[Any]) -> None:
             self.after(0, lambda: _render(items))

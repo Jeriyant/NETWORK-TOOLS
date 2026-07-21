@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 import tkinter as tk
@@ -39,6 +40,8 @@ class ScpPanel:
         self._term_mark = "1.0"
         self._ansi = AnsiScreen(rows=30, cols=100)
         self._term_fullscreen = False
+        self._typed_line = ""
+        self._awaiting_clear = False
 
         top = ctk.CTkFrame(header, fg_color="transparent")
         top.pack(fill="x")
@@ -618,6 +621,39 @@ class ScpPanel:
             pass
 
     # ----- terminal -----
+    @staticmethod
+    def _is_clear_seq(text: str) -> bool:
+        """BusyBox/xterm clear biasanya \\x1b[H\\x1b[J, bukan hanya \\x1b[2J."""
+        if not text:
+            return False
+        if "\x1bc" in text:  # RIS
+            return True
+        # CSI J / 0J / 1J / 2J / 3J (erase display)
+        if re.search(r"\x1b\[[0-9;]*J", text):
+            return True
+        # cursor home + erase (kadang terpisah token)
+        if "\x1b[H" in text and ("\x1b[J" in text or "\x1b[0J" in text):
+            return True
+        return False
+
+    def _wipe_term_keep_prompt(self, text: str = "") -> None:
+        """Kosongkan widget terminal; sisakan plain text (biasanya prompt)."""
+        self._term_fullscreen = False
+        try:
+            self._ansi.clear()
+        except Exception:
+            pass
+        self.term.configure(state="normal")
+        self.term.delete("1.0", "end")
+        plain = strip_plain(text) if text else ""
+        plain = plain.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
+        if plain:
+            self.term.insert("end", plain + ("\n" if not plain.endswith("\n") else ""))
+        self.term.see("end")
+        self._term_mark = self.term.index("end-1c")
+        if not self.session.connected:
+            self.term.configure(state="disabled")
+
     def _term_write(self, text: str) -> None:
         """Tulis ke terminal; fullscreen (nano/vim) pakai pyte screen."""
         try:
@@ -632,11 +668,7 @@ class ScpPanel:
                 or "\x1b[?47h" in text
                 or "\x1b[?1047h" in text
             )
-            has_clear = (
-                "\x1b[2J" in text
-                or "\x1bc" in text
-                or "\x1b[3J" in text
-            )
+            has_clear = self._is_clear_seq(text)
             if (
                 not self._term_fullscreen
                 and not enter_fs
@@ -644,22 +676,10 @@ class ScpPanel:
             ):
                 enter_fs = True
 
-            # Perintah clear / CSI wipe — selalu hapus layar (keluar nano yang nyangkut)
-            if has_clear and not enter_fs:
-                self._term_fullscreen = False
-                try:
-                    self._ansi.clear()
-                except Exception:
-                    pass
-                self.term.delete("1.0", "end")
-                plain = strip_plain(text)
-                plain = plain.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
-                if plain:
-                    self.term.insert("end", plain + "\n")
-                self.term.see("end")
-                self._term_mark = self.term.index("end-1c")
-                if not self.session.connected:
-                    self.term.configure(state="disabled")
+            # Perintah clear / CSI wipe — atau fallback setelah user ketik `clear`+Enter
+            if (has_clear or self._awaiting_clear) and not enter_fs:
+                self._awaiting_clear = False
+                self._wipe_term_keep_prompt(text)
                 return
 
             if leave_fs:
@@ -717,6 +737,7 @@ class ScpPanel:
     def _exit_fullscreen_term(self) -> None:
         """Keluar mode nano/vim — reset buffer agar `clear` & prompt bersih."""
         self._term_fullscreen = False
+        self._typed_line = ""
         try:
             self._ansi.clear()
         except Exception:
@@ -732,6 +753,7 @@ class ScpPanel:
         """Kosongkan tampilan terminal (lokal)."""
         connected = bool(self.session.connected)
         self._term_fullscreen = False
+        self._typed_line = ""
         try:
             self._ansi.clear()
         except Exception:
@@ -750,7 +772,6 @@ class ScpPanel:
         self._term_clear_ui()
         if self._shell_chan is not None and self.session.connected:
             try:
-                self._shell_chan.send("\x1bc")
                 self._shell_chan.send("clear\r")
             except Exception:
                 try:
@@ -883,16 +904,25 @@ class ScpPanel:
 
             ch = event.char
             if event.keysym == "Return":
+                cmd = (self._typed_line or "").strip()
+                self._typed_line = ""
+                if cmd == "clear" and not self._term_fullscreen:
+                    self._awaiting_clear = True
                 self._shell_chan.send("\r")
             elif event.keysym == "BackSpace":
+                if self._typed_line:
+                    self._typed_line = self._typed_line[:-1]
                 self._shell_chan.send("\x7f")  # nano biasanya DEL
             elif event.keysym == "Delete":
                 self._shell_chan.send("\x1b[3~")
             elif event.keysym == "Tab":
                 self._shell_chan.send("\t")
             elif event.keysym == "Escape":
+                self._typed_line = ""
                 self._shell_chan.send("\x1b")
             elif ch:
+                if ch.isprintable() and not self._term_fullscreen:
+                    self._typed_line += ch
                 self._shell_chan.send(ch)
         except Exception as exc:
             self._term_write(f"\n[shell error: {exc}]\n")
