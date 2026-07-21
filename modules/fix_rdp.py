@@ -187,18 +187,56 @@ class FixRdpRunner:
                 self._emit(o or f"    exit {c}")
         self.on_line("")
 
+    def _clear_windows_temp(self) -> None:
+        """Gabungan Clear Cache: TEMP Windows + folder RDP6."""
+        import tempfile
+
+        self.on_line("5) Clear Cache (TEMP & RDP6)…")
+        targets: list[tuple[str, Path]] = [
+            ("Windows TEMP", Path(tempfile.gettempdir())),
+            ("User TEMP", Path(os.environ.get("TEMP", tempfile.gettempdir()))),
+            ("Windows\\Temp", Path(os.environ.get("WINDIR", r"C:\Windows")) / "Temp"),
+            ("RDP6 Cache", Path(os.environ.get("USERPROFILE", str(Path.home()))) / "RDP6"),
+        ]
+        seen: set[str] = set()
+        for label, path in targets:
+            key = str(path.resolve()) if path.exists() else str(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            self.on_line(f"  Membersihkan: {label}")
+            self.on_line(f"    {path}")
+            if not path.exists():
+                self.on_line("    (folder tidak ada — dilewati)")
+                continue
+            removed = 0
+            failed = 0
+            for entry in list(path.iterdir()):
+                try:
+                    if entry.is_file() or entry.is_symlink():
+                        entry.unlink(missing_ok=True)
+                        removed += 1
+                    elif entry.is_dir():
+                        shutil.rmtree(entry, ignore_errors=False)
+                        removed += 1
+                except Exception:
+                    failed += 1
+            self.on_line(f"    Dihapus: {removed} item, gagal: {failed}")
+        self.on_line("")
+
     def _run(self) -> None:
         try:
-            self.on_line("=== FIX RDP (Reset Remote Desktop) ===")
-            self.on_line("Membuat sesi RDP client fresh.")
+            self.on_line("=== FIX RDP (Reset Remote Desktop + Clear Cache) ===")
+            self.on_line("Membuat sesi RDP client fresh dan membersihkan cache TEMP.")
             self.on_line("")
 
             self._kill_processes()
             self._clear_folders()
             self._clear_registry()
             self._clear_credentials()
+            self._clear_windows_temp()
 
-            self.on_line("Fix RDP selesai.")
+            self.on_line("Fix RDP + Clear Cache selesai.")
             self.on_line("Buka Remote Desktop / Connection Client lagi untuk koneksi baru.")
         except Exception as exc:
             self.on_line(f"Error: {exc}")

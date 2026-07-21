@@ -5,6 +5,7 @@ Network Tools — single-window desktop utility suite.
 from __future__ import annotations
 
 import random
+import re
 import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox
@@ -14,7 +15,6 @@ import customtkinter as ctk
 
 from modules.admin import is_admin, relaunch_as_admin
 from modules.app_icon import app_icon_path
-from modules.clear_cache import ClearCacheRunner
 from modules.fix_anydesk import AnydeskRunner
 from modules.fix_printer import FixPrinterRunner
 from modules.fix_rdp import FixRdpRunner
@@ -32,6 +32,7 @@ from modules.i18n import (
 from modules.installed_apps import InstalledAppsRunner, format_apps_text
 from modules.ip_scanner import IpScannerRunner
 from modules.ping_runner import PingRunner
+from modules.multi_ping import MultiHostPingRunner
 from modules.prefs import load_prefs, save_prefs
 from modules.refresh_network import RefreshNetworkRunner
 from modules.security_check import SecurityCheckRunner, format_security_text
@@ -39,6 +40,7 @@ from modules.settings import (
     DEFAULT_LANG,
     DEFAULT_THEME,
     DNS_LEAK_URL,
+    HOSTS,
     NETWORK_ADAPTER,
     SPEEDTEST_URL,
     APP_VERSION,
@@ -59,11 +61,12 @@ from modules.theme import (
     resolve_theme,
 )
 from modules.traceroute_runner import TracerouteRunner
+from modules.trace_topology import TracerouteTopologyRunner
 
 # Tools that require Administrator (UAC)
-ADMIN_TOOLS = frozenset({"refresh", "cache", "printer", "fixrdp"})
+ADMIN_TOOLS = frozenset({"refresh", "printer", "fixrdp"})
 # Langsung jalan saat menu dibuka (tanpa tombol Jalankan)
-AUTO_RUN_TOOLS = frozenset({"refresh", "cache", "printer", "fixrdp", "anydesk"})
+AUTO_RUN_TOOLS = frozenset({"refresh", "anydesk"})
 
 # Active palette (updated when theme changes)
 COLORS: dict[str, str] = dict(THEMES["light"])
@@ -80,7 +83,7 @@ TOOL_DEFS: list[tuple[str, str]] = [
     ("refresh", "↻"),
     ("printer", "🖨"),
     ("fixrdp", "⧉"),
-    ("cache", "⌫"),
+    ("scp", "⇅"),
     ("anydesk", "⌨"),
 ]
 
@@ -121,10 +124,24 @@ DASH_TILE_BTN = "#FFFFFF"
 DASH_TILE_BTN_HOVER = "#F1F5F9"
 DASH_TILE_BTN_TEXT = "#1E293B"
 
+# Border warna-warni untuk topologi traceroute
+TOPO_RAINBOW: list[str] = [
+    "#EF4444",  # red
+    "#F97316",  # orange
+    "#EAB308",  # yellow
+    "#22C55E",  # green
+    "#14B8A6",  # teal
+    "#3B82F6",  # blue
+    "#8B5CF6",  # violet
+    "#EC4899",  # pink
+]
+
 SEND_TOOLS = {"ping", "traceroute", "dns", "ipscan", "speedtest", "apps", "security"}
 TEXT_SEND_TOOLS = frozenset({"apps", "ipscan"})
 # Kirim/Kembali digabung di baris kontrol (bukan footer)
-INLINE_ACTION_TOOLS = frozenset({"ping", "traceroute", "ipscan", "apps", "security"})
+INLINE_ACTION_TOOLS = frozenset(
+    {"ping", "traceroute", "ipscan", "apps", "security", "printer", "scp", "fixrdp"}
+)
 
 
 def _hide_window_close_button(window: Any) -> None:
@@ -221,12 +238,16 @@ class NetworkToolsApp(ctk.CTk):
         self._sysinfo_value_labels: dict[str, Any] = {}
         self._sysinfo_cache: dict[str, str] | None = None
         self._sysinfo_loaded = False
+        self._startup_overlay: Any | None = None
+        self._update_poll_job: str | None = None
+        self._update_dialog_open = False
         self._apps_list: list[dict[str, str]] = []
         self._security_items: list[Any] = []
         self._send_text_payload: str = ""
         self._dash_palette_cycle = random.sample(DASH_TILE_PALETTE, k=len(DASH_TILE_PALETTE))
         self._hover_tile_id: int | None = None
         self._geom_save_job: str | None = None
+        self._geom_lock = False
 
         self._header = ctk.CTkFrame(self, fg_color="transparent")
         self._sysinfo_strip = ctk.CTkFrame(self, fg_color="transparent")
@@ -254,13 +275,16 @@ class NetworkToolsApp(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self._on_app_close)
 
         self.show_dashboard()
+        self._show_startup_loading()
         # Pastikan window utama tidak terkunci dari sesi update sebelumnya
         try:
             self.attributes("-disabled", False)
         except Exception:
             pass
         self.after(200, self._maybe_resume_elevated_tool)
-        self.after(800, self._check_update_on_startup)
+        self.after(600, self._start_update_backend_poll)
+        # Failsafe: sembunyikan loading startup jika sysinfo lambat/gagal
+        self.after(20_000, self._hide_startup_loading)
         try:
             from modules.updater import cleanup_update_leftovers
 
@@ -269,7 +293,8 @@ class NetworkToolsApp(ctk.CTk):
             pass
 
     def _fit_window_to_screen(self) -> None:
-        """Ukuran awal dashboard; pakai posisi tersimpan bila masih di layar."""
+        """Pulihkan lokasi & ukuran terakhir; default hanya jika belum pernah disimpan."""
+        self._geom_lock = True
         try:
             self.update_idletasks()
             sw = int(self.winfo_screenwidth())
@@ -277,12 +302,10 @@ class NetworkToolsApp(ctk.CTk):
         except Exception:
             sw, sh = 1366, 768
 
-        win_w = min(1000, max(sw - 40, 720))
-        win_h = min(560, max(sh - 80, 460))
-        self._dash_min_w = min(720, win_w)
+        self._dash_min_w = 720
         self._dash_min_h = 460
-        self._tool_min_w = self._dash_min_w
-        self._tool_min_h = min(520, max(480, sh - 100))
+        self._tool_min_w = 720
+        self._tool_min_h = 460
         self._side_pad = 16
         self.minsize(self._dash_min_w, self._dash_min_h)
 
@@ -290,43 +313,44 @@ class NetworkToolsApp(ctk.CTk):
         try:
             saved_w = int(prefs.get("win_w") or 0)
             saved_h = int(prefs.get("win_h") or 0)
-            saved_x = int(prefs.get("win_x"))
-            saved_y = int(prefs.get("win_y"))
+            saved_x = int(prefs.get("win_x")) if prefs.get("win_x") is not None else -1
+            saved_y = int(prefs.get("win_y")) if prefs.get("win_y") is not None else -1
         except Exception:
             saved_w = saved_h = 0
             saved_x = saved_y = -1
 
         if saved_w >= 640 and saved_h >= 400:
-            win_w = min(max(saved_w, self._dash_min_w), sw)
-            win_h = min(max(saved_h, self._dash_min_h), sh)
-        self._dash_w = win_w
-
-        if saved_x >= 0 and saved_y >= 0 and saved_x < sw - 80 and saved_y < sh - 80:
-            x, y = saved_x, saved_y
+            win_w = min(max(saved_w, 640), sw)
+            win_h = min(max(saved_h, 400), sh)
+            x = saved_x if saved_x >= 0 else max((sw - win_w) // 2, 0)
+            y = saved_y if saved_y >= 0 else 24
+            # Pastikan masih terlihat di layar
+            x = max(-win_w + 120, min(x, sw - 80))
+            y = max(0, min(y, sh - 80))
         else:
+            win_w = min(1000, max(sw - 40, 720))
+            win_h = min(620, max(sh - 80, 480))
             x = max((sw - win_w) // 2, 0)
             y = 24
+
+        self._dash_w = win_w
         self.geometry(f"{win_w}x{win_h}+{x}+{y}")
+        # Re-apply setelah layout awal (hindari overwrite prefs oleh ukuran sementara)
+        self.after(50, lambda: self._apply_saved_geometry(win_w, win_h, x, y))
+        self.after(1200, self._unlock_geometry)
+
+    def _apply_saved_geometry(self, w: int, h: int, x: int, y: int) -> None:
+        try:
+            self.geometry(f"{w}x{h}+{x}+{y}")
+        except Exception:
+            pass
+
+    def _unlock_geometry(self) -> None:
+        self._geom_lock = False
 
     def _fit_dashboard_window(self) -> None:
-        """Set tinggi jendela pas untuk 3 baris menu (tanpa ruang kosong)."""
+        """Jangan paksa resize — hanya refresh wrap deskripsi tile."""
         try:
-            self.update_idletasks()
-            pref_row = 118
-            rows = 3
-            h = int(self._header.winfo_reqheight()) + 8
-            if self._sysinfo_strip.winfo_ismapped():
-                h += int(self._sysinfo_strip.winfo_reqheight())
-            h += rows * pref_row + 8
-            h += int(self._footer.winfo_reqheight() or 34)
-            h = max(h, 460)
-
-            sw = int(self.winfo_screenwidth())
-            w = int(getattr(self, "_dash_w", 0) or min(1000, max(sw - 40, 720)))
-            x = int(self.winfo_x())
-            y = max(int(self.winfo_y()), 0)
-            self.minsize(min(720, w), min(460, h))
-            self.geometry(f"{w}x{h}+{x}+{y}")
             self.after(30, self._refresh_tile_wrap)
         except Exception:
             pass
@@ -352,24 +376,36 @@ class NetworkToolsApp(ctk.CTk):
             pass
 
     def _schedule_save_geometry(self) -> None:
+        if getattr(self, "_geom_lock", False):
+            return
         if self._geom_save_job is not None:
             try:
                 self.after_cancel(self._geom_save_job)
             except Exception:
                 pass
-        self._geom_save_job = self.after(400, self._save_window_geometry)
+        self._geom_save_job = self.after(500, self._save_window_geometry)
 
     def _save_window_geometry(self) -> None:
         self._geom_save_job = None
+        if getattr(self, "_geom_lock", False):
+            return
         try:
             self.update_idletasks()
-            if bool(self.wm_state() == "iconic"):
+            state = str(self.wm_state())
+            if state in {"iconic", "withdrawn"}:
                 return
-            w = int(self.winfo_width())
-            h = int(self.winfo_height())
-            x = int(self.winfo_x())
-            y = int(self.winfo_y())
-            if w < 200 or h < 150:
+            # Pakai geometry string agar konsisten dengan restore
+            geo = self.geometry()  # e.g. 1000x620+120+40
+            m = re.match(r"^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$", geo)
+            if not m:
+                w = int(self.winfo_width())
+                h = int(self.winfo_height())
+                x = int(self.winfo_x())
+                y = int(self.winfo_y())
+            else:
+                w, h, x, y = (int(m.group(i)) for i in range(1, 5))
+            # Abaikan ukuran sementara saat init (sering < minsize)
+            if w < 640 or h < 400:
                 return
             self._dash_w = w
             save_prefs(
@@ -384,6 +420,14 @@ class NetworkToolsApp(ctk.CTk):
             pass
 
     def _on_app_close(self) -> None:
+        self._geom_lock = False
+        job = getattr(self, "_update_poll_job", None)
+        if job is not None:
+            try:
+                self.after_cancel(job)
+            except Exception:
+                pass
+            self._update_poll_job = None
         self._save_window_geometry()
         try:
             self.destroy()
@@ -460,27 +504,119 @@ class NetworkToolsApp(ctk.CTk):
             return
         if not is_admin():
             return
+        if key == "printer":
+            # Setelah UAC dari tombol Fix — buka menu lalu langsung jalankan fix
+            self._elevate_auto_fix_printer = True
+        elif key == "fixrdp":
+            self._elevate_auto_fix_rdp = True
         self.open_tool(key)
         # AUTO_RUN_TOOLS sudah dijalankan dari open_tool
 
-    def _check_update_on_startup(self) -> None:
-        """Cek update ke GitHub setiap kali aplikasi dijalankan."""
+    def _show_startup_loading(self) -> None:
+        """Overlay loading hingga bar info sistem terisi."""
+        if getattr(self, "_startup_overlay", None) is not None:
+            return
+        if self._sysinfo_loaded and self._sysinfo_cache:
+            return
+        ov = ctk.CTkFrame(self, fg_color=COLORS["bg"], corner_radius=0)
+        ov.place(relx=0, rely=0, relwidth=1, relheight=1)
+        box = ctk.CTkFrame(ov, fg_color="transparent")
+        box.place(relx=0.5, rely=0.45, anchor="center")
+        ctk.CTkLabel(
+            box,
+            text=t("app.brand"),
+            font=ctk.CTkFont(family="Segoe UI", size=22, weight="bold"),
+            text_color=COLORS["accent"],
+        ).pack()
+        ctk.CTkLabel(
+            box,
+            text=t("app.startup_loading"),
+            font=ctk.CTkFont(family="Segoe UI", size=13),
+            text_color=COLORS["muted"],
+        ).pack(pady=(10, 12))
+        bar = ctk.CTkProgressBar(
+            box,
+            width=280,
+            height=8,
+            progress_color=COLORS["accent"],
+            fg_color=COLORS["panel"],
+            mode="indeterminate",
+        )
+        bar.pack()
+        bar.start()
+        self._startup_overlay = ov
+        self._startup_loading_bar = bar
+
+    def _hide_startup_loading(self) -> None:
+        ov = getattr(self, "_startup_overlay", None)
+        if ov is None:
+            return
+        bar = getattr(self, "_startup_loading_bar", None)
+        try:
+            if bar is not None:
+                bar.stop()
+        except Exception:
+            pass
+        try:
+            ov.place_forget()
+            ov.destroy()
+        except Exception:
+            pass
+        self._startup_overlay = None
+        self._startup_loading_bar = None
+
+    def _lift_startup_loading(self) -> None:
+        ov = getattr(self, "_startup_overlay", None)
+        if ov is None:
+            return
+        try:
+            ov.lift()
+        except Exception:
+            pass
+
+    def _start_update_backend_poll(self) -> None:
+        """Cek update di background sekarang, lalu ulang tiap 1 menit."""
+        self._run_update_check_once()
+
+    def _run_update_check_once(self) -> None:
+        """Satu siklus cek update (silent); dijadwalkan ulang tiap 60 detik."""
         import threading
 
+        self._update_poll_job = None
+
         def worker() -> None:
+            info = None
             try:
                 from modules.updater import check_for_update
 
                 info = check_for_update(APP_VERSION)
             except Exception:
                 info = None
-            if info:
-                self.after(0, lambda: self._prompt_update(info))
+
+            def done() -> None:
+                if info is not None and not getattr(self, "_update_dialog_open", False):
+                    self._prompt_update(info)
+                try:
+                    self._update_poll_job = self.after(60_000, self._run_update_check_once)
+                except Exception:
+                    pass
+
+            try:
+                self.after(0, done)
+            except Exception:
+                pass
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _check_update_on_startup(self) -> None:
+        """Kompatibilitas: arahkan ke poll backend."""
+        self._start_update_backend_poll()
+
     def _prompt_update(self, info: Any) -> None:
         """Update wajib: dialog kustom, hanya tombol Update — tanpa update app tidak bisa dipakai."""
+        if getattr(self, "_update_dialog_open", False):
+            return
+        self._update_dialog_open = True
         import sys
         import tempfile
         import webbrowser
@@ -532,6 +668,7 @@ class NetworkToolsApp(ctk.CTk):
             import os
 
             state["accepted"] = True
+            self._update_dialog_open = False
             try:
                 dlg.grab_release()
             except Exception:
@@ -956,6 +1093,8 @@ class NetworkToolsApp(ctk.CTk):
             self._show_sysinfo_strip()
             self._apply_sysinfo_cache_to_labels()
             self._ensure_latency_poll()
+            if self._sysinfo_loaded:
+                self._hide_startup_loading()
             return
 
         for child in parent.winfo_children():
@@ -1140,6 +1279,7 @@ class NetworkToolsApp(ctk.CTk):
         if self._sysinfo_loaded:
             self._apply_sysinfo_cache_to_labels()
             self._ensure_latency_poll()
+            self._hide_startup_loading()
             return
 
         def worker() -> None:
@@ -1163,6 +1303,7 @@ class NetworkToolsApp(ctk.CTk):
                 self._sysinfo_loaded = True
                 self._apply_sysinfo(info)
                 self._ensure_latency_poll()
+                self._hide_startup_loading()
 
             self.after(0, apply)
 
@@ -1254,6 +1395,13 @@ class NetworkToolsApp(ctk.CTk):
                 pass
         self._runner_stop = None
         self._destroy_browser()
+        sess = getattr(self, "_scp_session", None)
+        if sess is not None:
+            try:
+                sess.disconnect()
+            except Exception:
+                pass
+            self._scp_session = None
 
     def show_dashboard(self) -> None:
         self._stop_runner()
@@ -1368,7 +1516,6 @@ class NetworkToolsApp(ctk.CTk):
 
             def _tile_enter(_event: Any = None, bg=tile_hover, t=tile) -> None:
                 t.configure(fg_color=bg)
-                self._play_tile_hover(id(t))
 
             def _tile_leave(_event: Any = None, bg=tile_bg, t=tile) -> None:
                 t.configure(fg_color=bg)
@@ -1404,13 +1551,15 @@ class NetworkToolsApp(ctk.CTk):
             self._action_bar.pack_forget()
         except Exception:
             pass
+        self._lift_startup_loading()
 
         try:
             self._header.pack_configure(padx=16, pady=(10, 2))
             self._content.pack_configure(fill="both", expand=True, padx=12, pady=4)
+            # Jangan ubah ukuran jendela saat buka menu
             self.minsize(
-                getattr(self, "_tool_min_w", 720),
-                getattr(self, "_tool_min_h", 480),
+                getattr(self, "_dash_min_w", 720),
+                getattr(self, "_dash_min_h", 460),
             )
         except Exception:
             pass
@@ -1435,12 +1584,36 @@ class NetworkToolsApp(ctk.CTk):
             self._open_ip_scanner_view()
             return
 
+        if key == "ping":
+            self._open_ping_cards_view()
+            return
+
+        if key == "traceroute":
+            self._open_traceroute_topo_view()
+            return
+
         if key == "apps":
             self._open_apps_list_view()
             return
 
         if key == "security":
             self._open_security_check_view()
+            return
+
+        if key == "printer":
+            auto_fix = bool(getattr(self, "_elevate_auto_fix_printer", False))
+            self._elevate_auto_fix_printer = False
+            self._open_printer_view(auto_fix=auto_fix)
+            return
+
+        if key == "scp":
+            self._open_scp_view()
+            return
+
+        if key == "fixrdp":
+            auto_fix = bool(getattr(self, "_elevate_auto_fix_rdp", False))
+            self._elevate_auto_fix_rdp = False
+            self._open_rdp_status_view(auto_fix=auto_fix)
             return
 
         top = ctk.CTkFrame(self._header, fg_color="transparent")
@@ -1497,9 +1670,6 @@ class NetworkToolsApp(ctk.CTk):
             # Langsung jalan setelah UI siap (tanpa tombol Jalankan)
             starters = {
                 "refresh": self._start_refresh,
-                "printer": self._start_printer,
-                "cache": self._start_cache,
-                "fixrdp": self._start_fix_rdp,
                 "anydesk": self._start_anydesk,
             }
             fn = starters.get(key)
@@ -1771,17 +1941,36 @@ class NetworkToolsApp(ctk.CTk):
             anchor="w",
         )
         status_lbl.pack(side="left", fill="x", expand=True)
+        # Urutan kanan→kiri: Kembali, Kirim, Cek Ulang (kuning sebelum Kirim)
+        ctk.CTkButton(
+            toolbar,
+            text=t("app.back"),
+            width=100,
+            height=32,
+            fg_color=COLORS["danger"],
+            hover_color=COLORS["danger_hover"],
+            command=self._cancel_to_dashboard,
+        ).pack(side="right", padx=(8, 0))
+        ctk.CTkButton(
+            toolbar,
+            text=t("app.send"),
+            width=100,
+            height=32,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+            command=self._send_screenshot,
+        ).pack(side="right", padx=(8, 0))
         btn_refresh = ctk.CTkButton(
             toolbar,
             text=t("app.recheck"),
             width=110,
             height=32,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_dim"],
-            text_color=COLORS["on_accent"],
+            fg_color=COLORS.get("warn", "#E6B422"),
+            hover_color=COLORS.get("warn_hover", "#C99A12"),
+            text_color=COLORS.get("on_warn", "#1A1400"),
         )
-        btn_refresh.pack(side="right")
-        self._pack_inline_send_back(toolbar, text_send=False, height=32, side="right")
+        btn_refresh.pack(side="right", padx=(8, 0))
 
         cards = ctk.CTkFrame(self._content, fg_color="transparent")
         cards.pack(fill="both", expand=True)
@@ -1894,6 +2083,1026 @@ class NetworkToolsApp(ctk.CTk):
 
         btn_refresh.configure(command=load)
         self.after(80, load)
+
+    def _open_printer_view(self, auto_fix: bool = False) -> None:
+        """Daftar driver printer + tombol Fix Printer / Refresh / Kembali."""
+        from tkinter import ttk
+
+        from modules.printer_info import PrinterDriversRunner
+
+        self.console = None
+
+        top = ctk.CTkFrame(self._header, fg_color="transparent")
+        top.pack(fill="x")
+        ctk.CTkLabel(
+            top,
+            text=t("tool.printer.title"),
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=24),
+            text_color=COLORS["text"],
+        ).pack(side="left")
+        self._build_sysinfo_bar(self._sysinfo_strip)
+
+        toolbar = ctk.CTkFrame(self._content, fg_color="transparent")
+        toolbar.pack(fill="x", pady=(0, 8))
+        status_lbl = ctk.CTkLabel(
+            toolbar,
+            text=t("printer.loading"),
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color=COLORS["muted"],
+            anchor="w",
+        )
+        status_lbl.pack(side="left", fill="x", expand=True)
+
+        # Kanan → kiri pack: Kembali, Refresh, Fix  =>  Fix | Refresh | Kembali
+        ctk.CTkButton(
+            toolbar,
+            text=t("app.back"),
+            width=100,
+            height=32,
+            fg_color=COLORS["danger"],
+            hover_color=COLORS["danger_hover"],
+            command=self._cancel_to_dashboard,
+        ).pack(side="right", padx=(8, 0))
+
+        btn_refresh = ctk.CTkButton(
+            toolbar,
+            text=t("app.refresh"),
+            width=100,
+            height=32,
+            fg_color=COLORS.get("warn", "#E6B422"),
+            hover_color=COLORS.get("warn_hover", "#C99A12"),
+            text_color=COLORS.get("on_warn", "#1A1400"),
+        )
+        btn_refresh.pack(side="right", padx=(8, 0))
+
+        btn_fix = ctk.CTkButton(
+            toolbar,
+            text=t("printer.fix"),
+            width=120,
+            height=32,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+        )
+        btn_fix.pack(side="right", padx=(8, 0))
+
+        list_wrap = ctk.CTkFrame(
+            self._content,
+            fg_color=COLORS["panel"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        list_wrap.pack(fill="both", expand=True)
+
+        table_host = tk.Frame(list_wrap, bg=COLORS["panel"], highlightthickness=0)
+        table_host.pack(fill="both", expand=True, padx=12, pady=12)
+
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+        style.configure(
+            "Printer.Treeview",
+            background=COLORS["bg"],
+            foreground=COLORS["text"],
+            fieldbackground=COLORS["bg"],
+            borderwidth=0,
+            rowheight=30,
+            font=("Segoe UI", 11),
+        )
+        style.configure(
+            "Printer.Treeview.Heading",
+            background=COLORS["panel"],
+            foreground=COLORS["muted"],
+            borderwidth=0,
+            relief="flat",
+            font=("Segoe UI Semibold", 10),
+        )
+        style.map(
+            "Printer.Treeview",
+            background=[("selected", COLORS["accent"])],
+            foreground=[("selected", COLORS["on_accent"])],
+        )
+
+        cols = ("name", "manufacturer", "environment", "version")
+        tree = ttk.Treeview(
+            table_host,
+            columns=cols,
+            show="headings",
+            style="Printer.Treeview",
+            selectmode="browse",
+        )
+        tree.heading("name", text=t("printer.col.name"), anchor="w")
+        tree.heading("manufacturer", text=t("printer.col.mfr"), anchor="w")
+        tree.heading("environment", text=t("printer.col.env"), anchor="w")
+        tree.heading("version", text=t("printer.col.ver"), anchor="w")
+        tree.column("name", width=280, minwidth=140, anchor="w", stretch=True)
+        tree.column("manufacturer", width=160, minwidth=100, anchor="w", stretch=True)
+        tree.column("environment", width=140, minwidth=90, anchor="w", stretch=False)
+        tree.column("version", width=70, minwidth=50, anchor="w", stretch=False)
+
+        vsb = ttk.Scrollbar(table_host, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        table_host.grid_rowconfigure(0, weight=1)
+        table_host.grid_columnconfigure(0, weight=1)
+        tree.tag_configure("odd", background=COLORS["bg"])
+        tree.tag_configure("even", background=COLORS["panel"])
+
+        log_host = ctk.CTkFrame(
+            self._content, fg_color=COLORS["console_bg"], height=130, corner_radius=8
+        )
+        log_host.pack(fill="x", pady=(8, 0))
+        log_host.pack_propagate(False)
+        self.console = ConsoleView(log_host)
+        self.console.pack(fill="both", expand=True, padx=2, pady=2)
+
+        def _fill(rows: list[dict[str, str]]) -> None:
+            tree.delete(*tree.get_children())
+            if not rows:
+                status_lbl.configure(text=t("printer.empty"))
+                return
+            status_lbl.configure(text=t("printer.count", n=len(rows)))
+            for idx, row in enumerate(rows):
+                tag = "even" if idx % 2 == 0 else "odd"
+                tree.insert(
+                    "",
+                    "end",
+                    values=(
+                        row.get("name", "—"),
+                        row.get("manufacturer", "—"),
+                        row.get("environment", "—"),
+                        row.get("version", "—"),
+                    ),
+                    tags=(tag,),
+                )
+
+        def on_drivers(rows: list[dict[str, str]]) -> None:
+            self.after(0, lambda: _fill(rows))
+
+        def on_error(msg: str) -> None:
+            def ui() -> None:
+                status_lbl.configure(text=t("printer.fail"))
+                tree.delete(*tree.get_children())
+                self.log(msg)
+
+            self.after(0, ui)
+
+        def load() -> None:
+            status_lbl.configure(text=t("printer.loading"))
+            tree.delete(*tree.get_children())
+            PrinterDriversRunner(on_drivers=on_drivers, on_error=on_error).start()
+
+        def run_fix() -> None:
+            if not self._ensure_admin_for("printer"):
+                return
+            self._stop_runner()
+            if self.console:
+                self.console.clear()
+            status_lbl.configure(text=t("printer.fixing"))
+            FixPrinterRunner(
+                on_line=self.log,
+                on_done=lambda: self._notify_tool_done("done.printer"),
+            ).start()
+
+        btn_refresh.configure(command=load)
+        btn_fix.configure(command=run_fix)
+        self.after(80, load)
+        if auto_fix:
+            # Langsung Fix setelah UAC (tanpa klik ulang)
+            self.after(250, run_fix)
+
+    def _open_scp_view(self) -> None:
+        """SFTP/SSH explorer: form koneksi + file manager + perintah remote."""
+        from modules.scp_panel import ScpPanel
+
+        self.console = None
+        self._hide_sysinfo_strip()
+        ScpPanel(
+            self,
+            self._header,
+            self._content,
+            COLORS,
+            on_back=self._cancel_to_dashboard,
+        )
+
+    def _open_rdp_status_view(self, auto_fix: bool = False) -> None:
+        """Kartu status RDP Server-App1..App8 + tombol Fix RDP."""
+        from modules.rdp_check import MultiHostRdpRunner
+
+        self.console = None
+        self._rdp_card_widgets: dict[str, dict[str, Any]] = {}
+
+        top = ctk.CTkFrame(self._header, fg_color="transparent")
+        top.pack(fill="x")
+        ctk.CTkLabel(
+            top,
+            text=t("tool.fixrdp.title"),
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=22),
+            text_color=COLORS["text"],
+        ).pack(side="left")
+        self._build_sysinfo_bar(self._sysinfo_strip)
+
+        toolbar = ctk.CTkFrame(self._content, fg_color="transparent")
+        toolbar.pack(fill="x", pady=(0, 6))
+        status_lbl = ctk.CTkLabel(
+            toolbar,
+            text=t("rdp.checking"),
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=COLORS["muted"],
+            anchor="w",
+        )
+        status_lbl.pack(side="left", fill="x", expand=True)
+
+        # Kanan → kiri: Kembali, Refresh, Fix RDP
+        ctk.CTkButton(
+            toolbar,
+            text=t("app.back"),
+            width=100,
+            height=32,
+            fg_color=COLORS["danger"],
+            hover_color=COLORS["danger_hover"],
+            command=self._cancel_to_dashboard,
+        ).pack(side="right", padx=(8, 0))
+
+        btn_refresh = ctk.CTkButton(
+            toolbar,
+            text=t("app.refresh"),
+            width=100,
+            height=32,
+            fg_color=COLORS.get("warn", "#E6B422"),
+            hover_color=COLORS.get("warn_hover", "#C99A12"),
+            text_color=COLORS.get("on_warn", "#1A1400"),
+        )
+        btn_refresh.pack(side="right", padx=(8, 0))
+
+        btn_fix = ctk.CTkButton(
+            toolbar,
+            text=t("rdp.fix"),
+            width=110,
+            height=32,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+        )
+        btn_fix.pack(side="right", padx=(8, 0))
+
+        grid = ctk.CTkScrollableFrame(self._content, fg_color="transparent")
+        grid.pack(fill="both", expand=True)
+        cols = 4
+        for i in range(cols):
+            grid.grid_columnconfigure(i, weight=1, uniform="rdp_cards")
+
+        card_bg = COLORS["panel"]
+        card_border = COLORS["border"]
+        idle_dot = "#9CA3AF"
+        online_dot = COLORS.get("ok", "#12B76A")
+        offline_dot = COLORS.get("danger", "#C42B1C")
+        text_fg = COLORS["text"]
+        muted_fg = COLORS["muted"]
+
+        app_hosts = [
+            h
+            for h in HOSTS
+            if str(h.get("name") or "").lower().startswith("server-app")
+        ]
+        # Urut App1..App8 berdasarkan angka jika ada
+        def _app_key(h: dict[str, str]) -> int:
+            name = str(h.get("name") or "")
+            digits = "".join(ch for ch in name if ch.isdigit())
+            return int(digits) if digits else 999
+
+        app_hosts = sorted(app_hosts, key=_app_key)
+
+        targets: list[tuple[str, str, str]] = []
+        for idx, host in enumerate(app_hosts):
+            name = str(host.get("name") or f"Server-App{idx + 1}")
+            raw_ip = str(host.get("ip") or "")
+            disp_name, ip = resolve_target_ip(name, raw_ip)
+            host_id = f"{idx}:{disp_name}"
+            ip_show = ip or raw_ip or "—"
+            if ip:
+                targets.append((host_id, disp_name, ip))
+
+            r, c = divmod(idx, cols)
+            card = ctk.CTkFrame(
+                grid,
+                fg_color=card_bg,
+                corner_radius=10,
+                border_width=1,
+                border_color=card_border,
+                height=86,
+            )
+            card.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
+            card.grid_propagate(False)
+            inner = ctk.CTkFrame(card, fg_color="transparent")
+            inner.pack(fill="both", expand=True, padx=10, pady=8)
+
+            head = ctk.CTkFrame(inner, fg_color="transparent")
+            head.pack(fill="x")
+            ctk.CTkLabel(
+                head,
+                text="🖥",
+                font=ctk.CTkFont(size=14),
+                text_color=COLORS["accent"],
+                width=22,
+            ).pack(side="left")
+            ctk.CTkLabel(
+                head,
+                text=disp_name,
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=12),
+                text_color=text_fg,
+                anchor="w",
+            ).pack(side="left", fill="x", expand=True, padx=(4, 6))
+            dot = ctk.CTkFrame(
+                head,
+                width=14,
+                height=14,
+                corner_radius=7,
+                fg_color=offline_dot if not ip else idle_dot,
+            )
+            dot.pack(side="right")
+            dot.pack_propagate(False)
+
+            ctk.CTkLabel(
+                inner,
+                text=ip_show,
+                font=ctk.CTkFont(family="Consolas", size=11),
+                text_color=muted_fg,
+                anchor="w",
+            ).pack(anchor="w", fill="x", pady=(2, 0))
+            st_lbl = ctk.CTkLabel(
+                inner,
+                text=t("rdp.wait") if ip else "IP tidak valid",
+                font=ctk.CTkFont(family="Segoe UI", size=10),
+                text_color=muted_fg if ip else offline_dot,
+                anchor="w",
+            )
+            st_lbl.pack(anchor="w", fill="x", pady=(2, 0))
+
+            self._rdp_card_widgets[host_id] = {
+                "status": st_lbl,
+                "dot": dot,
+                "ok": None,
+            }
+
+        log_host = ctk.CTkFrame(
+            self._content, fg_color=COLORS["console_bg"], height=130, corner_radius=8
+        )
+        log_host.pack(fill="x", pady=(8, 0))
+        log_host.pack_propagate(False)
+        self.console = ConsoleView(log_host)
+        self.console.pack(fill="both", expand=True, padx=2, pady=2)
+
+        online_n = 0
+        offline_n = 0
+        runner_holder: dict[str, Any] = {"runner": None}
+
+        def _apply_status(host_id: str, ok: bool, status: str) -> None:
+            nonlocal online_n, offline_n
+            w = self._rdp_card_widgets.get(host_id)
+            if not w:
+                return
+            prev = w.get("ok")
+            w["ok"] = ok
+            w["status"].configure(
+                text=status,
+                text_color=online_dot if ok else offline_dot,
+            )
+            w["dot"].configure(fg_color=online_dot if ok else offline_dot)
+            if prev is True:
+                online_n = max(0, online_n - 1)
+            elif prev is False:
+                offline_n = max(0, offline_n - 1)
+            if ok:
+                online_n += 1
+            else:
+                offline_n += 1
+            status_lbl.configure(
+                text=t(
+                    "rdp.summary",
+                    ok=online_n,
+                    bad=offline_n,
+                    total=len(self._rdp_card_widgets),
+                )
+            )
+
+        def on_status(host_id: str, ok: bool, status: str) -> None:
+            self.after(
+                0,
+                lambda hid=host_id, o=ok, st=status: _apply_status(hid, o, st),
+            )
+
+        def start_checks() -> None:
+            nonlocal online_n, offline_n
+            old = runner_holder.get("runner")
+            if old is not None:
+                try:
+                    old.stop()
+                except Exception:
+                    pass
+            online_n = 0
+            offline_n = 0
+            for w in self._rdp_card_widgets.values():
+                w["ok"] = None
+                w["dot"].configure(fg_color=idle_dot)
+                w["status"].configure(text=t("rdp.wait"), text_color=muted_fg)
+            if not targets:
+                status_lbl.configure(text=t("rdp.no_hosts"))
+                return
+            status_lbl.configure(text=t("rdp.checking"))
+            runner = MultiHostRdpRunner(targets, on_status=on_status)
+            runner_holder["runner"] = runner
+            self.set_runner_stop(runner.stop)
+            runner.start()
+
+        def run_fix() -> None:
+            if not self._ensure_admin_for("fixrdp"):
+                return
+            if self.console:
+                self.console.clear()
+            status_lbl.configure(text=t("rdp.fixing"))
+            FixRdpRunner(
+                on_line=self.log,
+                on_done=lambda: self._notify_tool_done("done.fixrdp"),
+            ).start()
+
+        btn_refresh.configure(command=start_checks)
+        btn_fix.configure(command=run_fix)
+        self.after(80, start_checks)
+        if auto_fix:
+            self.after(250, run_fix)
+
+    def _ping_host_icon(self, name: str) -> str:
+        low = (name or "").lower()
+        if "internet" in low:
+            return "🌐"
+        if "gateway" in low:
+            return "📡"
+        if "vpn" in low:
+            return "🔒"
+        if "db" in low:
+            return "🗄"
+        if "app" in low:
+            return "🖥"
+        return "●"
+
+    def _open_ping_cards_view(self) -> None:
+        """Ping semua host di daftar — kartu compact + bulatan status hijau/merah."""
+        self.console = None
+        self._ping_card_widgets: dict[str, dict[str, Any]] = {}
+
+        top = ctk.CTkFrame(self._header, fg_color="transparent")
+        top.pack(fill="x")
+        ctk.CTkLabel(
+            top,
+            text=t("tool.ping.title"),
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=22),
+            text_color=COLORS["text"],
+        ).pack(side="left")
+        self._build_sysinfo_bar(self._sysinfo_strip)
+
+        toolbar = ctk.CTkFrame(self._content, fg_color="transparent")
+        toolbar.pack(fill="x", pady=(0, 6))
+        status_lbl = ctk.CTkLabel(
+            toolbar,
+            text="Memulai ping ke semua host…",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=COLORS["muted"],
+            anchor="w",
+        )
+        status_lbl.pack(side="left", fill="x", expand=True)
+        self._pack_inline_send_back(toolbar, text_send=False, height=30, side="right")
+
+        grid = ctk.CTkScrollableFrame(self._content, fg_color="transparent")
+        grid.pack(fill="both", expand=True)
+        cols = 4
+        for i in range(cols):
+            grid.grid_columnconfigure(i, weight=1, uniform="ping_cards")
+
+        card_bg = COLORS["panel"]
+        card_border = COLORS["border"]
+        idle_dot = "#9CA3AF"
+        online_dot = COLORS.get("ok", "#12B76A")
+        offline_dot = COLORS.get("danger", "#C42B1C")
+        text_fg = COLORS["text"]
+        muted_fg = COLORS["muted"]
+
+        targets: list[tuple[str, str, str]] = []
+        for idx, host in enumerate(HOSTS):
+            name = str(host.get("name") or f"Host {idx + 1}")
+            raw_ip = str(host.get("ip") or "")
+            disp_name, ip = resolve_target_ip(name, raw_ip)
+            host_id = f"{idx}:{disp_name}"
+            ip_show = ip or ("—" if raw_ip == "auto" else raw_ip)
+            if ip:
+                targets.append((host_id, disp_name, ip))
+
+            r, c = divmod(idx, cols)
+            card = ctk.CTkFrame(
+                grid,
+                fg_color=card_bg,
+                corner_radius=10,
+                border_width=1,
+                border_color=card_border,
+                height=86,
+            )
+            card.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
+            card.grid_propagate(False)
+            inner = ctk.CTkFrame(card, fg_color="transparent")
+            inner.pack(fill="both", expand=True, padx=10, pady=8)
+
+            head = ctk.CTkFrame(inner, fg_color="transparent")
+            head.pack(fill="x")
+
+            icon_lbl = ctk.CTkLabel(
+                head,
+                text=self._ping_host_icon(disp_name),
+                font=ctk.CTkFont(size=14),
+                text_color=COLORS["accent"],
+                width=22,
+            )
+            icon_lbl.pack(side="left")
+
+            name_lbl = ctk.CTkLabel(
+                head,
+                text=disp_name,
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=12),
+                text_color=text_fg,
+                anchor="w",
+            )
+            name_lbl.pack(side="left", fill="x", expand=True, padx=(4, 6))
+
+            # Bulatan status (abu = menunggu, hijau = online, merah = RTO)
+            dot = ctk.CTkFrame(
+                head,
+                width=14,
+                height=14,
+                corner_radius=7,
+                fg_color=offline_dot if not ip else idle_dot,
+            )
+            dot.pack(side="right")
+            dot.pack_propagate(False)
+
+            ip_lbl = ctk.CTkLabel(
+                inner,
+                text=ip_show,
+                font=ctk.CTkFont(family="Consolas", size=11),
+                text_color=muted_fg,
+                anchor="w",
+            )
+            ip_lbl.pack(anchor="w", fill="x", pady=(2, 0))
+
+            st_lbl = ctk.CTkLabel(
+                inner,
+                text="Menunggu…" if ip else "Gateway tidak terdeteksi",
+                font=ctk.CTkFont(family="Segoe UI", size=10),
+                text_color=muted_fg if ip else offline_dot,
+                anchor="w",
+            )
+            st_lbl.pack(anchor="w", fill="x", pady=(2, 0))
+
+            self._ping_card_widgets[host_id] = {
+                "card": card,
+                "icon": icon_lbl,
+                "name": name_lbl,
+                "ip": ip_lbl,
+                "status": st_lbl,
+                "dot": dot,
+                "ip_value": ip_show,
+            }
+
+        online_n = 0
+        offline_n = 0
+
+        def _apply_status(host_id: str, ok: bool, status: str) -> None:
+            nonlocal online_n, offline_n
+            w = self._ping_card_widgets.get(host_id)
+            if not w:
+                return
+            prev = w.get("ok")
+            w["ok"] = ok
+            w["status"].configure(
+                text=status,
+                text_color=online_dot if ok else offline_dot,
+            )
+            w["dot"].configure(fg_color=online_dot if ok else offline_dot)
+
+            if prev is True:
+                online_n = max(0, online_n - 1)
+            elif prev is False:
+                offline_n = max(0, offline_n - 1)
+            if ok:
+                online_n += 1
+            else:
+                offline_n += 1
+            status_lbl.configure(
+                text=f"Online: {online_n}  ·  Timeout: {offline_n}  ·  Total: {len(self._ping_card_widgets)}"
+            )
+
+        def on_status(host_id: str, ok: bool, status: str) -> None:
+            self.after(
+                0,
+                lambda hid=host_id, o=ok, st=status: _apply_status(hid, o, st),
+            )
+
+        if not targets:
+            status_lbl.configure(text="Tidak ada host yang bisa di-ping.")
+            return
+
+        runner = MultiHostPingRunner(targets, on_status=on_status)
+        self.set_runner_stop(runner.stop)
+        runner.start()
+        status_lbl.configure(text=f"Ping aktif ke {len(targets)} host…")
+
+    def _open_traceroute_topo_view(self) -> None:
+        """Traceroute ke 8.8.8.8 → topologi menyamping (wrap), icon per jenis perangkat."""
+        import threading
+
+        from modules.system_info import hostname as get_hostname, primary_ipv4
+        from modules.trace_topology import (
+            TracerouteTopologyRunner,
+            classify_hop,
+            resolve_and_classify,
+        )
+
+        self.console = None
+        target = "8.8.8.8"
+        # hop -> {ip, rtt, hostname, kind, icon, kind_label}
+        hops: dict[int, dict[str, Any]] = {}
+
+        top = ctk.CTkFrame(self._header, fg_color="transparent")
+        top.pack(fill="x")
+        ctk.CTkLabel(
+            top,
+            text=t("tool.traceroute.title"),
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=22),
+            text_color=COLORS["text"],
+        ).pack(side="left")
+        self._build_sysinfo_bar(self._sysinfo_strip)
+
+        toolbar = ctk.CTkFrame(self._content, fg_color="transparent")
+        toolbar.pack(fill="x", pady=(0, 6))
+        status_lbl = ctk.CTkLabel(
+            toolbar,
+            text=f"Tracing route ke {target}…",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=COLORS["muted"],
+            anchor="w",
+        )
+        status_lbl.pack(side="left", fill="x", expand=True)
+
+        def restart() -> None:
+            self._stop_runner()
+            hops.clear()
+            status_lbl.configure(text=f"Tracing route ke {target}…")
+            set_trace_loading(True)
+            _draw()
+            _start()
+
+        btn_refresh = ctk.CTkButton(
+            toolbar,
+            text=t("app.refresh"),
+            width=90,
+            height=30,
+            fg_color=COLORS.get("warn", "#E6B422"),
+            hover_color=COLORS.get("warn_hover", "#C99A12"),
+            text_color=COLORS.get("on_warn", "#1A1400"),
+            command=restart,
+        )
+        btn_refresh.pack(side="right", padx=(8, 0))
+        self._pack_inline_send_back(toolbar, text_send=False, height=30, side="right")
+
+        # Shell + canvas border warna-warni mengelilingi area topologi
+        shell = ctk.CTkFrame(self._content, fg_color="transparent")
+        shell.pack(fill="both", expand=True)
+        border_cv = tk.Canvas(
+            shell,
+            bg=COLORS["bg"],
+            highlightthickness=0,
+            bd=0,
+        )
+        border_cv.pack(fill="both", expand=True)
+        inner = ctk.CTkFrame(border_cv, fg_color=COLORS["panel"], corner_radius=0)
+        inner_win = border_cv.create_window(4, 4, window=inner, anchor="nw")
+
+        # Overlay loading selama traceroute berjalan
+        trace_load = ctk.CTkFrame(shell, fg_color=COLORS["panel"], corner_radius=10)
+        trace_load_inner = ctk.CTkFrame(trace_load, fg_color="transparent")
+        trace_load_inner.place(relx=0.5, rely=0.45, anchor="center")
+        ctk.CTkLabel(
+            trace_load_inner,
+            text=t("trace.loading"),
+            font=ctk.CTkFont(family="Segoe UI", size=14),
+            text_color=COLORS["text"],
+        ).pack()
+        trace_bar = ctk.CTkProgressBar(
+            trace_load_inner,
+            width=260,
+            height=8,
+            progress_color=COLORS["accent"],
+            fg_color=COLORS["bg"],
+            mode="indeterminate",
+        )
+        trace_bar.pack(pady=(12, 0))
+
+        def set_trace_loading(active: bool) -> None:
+            try:
+                if active:
+                    btn_refresh.configure(state="disabled")
+                    trace_load.place(relx=0, rely=0, relwidth=1, relheight=1)
+                    trace_bar.start()
+                    trace_load.lift()
+                else:
+                    trace_bar.stop()
+                    trace_load.place_forget()
+                    btn_refresh.configure(state="normal")
+            except Exception:
+                pass
+
+        set_trace_loading(True)
+
+        def _paint_rainbow_border(_event: Any = None) -> None:
+            bw = 4
+            pad = bw + 1
+            w = max(int(border_cv.winfo_width()), 40)
+            h = max(int(border_cv.winfo_height()), 40)
+            border_cv.coords(inner_win, pad, pad)
+            border_cv.itemconfigure(inner_win, width=max(w - 2 * pad, 20), height=max(h - 2 * pad, 20))
+            border_cv.delete("rb")
+            colors = TOPO_RAINBOW
+            n = len(colors)
+            # Perimeter clockwise: top → right → bottom → left
+            perim = [
+                ("h", pad, pad, w - pad, pad),  # top L→R
+                ("v", w - pad, pad, w - pad, h - pad),  # right T→B
+                ("h", w - pad, h - pad, pad, h - pad),  # bottom R→L
+                ("v", pad, h - pad, pad, pad),  # left B→T
+            ]
+            seg_i = 0
+            for orient, x1, y1, x2, y2 in perim:
+                length = abs((x2 - x1) if orient == "h" else (y2 - y1))
+                parts = max(int(length / 28), n)
+                for p in range(parts):
+                    t0 = p / parts
+                    t1 = (p + 1) / parts
+                    if orient == "h":
+                        xa = x1 + (x2 - x1) * t0
+                        xb = x1 + (x2 - x1) * t1
+                        ya = yb = y1
+                    else:
+                        ya = y1 + (y2 - y1) * t0
+                        yb = y1 + (y2 - y1) * t1
+                        xa = xb = x1
+                    border_cv.create_line(
+                        xa,
+                        ya,
+                        xb,
+                        yb,
+                        fill=colors[seg_i % n],
+                        width=bw,
+                        capstyle=tk.ROUND,
+                        tags="rb",
+                    )
+                    seg_i += 1
+
+        border_cv.bind("<Configure>", _paint_rainbow_border)
+
+        canvas = tk.Canvas(
+            inner,
+            bg=COLORS["bg"],
+            highlightthickness=0,
+            bd=0,
+        )
+        vsb = ctk.CTkScrollbar(inner, orientation="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y", padx=(0, 4), pady=4)
+        canvas.pack(side="left", fill="both", expand=True, padx=4, pady=4)
+
+        local_name = get_hostname()
+        local_ip = primary_ipv4() or "127.0.0.1"
+
+        def _draw(_event: Any = None) -> None:
+            canvas.delete("all")
+            cw = max(int(canvas.winfo_width()), 360)
+            node_w, node_h = 148, 78
+            gap_x, gap_y = 28, 36
+            pad_x, pad_y = 16, 18
+            max_right = cw - pad_x
+            palette = TOPO_RAINBOW
+            n_colors = len(palette)
+
+            nodes: list[dict[str, Any]] = []
+            nodes.append(
+                {
+                    "title": local_name,
+                    "sub": local_ip,
+                    "icon": "💻",
+                    "kind": "PC",
+                    "outline": palette[0],
+                    "ok": True,
+                }
+            )
+            for n in sorted(hops.keys()):
+                h = hops[n]
+                ip = h.get("ip")
+                ok = bool(ip)
+                icon = h.get("icon") or ("❓" if not ok else "📡")
+                kind = h.get("kind_label") or ("Timeout" if not ok else "Host")
+                if ip:
+                    host = h.get("hostname")
+                    sub = f"{ip}"
+                    if host:
+                        short = host if len(host) <= 28 else host[:25] + "…"
+                        sub = f"{ip}\n{short}"
+                else:
+                    sub = h.get("rtt") or "Request timed out"
+                # Timeout tetap merah; hop OK ambil warna pelangi berurutan
+                outline = (
+                    COLORS.get("danger", "#C42B1C")
+                    if not ok
+                    else palette[(n) % n_colors]
+                )
+                nodes.append(
+                    {
+                        "title": f"Hop {n} · {kind}",
+                        "sub": sub,
+                        "icon": icon,
+                        "kind": kind,
+                        "outline": outline,
+                        "ok": ok,
+                    }
+                )
+
+            if not hops or (hops[max(hops.keys())].get("ip") != target):
+                _k, icon_t, lab_t = classify_hop(
+                    ip=target, hop_num=99, is_target=True
+                )
+                nodes.append(
+                    {
+                        "title": f"Target · {lab_t}",
+                        "sub": target,
+                        "icon": icon_t,
+                        "kind": lab_t,
+                        "outline": palette[-1],
+                        "ok": True,
+                    }
+                )
+
+            # Layout: kiri → kanan, wrap ke baris bawah saat mentok
+            positions: list[tuple[float, float, dict[str, Any]]] = []
+            x = float(pad_x)
+            y = float(pad_y)
+            for node in nodes:
+                if x + node_w > max_right and x > pad_x:
+                    x = float(pad_x)
+                    y += node_h + gap_y
+                cx = x + node_w / 2
+                cy = y + node_h / 2
+                positions.append((cx, cy, node))
+                x += node_w + gap_x
+
+            # Garis antar node — warna berbeda per segmen
+            for i in range(len(positions) - 1):
+                x1, y1, _ = positions[i]
+                x2, y2, _ = positions[i + 1]
+                line_color = palette[i % n_colors]
+                same_row = abs(y1 - y2) < 1.0
+                if same_row:
+                    canvas.create_line(
+                        x1 + node_w / 2,
+                        y1,
+                        x2 - node_w / 2,
+                        y2,
+                        fill=line_color,
+                        width=2,
+                        arrow=tk.LAST,
+                        arrowshape=(8, 10, 4),
+                    )
+                else:
+                    mid_y = (y1 + y2) / 2
+                    canvas.create_line(
+                        x1,
+                        y1 + node_h / 2,
+                        x1,
+                        mid_y,
+                        x2,
+                        mid_y,
+                        x2,
+                        y2 - node_h / 2,
+                        fill=line_color,
+                        width=2,
+                        arrow=tk.LAST,
+                        arrowshape=(8, 10, 4),
+                        smooth=False,
+                    )
+
+            for cx, cy, node in positions:
+                x1, y1 = cx - node_w / 2, cy - node_h / 2
+                x2, y2 = cx + node_w / 2, cy + node_h / 2
+                canvas.create_rectangle(
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    fill=COLORS["panel"],
+                    outline=node["outline"],
+                    width=3,
+                )
+                canvas.create_text(
+                    cx,
+                    cy - 22,
+                    text=node["icon"],
+                    font=("Segoe UI Emoji", 14),
+                )
+                canvas.create_text(
+                    cx,
+                    cy - 2,
+                    text=node["title"],
+                    fill=COLORS["text"],
+                    font=("Segoe UI Semibold", 9),
+                    width=node_w - 10,
+                )
+                canvas.create_text(
+                    cx,
+                    cy + 20,
+                    text=node["sub"],
+                    fill=COLORS["muted"],
+                    font=("Consolas", 8),
+                    width=node_w - 10,
+                    justify=tk.CENTER,
+                )
+
+            total_h = y + node_h + pad_y + 12
+            canvas.configure(scrollregion=(0, 0, cw, max(total_h, 200)))
+
+        def _enrich_hop(hop: int, ip: str) -> None:
+            host, kind, icon, kind_label = resolve_and_classify(
+                ip, hop, is_target=(ip == target)
+            )
+
+            def ui() -> None:
+                if hop not in hops:
+                    return
+                hops[hop]["hostname"] = host
+                hops[hop]["kind"] = kind
+                hops[hop]["icon"] = icon
+                hops[hop]["kind_label"] = kind_label
+                _draw()
+
+            self.after(0, ui)
+
+        def on_hop(hop: int, ip: str | None, label: str) -> None:
+            def ui() -> None:
+                if ip:
+                    kind, icon, kind_label = classify_hop(
+                        ip=ip, hop_num=hop, is_target=(ip == target)
+                    )
+                else:
+                    kind, icon, kind_label = classify_hop(ip=None, hop_num=hop)
+                hops[hop] = {
+                    "ip": ip,
+                    "rtt": label,
+                    "hostname": None,
+                    "kind": kind,
+                    "icon": icon,
+                    "kind_label": kind_label,
+                }
+                status_lbl.configure(
+                    text=f"Hop {hop}: {ip or 'timeout'} ({kind_label}) — tracing {target}…"
+                )
+                _draw()
+                if ip:
+                    threading.Thread(
+                        target=_enrich_hop, args=(hop, ip), daemon=True
+                    ).start()
+
+            self.after(0, ui)
+
+        def on_done() -> None:
+            def ui() -> None:
+                n = len(hops)
+                status_lbl.configure(text=f"Selesai — {n} hop menuju {target}")
+                set_trace_loading(False)
+                _draw()
+
+            self.after(0, ui)
+
+        def _start() -> None:
+            runner = TracerouteTopologyRunner(
+                target,
+                on_hop=on_hop,
+                on_done=on_done,
+            )
+            self.set_runner_stop(runner.stop)
+            runner.start()
+
+        canvas.bind("<Configure>", lambda _e: _draw())
+        self.after(80, _draw)
+        self.after(120, _start)
 
     def _open_ip_scanner_view(self) -> None:
         """UI khusus IP Scanner — kartu status + daftar host (bukan console)."""
@@ -3015,28 +4224,28 @@ class NetworkToolsApp(ctk.CTk):
         if not self.console:
             return
         hints = {
-            "ping": "Pilih host dari daftar, lalu Mulai. Tekan Kembali untuk ke dashboard.",
-            "traceroute": "Pilih host dari dropdown, lalu Mulai. Perintah: tracert -d <alamat>",
-            "dns": "DNS leak test di browser bawaan aplikasi.",
-            "ipscan": "Scan host hidup di subnet PC ini.",
-            "speedtest": "Speedtest berjalan di browser bawaan aplikasi.",
+            "ping": "Kartu status live ping ke semua host. Tekan Kembali untuk ke dashboard.",
+            "traceroute": "Otomatis tracert ke 8.8.8.8 dan gambar topologi jalur. Refresh untuk ulang.",
+            "dns": "Cek kebocoran DNS di browser bawaan aplikasi.",
+            "ipscan": "Temukan host hidup di subnet PC ini. Klik Mulai Scan.",
+            "speedtest": "Uji kecepatan internet di browser bawaan aplikasi.",
             "refresh": (
                 "Menjalankan otomatis: disable/enable adapter & renew DHCP.\n"
                 "Fitur ini meminta Run as Administrator (UAC)."
             ),
             "printer": (
-                "Menjalankan otomatis: clear spooler printer\n"
-                "(net stop spooler → hapus antrian → net start spooler).\n"
+                "Menampilkan driver printer terpasang.\n"
+                "Fix Printer: clear spooler (net stop → hapus antrian → net start).\n"
                 "Meminta Run as Administrator (UAC)."
             ),
             "fixrdp": (
-                "Menjalankan otomatis: reset RDP client (ConnectionClient,\n"
-                "folder RDP6, registry Terminal Server Client, kredensial TERMSRV).\n"
-                "Meminta Run as Administrator (UAC)."
+                "Kartu status RDP Server-App1..App8 (port 3389).\n"
+                "Tombol Fix RDP: reset client + Clear Cache (butuh Admin)."
             ),
-            "cache": (
-                "Menjalankan otomatis: hapus TEMP & folder RDP6.\n"
-                "Fitur ini meminta Run as Administrator (UAC)."
+            "scp": (
+                "Isi Host/IP, Port, Username, Password lalu Hubungkan.\n"
+                "Explorer SFTP: naik/kembali folder, new folder/file, upload/download,\n"
+                "klik kanan rename/hapus/salin path. Perintah SSH di kolom bawah."
             ),
             "anydesk": (
                 "Menjalankan otomatis: tutup AnyDesk lama, buka baru,\n"
@@ -3220,17 +4429,6 @@ class NetworkToolsApp(ctk.CTk):
         FixPrinterRunner(
             on_line=self.log,
             on_done=lambda: self._notify_tool_done("done.printer"),
-        ).start()
-
-    def _start_cache(self) -> None:
-        if not self._ensure_admin_for("cache"):
-            return
-        self._stop_runner()
-        if self.console:
-            self.console.clear()
-        ClearCacheRunner(
-            on_line=self.log,
-            on_done=lambda: self._notify_tool_done("done.cache"),
         ).start()
 
     def _start_fix_rdp(self) -> None:

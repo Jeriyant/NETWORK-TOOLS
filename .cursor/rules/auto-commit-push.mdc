@@ -7,8 +7,10 @@ alwaysApply: true
 
 Setelah menyelesaikan perubahan kode yang diminta user di repo Network Tools:
 
-1. **Naikkan versi** di `modules/settings.py` (`APP_VERSION`) — naikkan minor/patch (mis. 1.4 → 1.5, atau 1.5 → 1.5.1 jika hanya hotfix kecil; ikuti permintaan user bila menyebut nomor versi).
-2. Build ulang EXE: `python -m PyInstaller --noconfirm --clean NetworkTools.spec`
+1. **Naikkan versi** di `modules/settings.py` (`APP_VERSION`) — naikkan minor/patch (mis. 1.4 → 1.5, atau 1.5 → 1.5.1 jika hanya hotfix kecil; ikuti permintaan user bila menyebut nomor versi). Sinkronkan juga `version_info.txt` (filevers / FileVersion / ProductVersion) agar cocok.
+2. **Build EXE hanya ke `dist/`** (default PyInstaller — **jangan** pakai `--distpath dist_new` / `dist_build` / folder lain):
+   - Jika `dist\NetworkTools.exe` terkunci: tutup dulu prosesnya (`Stop-Process -Name NetworkTools -Force`), lalu build.
+   - Perintah: `python -m PyInstaller --noconfirm --clean NetworkTools.spec`
 3. Buat **git commit** (protokol commit: status, diff, log, add, commit).
 4. Langsung **`git push`** ke `origin` (branch aktif, biasanya `main`).
 5. Buat **GitHub Release** dengan tag `v{APP_VERSION}`, upload `dist/NetworkTools.exe`, set sebagai latest.

@@ -45,7 +45,7 @@ DEFAULT_THEME = "system"
 DEFAULT_LANG = "id"
 
 # App version — naikkan setiap rilis baru (harus cocok dengan tag GitHub Release)
-APP_VERSION = "2.15"
+APP_VERSION = "2.21"
 UPDATE_REPO = "https://github.com/Jeriyant/NETWORK-TOOLS"
 
 

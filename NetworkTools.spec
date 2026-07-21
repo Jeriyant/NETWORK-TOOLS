@@ -11,9 +11,12 @@ hiddenimports = [
     "pythonnet",
     "webview",
     "webview.platforms.edgechromium",
+    "paramiko",
+    "scp",
+    "windnd",
 ]
 
-for pkg in ("customtkinter", "webview", "pythonnet", "clr_loader"):
+for pkg in ("customtkinter", "webview", "pythonnet", "clr_loader", "paramiko", "scp"):
     tmp_ret = collect_all(pkg)
     datas += tmp_ret[0]
     binaries += tmp_ret[1]
@@ -55,4 +58,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon="assets/app.ico",
+    version="version_info.txt",
 )
