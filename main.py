@@ -5181,7 +5181,7 @@ class NetworkToolsApp(ctk.CTk):
             self._show_kirim_dialog(
                 tips,
                 title="Screenshot dikirim",
-                subtitle='Otomatis ke grup "Monitoring jaringan":',
+                subtitle="Otomatis via t.me/cusjnetmonitor:",
                 sound=False,
             )
         except Exception as exc:
@@ -5220,7 +5220,7 @@ class NetworkToolsApp(ctk.CTk):
                 self._show_kirim_dialog(
                     tips,
                     title="File dikirim",
-                    subtitle='Otomatis ke grup "Monitoring jaringan":',
+                    subtitle="Otomatis via t.me/cusjnetmonitor:",
                 )
             except Exception as exc:
                 self._show_kirim_dialog([f"Gagal kirim file: {exc}"])

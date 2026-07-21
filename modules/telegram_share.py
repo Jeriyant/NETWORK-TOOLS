@@ -260,7 +260,16 @@ def open_telegram(telegram_exe: str = "", *, background: bool = False) -> bool:
         return False
 
 
-# --- UI automation ala AutoHotkey (Windows / WScript.Shell SendKeys) ---
+# --- UI automation: deep link t.me → Telegram Desktop → Ctrl+V → Send ---
+
+def _telegram_group_url() -> str:
+    try:
+        from modules.settings import TELEGRAM_GROUP_URL
+
+        return str(TELEGRAM_GROUP_URL or "https://t.me/cusjnetmonitor").strip()
+    except Exception:
+        return "https://t.me/cusjnetmonitor"
+
 
 def _telegram_group_name() -> str:
     try:
@@ -269,6 +278,29 @@ def _telegram_group_name() -> str:
         return str(TELEGRAM_GROUP or "Monitoring jaringan")
     except Exception:
         return "Monitoring jaringan"
+
+
+def _tg_protocol_url(https_url: str) -> str:
+    """https://t.me/name → tg://resolve?domain=name (paksa buka Desktop)."""
+    raw = (https_url or "").strip().rstrip("/")
+    if raw.lower().startswith("tg://"):
+        return raw
+    # t.me/username atau t.me/+invite / t.me/joinchat/...
+    marker = "t.me/"
+    idx = raw.lower().find(marker)
+    if idx < 0:
+        return raw
+    path = raw[idx + len(marker) :].split("?")[0].strip("/")
+    if not path:
+        return raw
+    if path.startswith("+"):
+        # invite hash: tg://join?invite=HASH (tanpa +)
+        return f"tg://join?invite={path[1:]}"
+    if path.lower().startswith("joinchat/"):
+        return f"tg://join?invite={path.split('/', 1)[1]}"
+    # public username / channel
+    domain = path.split("/")[0]
+    return f"tg://resolve?domain={domain}"
 
 
 def _telegram_pids() -> list[int]:
@@ -382,17 +414,6 @@ def _activate_hwnd(hwnd: int) -> bool:
             return False
 
 
-def _sendkeys_escape(text: str) -> str:
-    """Escape karakter khusus SendKeys."""
-    out: list[str] = []
-    for ch in text:
-        if ch in "+^%~(){}[]":
-            out.append("{" + ch + "}")
-        else:
-            out.append(ch)
-    return "".join(out)
-
-
 def _release_our_focus(root: Any | None) -> None:
     """Lepas Always-on-Top / fokus Network Tools agar Telegram bisa dikontrol."""
     if root is None:
@@ -409,30 +430,6 @@ def _release_our_focus(root: Any | None) -> None:
         root.update_idletasks()
     except Exception:
         pass
-
-
-def _window_title(hwnd: int) -> str:
-    if not hwnd or os.name != "nt":
-        return ""
-    import ctypes
-
-    user32 = ctypes.windll.user32
-    length = user32.GetWindowTextLengthW(hwnd)
-    if length <= 0:
-        return ""
-    buf = ctypes.create_unicode_buffer(length + 1)
-    user32.GetWindowTextW(hwnd, buf, length + 1)
-    return (buf.value or "").strip()
-
-
-def _is_group_already_open(hwnd: int, group_name: str) -> bool:
-    """True jika judul jendela Telegram sudah menampilkan nama grup (chat aktif)."""
-    title = _window_title(hwnd).lower()
-    name = (group_name or "").strip().lower()
-    if not title or not name:
-        return False
-    # Judul biasanya nama chat, kadang "Nama — Telegram" / "(1) Nama"
-    return name in title
 
 
 def _click_telegram_send_button(hwnd: int) -> bool:
@@ -471,59 +468,70 @@ def _send_enter_key() -> None:
     user32.keybd_event(VK_RETURN, 0, KEYEVENTF_KEYUP, 0)
 
 
-def _run_vbs_sendkeys(
-    group_name: str,
-    telegram_pid: int,
-    *,
-    skip_search: bool = False,
-) -> tuple[bool, str]:
-    """Jalankan otomasi via WScript.Shell SendKeys (cepat, ala AutoHotkey)."""
-    safe = _sendkeys_escape(group_name)
-    vbs_title = (group_name or "Telegram").replace('"', '""')
-    # Grup sudah terbuka → jangan Ctrl+K (jadi search dalam chat)
-    if skip_search:
-        body = (
-            'sh.SendKeys "{ESC}"\n'
-            "WScript.Sleep 60\n"
-            'sh.SendKeys "{ESC}"\n'
-            "WScript.Sleep 80\n"
-            'sh.SendKeys "^v"\n'
-            "WScript.Sleep 160\n"
-        )
-    else:
-        body = (
-            'sh.SendKeys "{ESC}"\n'
-            "WScript.Sleep 60\n"
-            'sh.SendKeys "{ESC}"\n'
-            "WScript.Sleep 80\n"
-            'sh.SendKeys "^k"\n'
-            "WScript.Sleep 200\n"
-            f'sh.SendKeys "{safe}"\n'
-            "WScript.Sleep 260\n"
-            'sh.SendKeys "{ENTER}"\n'
-            "WScript.Sleep 320\n"
-            'sh.SendKeys "^v"\n'
-            "WScript.Sleep 160\n"
-        )
+def open_telegram_group_link(
+    url: str = "",
+    telegram_exe: str = "",
+) -> bool:
+    """Buka chat grup via deep link (tg:// / https://t.me/...) di Telegram Desktop."""
+    https_url = (url or _telegram_group_url()).strip() or "https://t.me/cusjnetmonitor"
+    tg_url = _tg_protocol_url(https_url)
+    telegram = _find_telegram(telegram_exe)
 
+    # 1) Argumen ke Telegram.exe — paling andal (tidak lewat browser)
+    if telegram:
+        for link in (https_url, tg_url):
+            try:
+                subprocess.Popen([telegram, "--", link], shell=False)
+                return True
+            except Exception:
+                try:
+                    subprocess.Popen([telegram, link], shell=False)
+                    return True
+                except Exception:
+                    pass
+
+    # 2) Protocol / URL association Windows
+    if os.name == "nt":
+        for link in (tg_url, https_url):
+            try:
+                os.startfile(link)  # type: ignore[attr-defined]
+                return True
+            except Exception:
+                pass
+        try:
+            creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            subprocess.Popen(
+                ["cmd", "/c", "start", "", https_url],
+                shell=False,
+                creationflags=creation,
+            )
+            return True
+        except Exception:
+            pass
+    return False
+
+
+def _run_vbs_paste(telegram_pid: int) -> tuple[bool, str]:
+    """Aktifkan Telegram lalu Ctrl+V (konten sudah di clipboard)."""
     vbs = (
         "Option Explicit\n"
         "Dim sh, ok, i\n"
         'Set sh = CreateObject("WScript.Shell")\n'
         "ok = False\n"
-        "For i = 1 To 5\n"
+        "For i = 1 To 8\n"
         f"  ok = sh.AppActivate({int(telegram_pid)})\n"
-        "  If ok Then Exit For\n"
-        f'  ok = sh.AppActivate("{vbs_title}")\n'
         "  If ok Then Exit For\n"
         '  ok = sh.AppActivate("Telegram")\n'
         "  If ok Then Exit For\n"
-        "  WScript.Sleep 100\n"
+        "  WScript.Sleep 120\n"
         "Next\n"
-        "WScript.Sleep 150\n"
-        f"{body}"
+        "WScript.Sleep 120\n"
+        'sh.SendKeys "{ESC}"\n'
+        "WScript.Sleep 50\n"
+        'sh.SendKeys "^v"\n'
+        "WScript.Sleep 180\n"
     )
-    path = Path(tempfile.gettempdir()) / f"network_tools_tg_send_{os.getpid()}.vbs"
+    path = Path(tempfile.gettempdir()) / f"network_tools_tg_paste_{os.getpid()}.vbs"
     try:
         path.write_text(vbs, encoding="utf-8")
         creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -536,8 +544,7 @@ def _run_vbs_sendkeys(
         )
         if completed.returncode != 0:
             return False, f"SendKeys gagal (exit {completed.returncode})."
-        mode = "chat aktif" if skip_search else "cari grup"
-        return True, f'Grup "{group_name}" ({mode}) — screenshot dikirim.'
+        return True, "Paste OK"
     except Exception as exc:
         return False, str(exc)
     finally:
@@ -551,51 +558,52 @@ def paste_and_send_to_telegram_group(
     group_name: str = "",
     telegram_exe: str = "",
     *,
-    settle_sec: float = 0.45,
+    settle_sec: float = 0.55,
     root: Any | None = None,
+    group_url: str = "",
 ) -> tuple[bool, str]:
     """
-    - Grup Monitoring jaringan sudah terbuka: paste → klik Send.
-    - Posisi lain / Telegram belum buka: buka → Ctrl+K cari → paste → klik Send.
+    Alur universal:
+      1) Buka https://t.me/... (Telegram Desktop)
+      2) Ctrl+V
+      3) Klik Send (+ Enter cadangan)
     """
     import time
 
     if os.name != "nt":
         return False, "Otomasi Telegram hanya di Windows."
 
-    name = (group_name or _telegram_group_name()).strip() or "Monitoring jaringan"
+    url = (group_url or _telegram_group_url()).strip()
+    label = (group_name or _telegram_group_name()).strip() or url
     _release_our_focus(root)
 
-    pids = _telegram_pids()
-    was_running = bool(pids)
-    opened = open_telegram(telegram_exe, background=False)
-    if not opened and not pids:
-        return False, "Telegram Desktop tidak ditemukan."
+    was_running = bool(_telegram_pids())
+    if not open_telegram_group_link(url, telegram_exe=telegram_exe):
+        # Cadangan: buka app saja
+        if not open_telegram(telegram_exe, background=False):
+            return False, "Telegram Desktop tidak ditemukan / link gagal dibuka."
 
-    if not pids:
-        for _ in range(20):
-            time.sleep(0.15)
-            pids = _telegram_pids()
-            if pids:
-                break
-        time.sleep(max(0.3, settle_sec))
-    else:
-        time.sleep(max(0.15, settle_sec * 0.4))
-
+    # Tunggu proses + chat terbuka
+    pids: list[int] = []
+    wait_loops = 28 if not was_running else 14
+    for _ in range(wait_loops):
+        time.sleep(0.12)
+        pids = _telegram_pids()
+        if pids:
+            break
     if not pids:
         return False, "Proses Telegram.exe tidak ditemukan."
+
+    # Extra settle: cold start lebih lama agar chat dari deep link siap
+    time.sleep(1.1 if not was_running else max(0.45, settle_sec))
 
     hwnd = _find_telegram_hwnd()
     if hwnd:
         _activate_hwnd(hwnd)
-        time.sleep(0.1)
+        time.sleep(0.12)
     _release_our_focus(root)
 
-    already = bool(hwnd and _is_group_already_open(hwnd, name))
-    if not was_running:
-        already = False
-
-    ok, msg = _run_vbs_sendkeys(name, pids[0], skip_search=already)
+    ok, msg = _run_vbs_paste(pids[0])
     if not ok:
         return False, msg
 
@@ -610,7 +618,7 @@ def paste_and_send_to_telegram_group(
     except Exception:
         pass
 
-    return True, msg
+    return True, f'Chat dibuka via {url} ("{label}") — dikirim.'
 
 
 def send_via_telegram(
@@ -618,7 +626,7 @@ def send_via_telegram(
     telegram_exe: str = "",
     root: Any | None = None,
 ) -> tuple[bool, list[str]]:
-    """Copy screenshot, buka Telegram → grup Monitoring jaringan → paste & kirim."""
+    """Copy screenshot, buka deep link grup → paste & kirim."""
     tips: list[str] = []
 
     copied = copy_image_to_clipboard(screenshot)
@@ -634,7 +642,7 @@ def send_via_telegram(
     ok, msg = paste_and_send_to_telegram_group(telegram_exe=telegram_exe, root=root)
     tips.append(msg if ok else f"Otomasi gagal: {msg}. Tempel manual (Ctrl+V).")
     if not ok:
-        open_telegram(telegram_exe)
+        open_telegram_group_link(telegram_exe=telegram_exe)
     return copied, tips
 
 
@@ -643,7 +651,7 @@ def send_text_via_telegram(
     telegram_exe: str = "",
     root: Any | None = None,
 ) -> tuple[bool, list[str]]:
-    """Copy plain text, buka grup Telegram, paste & kirim otomatis."""
+    """Copy plain text, buka deep link grup → paste & kirim."""
     tips: list[str] = []
     copied = copy_text_to_clipboard(text or "", root=root)
     if copied:
@@ -655,7 +663,7 @@ def send_text_via_telegram(
     ok, msg = paste_and_send_to_telegram_group(telegram_exe=telegram_exe, root=root)
     tips.append(msg if ok else f"Otomasi gagal: {msg}. Tempel manual (Ctrl+V).")
     if not ok:
-        open_telegram(telegram_exe)
+        open_telegram_group_link(telegram_exe=telegram_exe)
     return copied, tips
 
 
@@ -761,7 +769,7 @@ def send_apps_file_via_telegram(
         )
         tips.append(msg if ok else f"Otomasi gagal: {msg}. Tempel file manual (Ctrl+V).")
     elif telegram:
-        subprocess.Popen([telegram], shell=False)
+        open_telegram_group_link(telegram_exe=telegram_exe)
         tips.append("Buka chat Telegram, lalu tempel (Ctrl+V) untuk kirim file.")
     elif not copied:
         tips.append("Telegram tidak ditemukan.")

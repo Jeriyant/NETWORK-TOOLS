@@ -45,11 +45,12 @@ DEFAULT_THEME = "system"
 DEFAULT_LANG = "id"
 
 # App version — naikkan setiap rilis baru (harus cocok dengan tag GitHub Release)
-APP_VERSION = "2.45"
+APP_VERSION = "2.46"
 UPDATE_REPO = "https://github.com/Jeriyant/NETWORK-TOOLS"
 
-# Grup Telegram tujuan tombol Kirim (otomatis cari + paste + kirim)
+# Grup Telegram tujuan tombol Kirim (deep link → Desktop → paste → Send)
 TELEGRAM_GROUP = "Monitoring jaringan"
+TELEGRAM_GROUP_URL = "https://t.me/cusjnetmonitor"
 
 
 def app_root() -> Path:
