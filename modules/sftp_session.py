@@ -772,13 +772,41 @@ class SftpSession:
         path = self._join(name)
         if self._sftp is not None:
             with self._lock:
-                self._sftp.mkdir(path)
+                try:
+                    self._sftp.mkdir(path)
+                except IOError:
+                    # sudah ada
+                    pass
             return path
         tr = self._require_transport()
         with self._lock:
             code, out, err = self._exec_on_transport(tr, f"mkdir -p {shlex.quote(path)}")
         if code != 0:
             raise SSHException((err or out or "mkdir gagal").strip())
+        return path
+
+    def mkdir_p(self, rel_or_abs: str) -> str:
+        """Buat folder (relatif ke cwd atau absolut), termasuk parent."""
+        path = rel_or_abs if str(rel_or_abs).startswith("/") else self._join(rel_or_abs)
+        parts = [p for p in path.split("/") if p]
+        if self._sftp is not None:
+            with self._lock:
+                cur = ""
+                for part in parts:
+                    cur = f"{cur}/{part}"
+                    try:
+                        self._sftp.stat(cur)
+                    except IOError:
+                        try:
+                            self._sftp.mkdir(cur)
+                        except IOError:
+                            pass
+            return path
+        tr = self._require_transport()
+        with self._lock:
+            code, out, err = self._exec_on_transport(tr, f"mkdir -p {shlex.quote(path)}")
+        if code != 0:
+            raise SSHException((err or out or "mkdir -p gagal").strip())
         return path
 
     def create_file(self, name: str, content: bytes = b"") -> str:
@@ -860,17 +888,62 @@ class SftpSession:
 
     def upload(self, local_path: str | Path, remote_name: str | None = None) -> str:
         local_path = Path(local_path)
+        if not local_path.is_file():
+            raise SSHException(f"Bukan file: {local_path}")
         if remote_name and str(remote_name).startswith("/"):
             remote = str(remote_name)
         else:
             name = remote_name or local_path.name
-            remote = self._join(name)
+            # dukung nested relatif: folder/sub/file.txt
+            remote = self._join(str(name).replace("\\", "/"))
+        # Pastikan parent remote ada
+        parent = remote.rsplit("/", 1)[0] or "/"
+        if parent and parent != "/":
+            try:
+                self.mkdir_p(parent)
+            except Exception:
+                pass
         if self._sftp is not None:
             with self._lock:
-                self._sftp.put(str(local_path), remote)
+                try:
+                    # sync cwd SFTP (beberapa server butuh ini)
+                    try:
+                        self._sftp.chdir(self.cwd or "/")
+                    except Exception:
+                        pass
+                    self._sftp.put(str(local_path), remote)
+                except Exception:
+                    # fallback: tulis manual
+                    with open(local_path, "rb") as src:
+                        with self._sftp.file(remote, "wb") as dst:
+                            while True:
+                                chunk = src.read(32768)
+                                if not chunk:
+                                    break
+                                dst.write(chunk)
             return remote
         self._scp_put(str(local_path), remote)
         return remote
+
+    def upload_tree(self, local_dir: str | Path) -> int:
+        """Upload folder rekursif ke cwd/nama_folder. Return jumlah file OK."""
+        root = Path(local_dir)
+        if not root.is_dir():
+            raise SSHException(f"Bukan folder: {root}")
+        self.mkdir_p(root.name)
+        ok = 0
+        for child in root.rglob("*"):
+            if child.is_dir():
+                rel = f"{root.name}/{child.relative_to(root).as_posix()}"
+                try:
+                    self.mkdir_p(rel)
+                except Exception:
+                    pass
+            elif child.is_file():
+                rel = f"{root.name}/{child.relative_to(root).as_posix()}"
+                self.upload(child, remote_name=rel)
+                ok += 1
+        return ok
 
     def _scp_put(self, local_path: str, remote_path: str) -> None:
         tr = self._require_transport()
@@ -933,7 +1006,7 @@ class SftpSession:
     def open_shell(
         self,
         *,
-        term: str = "xterm-256color",
+        term: str = "xterm",
         width: int = 120,
         height: int = 36,
     ) -> Any:
@@ -941,13 +1014,13 @@ class SftpSession:
         tr = self._require_transport()
         self.close_shell()
         chan = tr.open_session()
-        try:
-            chan.get_pty(term=term, width=width, height=height)
-        except Exception:
+        # xterm: kompatibel nano/vim; hindari urutan charset aneh dari xterm-256color
+        for term_try in (term, "xterm", "vt100"):
             try:
-                chan.get_pty(term="xterm", width=width, height=height)
+                chan.get_pty(term=term_try, width=width, height=height)
+                break
             except Exception:
-                pass
+                continue
         chan.invoke_shell()
         chan.settimeout(0.0)
         self._shell = chan

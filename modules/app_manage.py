@@ -33,11 +33,43 @@ def _run(args: list[str], timeout: int = 600) -> tuple[int, str]:
         return 1, str(exc)
 
 
+def _quote_uninstall_cmd(cmdline: str) -> str:
+    """Quote path exe yang punya spasi (hindari 'C:\\Program' is not recognized)."""
+    u = (cmdline or "").strip()
+    if not u:
+        return u
+    if u[:1] == '"':
+        return u
+    low = u.lower()
+    if low.startswith("msiexec"):
+        # Quote MSI path: msiexec.exe /x {GUID} atau /x C:\\Path With Space\\x.msi
+        m = re.search(r"(?i)(/[ix]\s+)([^\"].+\.msi)\b", u)
+        if m and " " in m.group(2):
+            return u[: m.start(2)] + f'"{m.group(2)}"' + u[m.end(2) :]
+        return u
+    m = re.match(r"^(.+?\.(?:exe|bat|cmd|com))(\s+.*)?$", u, flags=re.IGNORECASE | re.DOTALL)
+    if m:
+        exe = m.group(1).strip().strip('"')
+        rest = m.group(2) or ""
+        if " " in exe:
+            return f'"{exe}"{rest}'
+        return u
+    # Tanpa ekstensi — quote sampai argumen pertama yang diawali /
+    m2 = re.match(r"^([^/]+?)(\s+/.*)?$", u, flags=re.DOTALL)
+    if m2:
+        exe = m2.group(1).strip().strip('"')
+        rest = m2.group(2) or ""
+        if " " in exe:
+            return f'"{exe}"{rest}'
+    return u
+
+
 def _run_cmd_line(cmdline: str, timeout: int = 600) -> tuple[int, str]:
-    """Jalankan UninstallString mentah lewat cmd."""
+    """Jalankan UninstallString lewat cmd dengan path ter-quote."""
+    cmd = _quote_uninstall_cmd(cmdline)
     try:
         completed = subprocess.run(
-            cmdline,
+            cmd,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -53,7 +85,7 @@ def _run_cmd_line(cmdline: str, timeout: int = 600) -> tuple[int, str]:
 
 
 def _silentize(uninstall: str) -> str:
-    u = (uninstall or "").strip()
+    u = _quote_uninstall_cmd((uninstall or "").strip())
     if not u:
         return u
     low = u.lower()
@@ -68,7 +100,7 @@ def _silentize(uninstall: str) -> str:
         return u
     if "/silent" in low or "/s" in low or "-silent" in low or "/quiet" in low:
         return u
-    return f'{u} /S'
+    return f"{u} /S"
 
 
 def uninstall_app(app: dict[str, str], *, quiet: bool = False) -> tuple[bool, str]:

@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 import customtkinter as ctk
 
+from modules.ansi_term import AnsiScreen, strip_plain
 from modules.i18n import t
 from modules.sftp_session import RemoteEntry, SftpSession
 
@@ -36,6 +37,8 @@ class ScpPanel:
         self._shell_stop = threading.Event()
         self._shell_thread: threading.Thread | None = None
         self._term_mark = "1.0"
+        self._ansi = AnsiScreen(rows=30, cols=100)
+        self._term_fullscreen = False
 
         top = ctk.CTkFrame(header, fg_color="transparent")
         top.pack(fill="x")
@@ -275,7 +278,6 @@ class ScpPanel:
             return b
 
         # Warna berbeda per aksi
-        self.btn_up = _icon_btn("↑", self._go_up, t("scp.up"), color="#3B82F6", hover="#2563EB")
         self.btn_ref = _icon_btn(
             "↻",
             self._refresh,
@@ -295,6 +297,9 @@ class ScpPanel:
         )
         self.btn_download = _icon_btn(
             "⬇", self._download, t("scp.download"), color="#F97316", hover="#EA580C"
+        )
+        self.btn_delete = _icon_btn(
+            "🗑", self._delete, t("scp.delete"), color="#DC2626", hover="#B91C1C"
         )
 
         self._drag_start: tuple[int, int] | None = None
@@ -618,33 +623,52 @@ class ScpPanel:
 
     # ----- terminal -----
     def _term_write(self, text: str) -> None:
-        """Tulis ke terminal dengan handle clear-screen / backspace."""
+        """Tulis ke terminal; fullscreen (nano/vim) pakai buffer ANSI."""
         try:
             self.term.configure(state="normal")
-            if (
-                "\x1b[2J" in text
+            # Deteksi masuk/keluar alternate screen / clear
+            enter_fs = (
+                "\x1b[?1049h" in text
+                or "\x1b[?47h" in text
+                or "\x1b[2J" in text
                 or "\x1b[H" in text
                 or "\x1bc" in text
-                or "\x1b[3J" in text
-            ):
+            )
+            leave_fs = "\x1b[?1049l" in text or "\x1b[?47l" in text
+            if enter_fs:
+                self._term_fullscreen = True
+                cols = max(40, int(self.term.winfo_width() / 8) or 100)
+                rows = max(10, int(self.term.winfo_height() / 16) or 30)
+                self._ansi.resize(rows, cols)
+            if leave_fs:
+                self._term_fullscreen = False
+                self._ansi.clear()
+
+            if self._term_fullscreen or enter_fs:
+                self._ansi.feed(text)
+                screen = self._ansi.render()
                 self.term.delete("1.0", "end")
-            text = self._strip_ansi(text)
-            # Jangan hapus baris pada \r — itu yang membuat output (ip a, dll) hilang
-            text = text.replace("\r\n", "\n").replace("\r", "\n")
-            for ch in text:
-                if ch in ("\x08", "\x7f"):
-                    try:
-                        self.term.delete("end-2c")
-                    except Exception:
+                self.term.insert("1.0", screen)
+                self.term.see("end")
+                self._term_mark = self.term.index("end-1c")
+            else:
+                plain = strip_plain(text)
+                plain = plain.replace("\r\n", "\n").replace("\r", "\n")
+                for ch in plain:
+                    if ch in ("\x08", "\x7f"):
+                        try:
+                            self.term.delete("end-2c")
+                        except Exception:
+                            pass
+                    elif ch == "\n":
+                        self.term.insert("end", "\n")
+                    elif ch == "\x07":
                         pass
-                elif ch == "\n":
-                    self.term.insert("end", "\n")
-                elif ch == "\x07":
-                    pass
-                elif ch:
-                    self.term.insert("end", ch)
-            self.term.see("end")
-            self._term_mark = self.term.index("end-1c")
+                    elif ch:
+                        self.term.insert("end", ch)
+                self.term.see("end")
+                self._term_mark = self.term.index("end-1c")
+
             if not self.session.connected:
                 self.term.configure(state="disabled")
         except Exception:
@@ -655,6 +679,8 @@ class ScpPanel:
         self.term.configure(state="normal")
         self.term.delete("1.0", "end")
         self._term_mark = "1.0"
+        self._term_fullscreen = False
+        self._ansi.clear()
         if was == "disabled" or not self.session.connected:
             self.term.configure(state="disabled")
 
@@ -828,7 +854,7 @@ class ScpPanel:
             while not self._shell_stop.is_set() and chan is not None:
                 try:
                     if chan.recv_ready():
-                        data = chan.recv(4096)
+                        data = chan.recv(16384)
                         if not data:
                             break
                         text = data.decode("utf-8", errors="replace")
@@ -857,19 +883,14 @@ class ScpPanel:
         try:
             cols = max(40, int(self.term.winfo_width() / 8) or 100)
             rows = max(10, int(self.term.winfo_height() / 16) or 30)
+            self._ansi.resize(rows, cols)
             self.session.resize_shell(cols, rows)
         except Exception:
             pass
 
     @staticmethod
     def _strip_ansi(text: str) -> str:
-        import re
-
-        # CSI sequences
-        text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", text)
-        text = re.sub(r"\x1b\][^\x07]*\x07", "", text)
-        text = text.replace("\x1b", "")
-        return text
+        return strip_plain(text)
 
     def _stop_shell(self) -> None:
         self._shell_stop.set()
@@ -955,7 +976,7 @@ class ScpPanel:
             self.term.configure(state="disabled")
 
     def _setup_drag_drop(self) -> None:
-        """Hook drop hanya di frame host — jangan Treeview (sering force-close Tk)."""
+        """Hook drop di frame host (+ tree bila aman) untuk upload file/folder."""
         try:
             import windnd
         except Exception:
@@ -977,7 +998,6 @@ class ScpPanel:
             return out
 
         def on_drop(files: list[Any]) -> None:
-            # Callback windnd di thread asing — salin path lalu marshal ke Tk.
             try:
                 paths = list(_normalize(files))
             except Exception:
@@ -996,25 +1016,27 @@ class ScpPanel:
             except Exception:
                 pass
 
-        try:
-            # Hanya frame Tk — jangan hook ttk.Treeview
-            windnd.hook_dropfiles(self._tree_host, func=on_drop)
-        except Exception:
-            pass
+        for widget in (self._tree_host, getattr(self, "tree", None)):
+            if widget is None:
+                continue
+            try:
+                windnd.hook_dropfiles(widget, func=on_drop)
+            except Exception:
+                pass
 
     def _handle_drop_paths(self, paths: list[str]) -> None:
-        """Drop dari Windows Explorer → upload file ke remote."""
+        """Drop dari Windows Explorer → upload file/folder ke remote."""
         if not self.session.connected:
             messagebox.showinfo(t("tool.scp.title"), t("scp.need_connect"), parent=self.app)
             return
 
         from pathlib import Path as _Path
 
-        files = [p for p in paths if _Path(p).is_file()]
-        if not files:
-            self._status("Drop diabaikan — lepas file (bukan folder) untuk upload.")
+        items = [p for p in paths if _Path(p).exists()]
+        if not items:
+            self._status("Drop diabaikan — path tidak valid.")
             return
-        self._upload_paths(files)
+        self._upload_paths(items)
 
     def _on_tree_press(self, event: Any) -> None:
         row = self.tree.identify_row(event.y)
@@ -1706,7 +1728,10 @@ class ScpPanel:
             return
         paths = filedialog.askopenfilenames(parent=self.app, title=t("scp.upload"))
         if not paths:
-            return
+            folder = filedialog.askdirectory(parent=self.app, title=t("scp.upload"))
+            if not folder:
+                return
+            paths = [folder]
         self._upload_paths(list(paths))
 
     def _upload_paths(self, paths: list[str]) -> None:
@@ -1718,25 +1743,45 @@ class ScpPanel:
 
         from pathlib import Path as _Path
 
-        files = [p for p in paths if _Path(p).is_file()]
-        if not files:
-            self._status("Drop diabaikan — tidak ada file untuk di-upload.")
+        items = [p for p in paths if _Path(p).exists()]
+        if not items:
+            self._status("Tidak ada file/folder untuk di-upload.")
             return
 
-        self._status(f"Upload {len(files)} file…")
-        self._xfer_start(f"⬆ Upload {len(files)} file…")
+        self._status(f"Upload {len(items)} item…")
+        self._xfer_start(f"⬆ Upload {len(items)} item…")
 
         def worker() -> None:
             ok = 0
-            for i, p in enumerate(files, start=1):
-                name = _Path(p).name
-                self._ui(lambda n=name, i=i: self._xfer_start(f"⬆ {n} ({i}/{len(files)})"))
+            total = 0
+            errors: list[str] = []
+            for p in items:
+                local = _Path(p)
                 try:
-                    remote = self.session.upload(p)
-                    ok += 1
-                    self._ui(lambda r=remote: self._status(f"Uploaded → {r}"))
+                    if local.is_file():
+                        total += 1
+                        self._ui(
+                            lambda n=local.name, i=total: self._xfer_start(f"⬆ {n} ({i})")
+                        )
+                        remote = self.session.upload(local)
+                        ok += 1
+                        self._ui(lambda r=remote: self._status(f"Uploaded → {r}"))
+                    elif local.is_dir():
+                        self._ui(
+                            lambda n=local.name: self._xfer_start(f"⬆ folder {n}…")
+                        )
+                        n_ok = self.session.upload_tree(local)
+                        ok += n_ok
+                        total += n_ok
+                        self._ui(
+                            lambda n=local.name, k=n_ok: self._status(
+                                f"Uploaded folder {n} ({k} file)"
+                            )
+                        )
                 except Exception as exc:
+                    errors.append(f"{local.name}: {exc}")
                     self._ui(lambda e=str(exc): self._status(f"Upload fail: {e}"))
+
             try:
                 rows = self.session.list_dir()
             except Exception:
@@ -1744,9 +1789,17 @@ class ScpPanel:
 
             def finish() -> None:
                 self._fill(rows)
-                msg = f"Upload selesai ({ok}/{len(files)})"
+                msg = f"Upload selesai ({ok}/{total or len(items)})"
+                if errors:
+                    msg += f" — gagal {len(errors)}"
                 self._status(msg)
                 self._xfer_stop(msg)
+                if errors and ok == 0:
+                    messagebox.showerror(
+                        t("tool.scp.title"),
+                        "\n".join(errors[:8]),
+                        parent=self.app,
+                    )
 
             self._ui(finish)
 

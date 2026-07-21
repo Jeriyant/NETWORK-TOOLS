@@ -2503,27 +2503,132 @@ class NetworkToolsApp(ctk.CTk):
         def _show_adapter_status(adapter: dict[str, str]) -> None:
             name = adapter.get("name") or "—"
             details = get_adapter_details(name) or adapter
-            lines = [
-                f"{t('network.info.name')}: {details.get('name') or name}",
-                f"{t('network.info.status')}: {details.get('status') or adapter.get('status') or '—'}",
-                f"{t('network.info.desc')}: {details.get('desc') or adapter.get('desc') or '—'}",
-                f"{t('network.info.mac')}: {details.get('mac') or adapter.get('mac') or '—'}",
-                f"{t('network.info.speed')}: {details.get('speed') or adapter.get('speed') or '—'}",
-                f"{t('network.info.media')}: {details.get('media') or '—'}",
-                f"{t('network.info.ipv4')}: {details.get('ipv4') or '—'}"
-                + (
-                    f"/{details.get('prefix')}"
-                    if details.get("prefix")
-                    else ""
+            ipv4 = details.get("ipv4") or "—"
+            if details.get("prefix"):
+                ipv4 = f"{ipv4}/{details.get('prefix')}"
+            rows = [
+                (t("network.info.name"), details.get("name") or name),
+                (
+                    t("network.info.status"),
+                    details.get("status") or adapter.get("status") or "—",
                 ),
-                f"{t('network.info.gateway')}: {details.get('gateway') or '—'}",
-                f"ifIndex: {details.get('ifindex') or '—'}",
+                (
+                    t("network.info.desc"),
+                    details.get("desc") or adapter.get("desc") or "—",
+                ),
+                (
+                    t("network.info.mac"),
+                    details.get("mac") or adapter.get("mac") or "—",
+                ),
+                (
+                    t("network.info.speed"),
+                    details.get("speed") or adapter.get("speed") or "—",
+                ),
+                (t("network.info.media"), details.get("media") or "—"),
+                (t("network.info.ipv4"), ipv4),
+                (t("network.info.gateway"), details.get("gateway") or "—"),
+                (t("network.info.dns"), details.get("dns") or "—"),
+                ("ifIndex", details.get("ifindex") or "—"),
             ]
-            messagebox.showinfo(
-                t("network.status"),
-                "\n".join(lines),
-                parent=self,
+
+            dlg = ctk.CTkToplevel(self)
+            dlg.title(t("network.status"))
+            dlg.geometry("480x420")
+            dlg.minsize(420, 360)
+            dlg.configure(fg_color=COLORS["bg"])
+            dlg.transient(self)
+            dlg.attributes("-topmost", True)
+            self.update_idletasks()
+            px = self.winfo_rootx() + (self.winfo_width() - 480) // 2
+            py = self.winfo_rooty() + (self.winfo_height() - 420) // 2
+            dlg.geometry(f"480x420+{max(px, 40)}+{max(py, 40)}")
+
+            frame = ctk.CTkFrame(
+                dlg,
+                fg_color=COLORS["panel"],
+                corner_radius=12,
+                border_width=1,
+                border_color=COLORS["border"],
             )
+            frame.pack(fill="both", expand=True, padx=14, pady=14)
+
+            ctk.CTkLabel(
+                frame,
+                text=t("network.status"),
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=16),
+                text_color=COLORS["text"],
+                anchor="w",
+            ).pack(fill="x", padx=14, pady=(12, 8))
+
+            body = ctk.CTkScrollableFrame(frame, fg_color="transparent")
+            body.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+            body.grid_columnconfigure(0, weight=0, minsize=110)
+            body.grid_columnconfigure(1, weight=1)
+
+            for i, (label, value) in enumerate(rows):
+                ctk.CTkLabel(
+                    body,
+                    text=label,
+                    font=ctk.CTkFont(family="Segoe UI", size=12),
+                    text_color=COLORS["muted"],
+                    anchor="w",
+                ).grid(row=i, column=0, sticky="nw", padx=(6, 10), pady=4)
+                val_box = ctk.CTkEntry(
+                    body,
+                    font=ctk.CTkFont(family="Consolas", size=12),
+                    fg_color=COLORS["bg"],
+                    border_color=COLORS["border"],
+                    text_color=COLORS["text"],
+                    height=28,
+                )
+                val_box.grid(row=i, column=1, sticky="ew", padx=(0, 6), pady=4)
+                val_box.insert(0, value or "—")
+                val_box.configure(state="readonly")
+
+            footer = ctk.CTkFrame(frame, fg_color="transparent")
+            footer.pack(fill="x", padx=12, pady=(4, 12))
+
+            def _copy_all() -> None:
+                text = "\n".join(f"{k}: {v}" for k, v in rows)
+                try:
+                    self.clipboard_clear()
+                    self.clipboard_append(text)
+                    tip.configure(text=t("network.info.copied"))
+                except Exception:
+                    tip.configure(text="Copy gagal.")
+
+            tip = ctk.CTkLabel(
+                footer,
+                text="",
+                font=ctk.CTkFont(family="Segoe UI", size=11),
+                text_color=COLORS.get("ok", "#12B76A"),
+                anchor="w",
+            )
+            tip.pack(side="left", fill="x", expand=True)
+
+            ctk.CTkButton(
+                footer,
+                text=t("network.info.copy"),
+                width=120,
+                height=34,
+                fg_color=COLORS["accent"],
+                hover_color=COLORS["accent_dim"],
+                text_color=COLORS["on_accent"],
+                command=_copy_all,
+            ).pack(side="right", padx=(8, 0))
+            ctk.CTkButton(
+                footer,
+                text=t("network.info.close"),
+                width=90,
+                height=34,
+                fg_color=COLORS["border"],
+                hover_color=COLORS["muted"],
+                text_color=COLORS["text"],
+                command=dlg.destroy,
+            ).pack(side="right")
+
+            dlg.after(80, dlg.lift)
+            dlg.after(100, dlg.focus_force)
 
         def _adapter_action(kind: str, adapter: dict[str, str]) -> None:
             name = adapter.get("name") or ""
@@ -4433,16 +4538,52 @@ class NetworkToolsApp(ctk.CTk):
         dlg.title(t("app.brand"))
         dlg.geometry(f"{dlg_w}x{dlg_h}")
         dlg.minsize(dlg_w, 200)
-        dlg.resizable(False, False)
+        dlg.resizable(True, True)
         dlg.configure(fg_color=COLORS["bg"])
         dlg.transient(self)
         dlg.attributes("-topmost", True)
         dlg.attributes("-alpha", 0.0)
 
+        prefs = load_prefs()
         self.update_idletasks()
-        px = self.winfo_rootx() + (self.winfo_width() - dlg_w) // 2
-        py = self.winfo_rooty() + (self.winfo_height() - dlg_h) // 2
-        dlg.geometry(f"{dlg_w}x{dlg_h}+{max(px, 40)}+{max(py + 40, 40)}")
+        saved_x = prefs.get("done_x")
+        saved_y = prefs.get("done_y")
+        if saved_x is not None and saved_y is not None:
+            try:
+                px, py = int(saved_x), int(saved_y)
+            except Exception:
+                px = self.winfo_rootx() + (self.winfo_width() - dlg_w) // 2
+                py = self.winfo_rooty() + (self.winfo_height() - dlg_h) // 2
+        else:
+            px = self.winfo_rootx() + (self.winfo_width() - dlg_w) // 2
+            py = self.winfo_rooty() + (self.winfo_height() - dlg_h) // 2
+        dlg.geometry(f"{dlg_w}x{dlg_h}+{max(px, 0)}+{max(py, 0)}")
+
+        def _persist_pos(_event: Any = None) -> None:
+            try:
+                if not dlg.winfo_exists():
+                    return
+                save_prefs(done_x=int(dlg.winfo_x()), done_y=int(dlg.winfo_y()))
+            except Exception:
+                pass
+
+        def _close() -> None:
+            _persist_pos()
+            dlg.destroy()
+
+        _pos_job: dict[str, Any] = {"id": None}
+
+        def _on_cfg(_event: Any = None) -> None:
+            jid = _pos_job.get("id")
+            if jid is not None:
+                try:
+                    dlg.after_cancel(jid)
+                except Exception:
+                    pass
+            _pos_job["id"] = dlg.after(400, _persist_pos)
+
+        dlg.bind("<Configure>", _on_cfg)
+        dlg.protocol("WM_DELETE_WINDOW", _close)
 
         flash = ctk.CTkFrame(dlg, fg_color=COLORS["ok"], height=6, corner_radius=0)
         flash.pack(fill="x", side="top")
@@ -4489,7 +4630,7 @@ class NetworkToolsApp(ctk.CTk):
             text_color=COLORS["on_ok"],
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             corner_radius=10,
-            command=dlg.destroy,
+            command=_close,
         ).pack(side="right", pady=6)
 
         def fade_in(step: int = 0) -> None:

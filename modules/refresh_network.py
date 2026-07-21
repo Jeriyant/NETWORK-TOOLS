@@ -76,7 +76,7 @@ def list_net_adapters() -> list[dict[str, str]]:
 
 
 def get_adapter_details(name: str) -> dict[str, str]:
-    """Detail adapter untuk dialog Status/Informasi."""
+    """Detail adapter untuk dialog Status/Informasi (termasuk DNS)."""
     n = (name or "").replace('"', "")
     if not n:
         return {}
@@ -87,13 +87,17 @@ def get_adapter_details(name: str) -> dict[str, str]:
         "-ErrorAction SilentlyContinue | Select-Object -First 1; "
         "$gw = Get-NetRoute -InterfaceIndex $a.ifIndex -DestinationPrefix '0.0.0.0/0' "
         "-ErrorAction SilentlyContinue | Select-Object -First 1; "
+        "$dns = @(Get-DnsClientServerAddress -InterfaceIndex $a.ifIndex "
+        "-AddressFamily IPv4 -ErrorAction SilentlyContinue | "
+        "ForEach-Object { $_.ServerAddresses } | Where-Object { $_ }); "
         "[pscustomobject]@{ "
         "Name=$a.Name; Status=$a.Status; MacAddress=$a.MacAddress; "
         "LinkSpeed=$a.LinkSpeed; InterfaceDescription=$a.InterfaceDescription; "
         "ifIndex=$a.ifIndex; MediaType=$a.MediaType; "
         "IPv4=($(if($ip){$ip.IPAddress}else{''})); "
         "Prefix=($(if($ip){$ip.PrefixLength}else{''})); "
-        "Gateway=($(if($gw){$gw.NextHop}else{''})) "
+        "Gateway=($(if($gw){$gw.NextHop}else{''})); "
+        "DNS=($dns -join ', ') "
         "} | ConvertTo-Json -Compress"
     )
     if code != 0 or not out.strip():
@@ -120,6 +124,7 @@ def get_adapter_details(name: str) -> dict[str, str]:
         "ipv4": str(data.get("IPv4") or ""),
         "prefix": str(data.get("Prefix") or ""),
         "gateway": str(data.get("Gateway") or ""),
+        "dns": str(data.get("DNS") or ""),
     }
 
 

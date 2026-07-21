@@ -106,9 +106,29 @@ def _anydesk_process_running() -> bool:
         return False
 
 
+def _force_kill_anydesk() -> str:
+    """Tutup paksa semua proses AnyDesk.exe."""
+    creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        completed = subprocess.run(
+            ["taskkill", "/IM", "AnyDesk.exe", "/F"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+            creationflags=creation,
+        )
+        out = ((completed.stdout or "") + (completed.stderr or "")).strip()
+        return out or f"taskkill exit {completed.returncode}"
+    except Exception as exc:
+        return str(exc)
+
+
 def _start_anydesk_tray(exe: Path) -> tuple[bool, str]:
     """Jalankan AnyDesk di system tray saja (--tray / --control)."""
     creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    last = "Gagal start tray"
     # Urutan: --tray (systray), lalu --control (tray icon process resmi)
     for args in (
         [str(exe), "--tray"],
@@ -128,7 +148,7 @@ def _start_anydesk_tray(exe: Path) -> tuple[bool, str]:
         except Exception as exc:
             last = str(exc)
             continue
-    return False, last if "last" in dir() else "Gagal start tray"
+    return False, last
 
 
 def _ensure_service(exe: Path) -> None:
@@ -193,35 +213,25 @@ class AnydeskRunner:
 
             self.on_line(f"Menemukan: {exe}")
 
-            # 1) Ambil ID tanpa buka jendela (file / CLI)
-            self.on_line("Membaca AnyDesk ID (tanpa buka jendela)…")
-            anydesk_id = get_anydesk_id_cli(exe) or read_anydesk_id_from_files()
+            # Tutup paksa dulu agar window utama tidak nyangkut, lalu tray bersih
+            if _anydesk_process_running():
+                self.on_line("Menutup paksa AnyDesk yang sedang berjalan…")
+                self.on_line(_force_kill_anydesk())
+                time.sleep(1.0)
+
+            self.on_line("Menyalakan service + system tray…")
+            _ensure_service(exe)
+            ok, msg = _start_anydesk_tray(exe)
+            self.on_line(msg if ok else f"Tray: {msg}")
+            time.sleep(1.5)
+
+            self.on_line("Membaca AnyDesk ID…")
+            anydesk_id = self._poll_id(exe, rounds=8, delay=1.2)
 
             if not anydesk_id:
-                running = _anydesk_process_running()
-                if not running:
-                    self.on_line("AnyDesk belum di tray — menyalakan service/tray…")
-                    _ensure_service(exe)
-                    ok, msg = _start_anydesk_tray(exe)
-                    self.on_line(msg if ok else f"Tray: {msg}")
-                    time.sleep(1.5)
-                else:
-                    self.on_line("AnyDesk sudah berjalan — menunggu ID…")
-
-                anydesk_id = self._poll_id(exe)
-
-            if not anydesk_id:
-                # Pastikan tray aktif, lalu poll lagi (jangan taskkill / jangan buka UI)
-                self.on_line("ID belum ada — pastikan AnyDesk di system tray…")
+                self.on_line("ID belum ada — coba tray ulang…")
                 _start_anydesk_tray(exe)
                 anydesk_id = self._poll_id(exe, rounds=8, delay=1.5)
-
-            # ID sudah ada: pastikan proses tray hidup tanpa membuka jendela utama
-            if anydesk_id and not _anydesk_process_running():
-                self.on_line("Menyalakan AnyDesk di system tray…")
-                _ensure_service(exe)
-                ok, msg = _start_anydesk_tray(exe)
-                self.on_line(msg if ok else f"Tray: {msg}")
 
             if not anydesk_id:
                 self.on_line("AnyDesk ID belum tersedia.")
@@ -244,7 +254,7 @@ class AnydeskRunner:
                 self.on_line("Gagal menyalin ke clipboard.")
 
             if _anydesk_process_running():
-                self.on_line("AnyDesk tetap di system tray (tanpa jendela utama).")
+                self.on_line("AnyDesk di system tray (tanpa jendela utama).")
             self.on_line("")
             self.on_line("Selesai — notifikasi siap. Tekan Kirim untuk buka Telegram.")
         except Exception as exc:

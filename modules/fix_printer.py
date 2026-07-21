@@ -156,16 +156,21 @@ class FixPrinterRunner:
         self.on_line(f"Folder kosong disiapkan: {backup_dir}")
         return str(backup_dir) if backup_dir.exists() else None
 
-    def _find_inf_in_backup(self, backup_dir: str) -> str:
+    def _find_inf_in_backup(self, backup_dir: str, preferred: str = "") -> str:
         root = Path(backup_dir)
         if not root.is_dir():
             return ""
-        # Prefer INF di root, lalu recursive
-        for pattern in ("*.inf", "**/*.inf"):
-            found = sorted(root.glob(pattern))
-            if found:
-                return str(found[0])
-        return ""
+        pref_name = Path(preferred).name if preferred else ""
+        if pref_name:
+            for p in root.rglob(pref_name):
+                if p.is_file():
+                    return str(p)
+        # oem*.inf dari DriverStore biasanya yang dipakai pnputil/printui
+        oems = sorted(p for p in root.rglob("oem*.inf") if p.is_file())
+        if oems:
+            return str(oems[0])
+        found = sorted(p for p in root.rglob("*.inf") if p.is_file())
+        return str(found[0]) if found else ""
 
     def _run(self) -> None:
         try:
@@ -194,17 +199,19 @@ class FixPrinterRunner:
                 self.on_line("Uninstall gagal — install ulang dibatalkan.")
                 return
             self.on_line("Uninstall OK.")
-            time.sleep(1.0)
+            time.sleep(1.5)
             self.on_line("")
 
             self.on_line("=== 4/4 INSTALL DRIVER ===")
             install_inf = ""
             if backup_dir:
-                install_inf = self._find_inf_in_backup(backup_dir)
+                install_inf = self._find_inf_in_backup(backup_dir, preferred=inf_path)
             if not install_inf and inf_path and Path(inf_path).is_file():
                 install_inf = inf_path
             if install_inf:
                 self.on_line(f"Install dari: {install_inf}")
+            else:
+                self.on_line("INF backup tidak ditemukan — coba wizard…")
             ok2, msg2 = reinstall_printer_driver(name, install_inf)
             self._emit(msg2)
             if ok2:

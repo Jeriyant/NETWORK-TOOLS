@@ -124,6 +124,10 @@ _STRINGS: dict[str, dict[str, str]] = {
     "network.info.media": {"id": "Media", "en": "Media"},
     "network.info.ipv4": {"id": "IPv4", "en": "IPv4"},
     "network.info.gateway": {"id": "Gateway", "en": "Gateway"},
+    "network.info.dns": {"id": "DNS", "en": "DNS"},
+    "network.info.copy": {"id": "Salin semua", "en": "Copy all"},
+    "network.info.copied": {"id": "Disalin ke clipboard.", "en": "Copied to clipboard."},
+    "network.info.close": {"id": "Tutup", "en": "Close"},
     "tool.printer.title": {"id": "Printer", "en": "Printer"},
     "tool.printer.desc": {
         "id": "Lihat driver terpasang & perbaiki spooler",

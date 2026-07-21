@@ -145,36 +145,116 @@ def uninstall_printer_driver(name: str) -> tuple[bool, str]:
 
 
 def reinstall_printer_driver(name: str, inf_path: str = "") -> tuple[bool, str]:
-    """Reinstall driver dari INF bila ada, atau buka wizard printer."""
+    """Reinstall driver dari INF (pnputil + printui / Add-PrinterDriver)."""
     n = (name or "").replace('"', "")
     inf = (inf_path or "").strip().strip('"')
     notes: list[str] = []
 
-    if inf:
+    if inf and Path(inf).is_file():
         try:
-            if Path(inf).is_file():
-                completed = subprocess.run(
-                    ["pnputil", "/add-driver", inf, "/install"],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    creationflags=_creation(),
-                    timeout=180,
+            completed = subprocess.run(
+                ["pnputil", "/add-driver", inf, "/install"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=_creation(),
+                timeout=180,
+            )
+            out = ((completed.stdout or "") + (completed.stderr or "")).strip()
+            notes.append(out or f"pnputil exit {completed.returncode}")
+        except Exception as exc:
+            notes.append(f"pnputil: {exc}")
+
+        # Classic PrintUI install-from-INF (paling andal untuk Type 3 driver)
+        try:
+            completed = subprocess.run(
+                [
+                    "rundll32",
+                    "printui.dll,PrintUIEntry",
+                    "/ia",
+                    "/m",
+                    n,
+                    "/h",
+                    "x64",
+                    "/v",
+                    "Type 3 - User Mode",
+                    "/f",
+                    inf,
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=_creation(),
+                timeout=180,
+            )
+            out = ((completed.stdout or "") + (completed.stderr or "")).strip()
+            notes.append(out or f"printui /ia exit {completed.returncode}")
+            if completed.returncode == 0:
+                # Verifikasi driver muncul
+                c_chk, o_chk = _run_ps(
+                    f'if (Get-PrinterDriver -Name "{n}" -ErrorAction SilentlyContinue) '
+                    '{ "OK" } else { "MISSING" }',
+                    timeout=60,
                 )
-                out = ((completed.stdout or "") + (completed.stderr or "")).strip()
-                notes.append(out or f"pnputil exit {completed.returncode}")
-                ps = (
-                    f'try {{ Add-PrinterDriver -Name "{n}" -ErrorAction Stop; "OK" }} '
-                    "catch { $_.Exception.Message }"
-                )
-                c2, o2 = _run_ps(ps, timeout=120)
-                notes.append(o2)
-                if c2 == 0 and "OK" in o2:
+                notes.append(o_chk)
+                if "OK" in (o_chk or ""):
                     return True, "\n".join(notes)
-                return completed.returncode == 0, "\n".join(notes)
+        except Exception as exc:
+            notes.append(f"printui: {exc}")
+
+        # PowerShell Add-PrinterDriver dengan -InfPath
+        ps = (
+            f'$n = "{n}"; $inf = "{inf}"; '
+            "try { "
+            "  Add-PrinterDriver -Name $n -InfPath $inf -ErrorAction Stop; "
+            '  "OK" '
+            "} catch { "
+            "  try { "
+            "    Add-PrinterDriver -Name $n -ErrorAction Stop; "
+            '    "OK" '
+            "  } catch { $_.Exception.Message } "
+            "}"
+        )
+        c2, o2 = _run_ps(ps, timeout=120)
+        notes.append(o2)
+        if c2 == 0 and "OK" in (o2 or ""):
+            return True, "\n".join(notes)
+
+        # Coba lagi tanpa constrains /h /v
+        try:
+            completed = subprocess.run(
+                [
+                    "rundll32",
+                    "printui.dll,PrintUIEntry",
+                    "/ia",
+                    "/m",
+                    n,
+                    "/f",
+                    inf,
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=_creation(),
+                timeout=180,
+            )
+            out = ((completed.stdout or "") + (completed.stderr or "")).strip()
+            notes.append(out or f"printui /ia (simple) exit {completed.returncode}")
+            c_chk, o_chk = _run_ps(
+                f'if (Get-PrinterDriver -Name "{n}" -ErrorAction SilentlyContinue) '
+                '{ "OK" } else { "MISSING" }',
+                timeout=60,
+            )
+            notes.append(o_chk)
+            if completed.returncode == 0 and "OK" in (o_chk or ""):
+                return True, "\n".join(notes)
         except Exception as exc:
             notes.append(str(exc))
+
+        return False, "\n".join(notes) if notes else "Install driver gagal."
 
     try:
         subprocess.Popen(
