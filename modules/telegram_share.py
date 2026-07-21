@@ -285,7 +285,6 @@ def _tg_protocol_url(https_url: str) -> str:
     raw = (https_url or "").strip().rstrip("/")
     if raw.lower().startswith("tg://"):
         return raw
-    # t.me/username atau t.me/+invite / t.me/joinchat/...
     marker = "t.me/"
     idx = raw.lower().find(marker)
     if idx < 0:
@@ -294,11 +293,9 @@ def _tg_protocol_url(https_url: str) -> str:
     if not path:
         return raw
     if path.startswith("+"):
-        # invite hash: tg://join?invite=HASH (tanpa +)
         return f"tg://join?invite={path[1:]}"
     if path.lower().startswith("joinchat/"):
         return f"tg://join?invite={path.split('/', 1)[1]}"
-    # public username / channel
     domain = path.split("/")[0]
     return f"tg://resolve?domain={domain}"
 
@@ -318,7 +315,6 @@ def _telegram_pids() -> list[int]:
             timeout=15,
         )
         for line in (completed.stdout or "").splitlines():
-            # "Telegram.exe","1234","Session Name","Session#","Mem Usage"
             parts = [p.strip().strip('"') for p in line.split(",")]
             if len(parts) >= 2 and parts[0].lower() == "telegram.exe":
                 try:
@@ -351,7 +347,6 @@ def _find_telegram_hwnd() -> int:
     def _cb(hwnd: int, _lp: int) -> bool:
         if not user32.IsWindowVisible(hwnd):
             return True
-        # Skip child / tool windows tanpa title besar — ambil yang punya ukuran wajar
         rect = wintypes.RECT()
         if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
             return True
@@ -368,6 +363,30 @@ def _find_telegram_hwnd() -> int:
 
     user32.EnumWindows(EnumWindowsProc(_cb), 0)
     return found[0] if found else 0
+
+
+def _window_title(hwnd: int) -> str:
+    if not hwnd or os.name != "nt":
+        return ""
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    length = user32.GetWindowTextLengthW(hwnd)
+    if length <= 0:
+        return ""
+    buf = ctypes.create_unicode_buffer(length + 1)
+    user32.GetWindowTextW(hwnd, buf, length + 1)
+    return (buf.value or "").strip()
+
+
+def _is_group_already_open(hwnd: int, group_name: str) -> bool:
+    """True jika judul jendela Telegram sudah menampilkan nama grup (chat aktif)."""
+    title = _window_title(hwnd).lower()
+    name = (group_name or "").strip().lower()
+    if not title or not name:
+        return False
+    # Juga cocokkan slug dari URL (cusjnetmonitor) bila judul memakai itu
+    return name in title
 
 
 def _activate_hwnd(hwnd: int) -> bool:
@@ -432,6 +451,42 @@ def _release_our_focus(root: Any | None) -> None:
         pass
 
 
+def _click_point(x: int, y: int) -> None:
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    user32.SetCursorPos(int(x), int(y))
+    user32.mouse_event(0x0002, 0, 0, 0, 0)  # LEFTDOWN
+    user32.mouse_event(0x0004, 0, 0, 0, 0)  # LEFTUP
+
+
+def _click_compose_area(hwnd: int) -> bool:
+    """Klik kotak pesan (bawah tengah) agar fokus input sebelum paste."""
+    if not hwnd or os.name != "nt":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    rect = wintypes.RECT()
+    if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        return False
+    w = rect.right - rect.left
+    h = rect.bottom - rect.top
+    if w < 100 or h < 100:
+        return False
+    # Beberapa titik: input biasanya kiri tombol Send
+    points = (
+        (rect.left + int(w * 0.55), rect.bottom - 48),
+        (rect.left + int(w * 0.45), rect.bottom - 42),
+        (rect.left + int(w * 0.65), rect.bottom - 55),
+    )
+    for x, y in points:
+        _click_point(x, y)
+        return True
+    return False
+
+
 def _click_telegram_send_button(hwnd: int) -> bool:
     """Klik area tombol Send (pojok kanan-bawah jendela Telegram)."""
     if not hwnd or os.name != "nt":
@@ -447,37 +502,61 @@ def _click_telegram_send_button(hwnd: int) -> bool:
         (rect.right - 44, rect.bottom - 46),
         (rect.right - 60, rect.bottom - 52),
         (rect.right - 36, rect.bottom - 40),
+        (rect.right - 50, rect.bottom - 70),  # media preview Send
     )
     for x, y in points:
         if x <= rect.left or y <= rect.top:
             continue
-        user32.SetCursorPos(int(x), int(y))
-        user32.mouse_event(0x0002, 0, 0, 0, 0)  # LEFTDOWN
-        user32.mouse_event(0x0004, 0, 0, 0, 0)  # LEFTUP
+        _click_point(x, y)
         return True
     return False
 
 
-def _send_enter_key() -> None:
+def _key_chord(*vk_codes: int) -> None:
+    """Tekan kombinasi tombol via keybd_event (lebih andal dari VBS SendKeys)."""
     import ctypes
 
     user32 = ctypes.windll.user32
-    VK_RETURN = 0x0D
     KEYEVENTF_KEYUP = 0x0002
-    user32.keybd_event(VK_RETURN, 0, 0, 0)
-    user32.keybd_event(VK_RETURN, 0, KEYEVENTF_KEYUP, 0)
+    for vk in vk_codes:
+        user32.keybd_event(vk, 0, 0, 0)
+    for vk in reversed(vk_codes):
+        user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+
+
+def _send_ctrl_v() -> None:
+    VK_CONTROL = 0x11
+    VK_V = 0x56
+    _key_chord(VK_CONTROL, VK_V)
+
+
+def _send_enter_key() -> None:
+    VK_RETURN = 0x0D
+    _key_chord(VK_RETURN)
 
 
 def open_telegram_group_link(
     url: str = "",
     telegram_exe: str = "",
 ) -> bool:
-    """Buka chat grup via deep link (tg:// / https://t.me/...) di Telegram Desktop."""
+    """Buka chat grup via deep link; reuse instance yang sudah jalan (ShellExecute)."""
     https_url = (url or _telegram_group_url()).strip() or "https://t.me/cusjnetmonitor"
     tg_url = _tg_protocol_url(https_url)
     telegram = _find_telegram(telegram_exe)
 
-    # 1) Argumen ke Telegram.exe — paling andal (tidak lewat browser)
+    # 1) ShellExecute tg:// — pakai instance Telegram yang sudah terbuka
+    if os.name == "nt":
+        import ctypes
+
+        for link in (tg_url, https_url):
+            try:
+                rc = int(ctypes.windll.shell32.ShellExecuteW(None, "open", link, None, None, 1))
+                if rc > 32:
+                    return True
+            except Exception:
+                pass
+
+    # 2) Telegram.exe + link (cold start)
     if telegram:
         for link in (https_url, tg_url):
             try:
@@ -490,68 +569,34 @@ def open_telegram_group_link(
                 except Exception:
                     pass
 
-    # 2) Protocol / URL association Windows
     if os.name == "nt":
-        for link in (tg_url, https_url):
-            try:
-                os.startfile(link)  # type: ignore[attr-defined]
-                return True
-            except Exception:
-                pass
         try:
-            creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            subprocess.Popen(
-                ["cmd", "/c", "start", "", https_url],
-                shell=False,
-                creationflags=creation,
-            )
+            os.startfile(https_url)  # type: ignore[attr-defined]
             return True
         except Exception:
             pass
     return False
 
 
-def _run_vbs_paste(telegram_pid: int) -> tuple[bool, str]:
-    """Aktifkan Telegram lalu Ctrl+V (konten sudah di clipboard)."""
-    vbs = (
-        "Option Explicit\n"
-        "Dim sh, ok, i\n"
-        'Set sh = CreateObject("WScript.Shell")\n'
-        "ok = False\n"
-        "For i = 1 To 8\n"
-        f"  ok = sh.AppActivate({int(telegram_pid)})\n"
-        "  If ok Then Exit For\n"
-        '  ok = sh.AppActivate("Telegram")\n'
-        "  If ok Then Exit For\n"
-        "  WScript.Sleep 120\n"
-        "Next\n"
-        "WScript.Sleep 120\n"
-        'sh.SendKeys "{ESC}"\n'
-        "WScript.Sleep 50\n"
-        'sh.SendKeys "^v"\n'
-        "WScript.Sleep 180\n"
-    )
-    path = Path(tempfile.gettempdir()) / f"network_tools_tg_paste_{os.getpid()}.vbs"
-    try:
-        path.write_text(vbs, encoding="utf-8")
-        creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        completed = subprocess.run(
-            ["wscript.exe", "//B", "//Nologo", str(path)],
-            capture_output=True,
-            text=True,
-            creationflags=creation,
-            timeout=30,
-        )
-        if completed.returncode != 0:
-            return False, f"SendKeys gagal (exit {completed.returncode})."
-        return True, "Paste OK"
-    except Exception as exc:
-        return False, str(exc)
-    finally:
-        try:
-            path.unlink(missing_ok=True)
-        except Exception:
-            pass
+def _paste_and_send_keys(hwnd: int) -> None:
+    """Fokus chat → klik input → Ctrl+V → Send (tanpa ESC — ESC menutup chat!)."""
+    import time
+
+    if hwnd:
+        _activate_hwnd(hwnd)
+        time.sleep(0.15)
+        _click_compose_area(hwnd)
+        time.sleep(0.12)
+    _send_ctrl_v()
+    # Gambar butuh waktu muncul di preview / caption
+    time.sleep(0.45)
+    if hwnd:
+        _click_telegram_send_button(hwnd)
+        time.sleep(0.15)
+    _send_enter_key()
+    time.sleep(0.12)
+    # Cadangan kedua Enter (beberapa build TG butuh Enter di caption)
+    _send_enter_key()
 
 
 def paste_and_send_to_telegram_group(
@@ -561,12 +606,12 @@ def paste_and_send_to_telegram_group(
     settle_sec: float = 0.55,
     root: Any | None = None,
     group_url: str = "",
+    clipboard_refresh: Any | None = None,
 ) -> tuple[bool, str]:
     """
-    Alur universal:
-      1) Buka https://t.me/... (Telegram Desktop)
-      2) Ctrl+V
-      3) Klik Send (+ Enter cadangan)
+    Alur:
+      - Jika grup sudah terbuka: fokus → paste → Send (jangan buka link / ESC).
+      - Jika belum: buka t.me / tg:// → tunggu → paste → Send.
     """
     import time
 
@@ -575,50 +620,63 @@ def paste_and_send_to_telegram_group(
 
     url = (group_url or _telegram_group_url()).strip()
     label = (group_name or _telegram_group_name()).strip() or url
-    _release_our_focus(root)
-
-    was_running = bool(_telegram_pids())
-    if not open_telegram_group_link(url, telegram_exe=telegram_exe):
-        # Cadangan: buka app saja
-        if not open_telegram(telegram_exe, background=False):
-            return False, "Telegram Desktop tidak ditemukan / link gagal dibuka."
-
-    # Tunggu proses + chat terbuka
-    pids: list[int] = []
-    wait_loops = 28 if not was_running else 14
-    for _ in range(wait_loops):
-        time.sleep(0.12)
-        pids = _telegram_pids()
-        if pids:
-            break
-    if not pids:
-        return False, "Proses Telegram.exe tidak ditemukan."
-
-    # Extra settle: cold start lebih lama agar chat dari deep link siap
-    time.sleep(1.1 if not was_running else max(0.45, settle_sec))
-
-    hwnd = _find_telegram_hwnd()
-    if hwnd:
-        _activate_hwnd(hwnd)
-        time.sleep(0.12)
-    _release_our_focus(root)
-
-    ok, msg = _run_vbs_paste(pids[0])
-    if not ok:
-        return False, msg
-
-    hwnd2 = _find_telegram_hwnd() or hwnd
-    if hwnd2:
-        _activate_hwnd(hwnd2)
-        time.sleep(0.08)
-        _click_telegram_send_button(hwnd2)
-        time.sleep(0.12)
+    # Slug dari URL untuk deteksi judul (kadang judul = username)
+    slug = ""
     try:
-        _send_enter_key()
+        slug = url.rstrip("/").split("/")[-1].split("?")[0].lstrip("+")
     except Exception:
         pass
 
-    return True, f'Chat dibuka via {url} ("{label}") — dikirim.'
+    _release_our_focus(root)
+
+    was_running = bool(_telegram_pids())
+    hwnd0 = _find_telegram_hwnd() if was_running else 0
+    already = bool(
+        hwnd0
+        and (
+            _is_group_already_open(hwnd0, label)
+            or (slug and _is_group_already_open(hwnd0, slug))
+        )
+    )
+
+    if already:
+        # Jangan buka ulang deep link / ESC — cukup fokus + paste
+        _activate_hwnd(hwnd0)
+        time.sleep(0.2)
+    else:
+        if not open_telegram_group_link(url, telegram_exe=telegram_exe):
+            if not open_telegram(telegram_exe, background=False):
+                return False, "Telegram Desktop tidak ditemukan / link gagal dibuka."
+
+        pids: list[int] = []
+        wait_loops = 30 if not was_running else 16
+        for _ in range(wait_loops):
+            time.sleep(0.12)
+            pids = _telegram_pids()
+            if pids:
+                break
+        if not pids:
+            return False, "Proses Telegram.exe tidak ditemukan."
+
+        time.sleep(1.25 if not was_running else max(0.55, settle_sec))
+
+    # Refresh clipboard tepat sebelum paste (link/fokus bisa mengganggu timing)
+    if callable(clipboard_refresh):
+        try:
+            clipboard_refresh()
+        except Exception:
+            pass
+        time.sleep(0.08)
+
+    _release_our_focus(root)
+    hwnd = _find_telegram_hwnd() or hwnd0
+    if not hwnd:
+        return False, "Jendela Telegram tidak ditemukan."
+
+    _paste_and_send_keys(hwnd)
+
+    mode = "chat aktif" if already else f"via {url}"
+    return True, f'Kirim ke "{label}" ({mode}).'
 
 
 def send_via_telegram(
@@ -629,17 +687,21 @@ def send_via_telegram(
     """Copy screenshot, buka deep link grup → paste & kirim."""
     tips: list[str] = []
 
-    copied = copy_image_to_clipboard(screenshot)
-    if not copied:
-        copied = copy_image_powershell(screenshot)
+    def _refresh() -> bool:
+        return copy_image_to_clipboard(screenshot) or copy_image_powershell(screenshot)
 
+    copied = _refresh()
     if copied:
         tips.append("Gambar sudah di clipboard.")
     else:
         tips.append(f"Clipboard gagal. File tersimpan: {screenshot}")
         return copied, tips
 
-    ok, msg = paste_and_send_to_telegram_group(telegram_exe=telegram_exe, root=root)
+    ok, msg = paste_and_send_to_telegram_group(
+        telegram_exe=telegram_exe,
+        root=root,
+        clipboard_refresh=_refresh,
+    )
     tips.append(msg if ok else f"Otomasi gagal: {msg}. Tempel manual (Ctrl+V).")
     if not ok:
         open_telegram_group_link(telegram_exe=telegram_exe)
@@ -653,14 +715,23 @@ def send_text_via_telegram(
 ) -> tuple[bool, list[str]]:
     """Copy plain text, buka deep link grup → paste & kirim."""
     tips: list[str] = []
-    copied = copy_text_to_clipboard(text or "", root=root)
+    payload = text or ""
+
+    def _refresh() -> bool:
+        return copy_text_to_clipboard(payload, root=root)
+
+    copied = _refresh()
     if copied:
         tips.append("Teks sudah di clipboard.")
     else:
         tips.append("Gagal menyalin teks ke clipboard.")
         return copied, tips
 
-    ok, msg = paste_and_send_to_telegram_group(telegram_exe=telegram_exe, root=root)
+    ok, msg = paste_and_send_to_telegram_group(
+        telegram_exe=telegram_exe,
+        root=root,
+        clipboard_refresh=_refresh,
+    )
     tips.append(msg if ok else f"Otomasi gagal: {msg}. Tempel manual (Ctrl+V).")
     if not ok:
         open_telegram_group_link(telegram_exe=telegram_exe)
@@ -764,8 +835,13 @@ def send_apps_file_via_telegram(
 
     telegram = _find_telegram(telegram_exe)
     if telegram and copied:
+        def _refresh() -> bool:
+            return copy_file_to_clipboard(path)
+
         ok, msg = paste_and_send_to_telegram_group(
-            telegram_exe=telegram_exe, root=root
+            telegram_exe=telegram_exe,
+            root=root,
+            clipboard_refresh=_refresh,
         )
         tips.append(msg if ok else f"Otomasi gagal: {msg}. Tempel file manual (Ctrl+V).")
     elif telegram:
