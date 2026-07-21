@@ -279,8 +279,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     },
     "tool.anydesk.title": {"id": "Anydesk", "en": "Anydesk"},
     "tool.anydesk.desc": {
-        "id": "Taskkill, jalankan AnyDesk, tampilkan ID (tanpa UAC)",
-        "en": "Taskkill, run AnyDesk, show ID (no UAC)",
+        "id": "Taskkill, jalankan AnyDesk (--tray), tampilkan ID",
+        "en": "Taskkill, run AnyDesk (--tray), show ID",
     },
     # Apps list
     "apps.loading": {"id": "Memuat daftar aplikasi…", "en": "Loading application list…"},
