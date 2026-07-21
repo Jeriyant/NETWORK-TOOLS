@@ -468,11 +468,7 @@ class ScpPanel:
         self._term_menu.add_command(label="Select All", command=self._on_term_select_all)
         self._term_menu.add_command(label="Clear", command=self._term_clear_ui)
 
-        self._term_write(
-            t("scp.need_connect") + "\n"
-            "Terminal — arrow/Ctrl untuk nano/vim · klik kanan: Copy/Paste.\n"
-            "Explorer: drop=upload · seret=download · Buka+Save=upload otomatis.\n"
-        )
+        # Terminal kosong sampai terhubung
         self.term.configure(state="disabled")
 
         self._setup_drag_drop()
@@ -636,8 +632,11 @@ class ScpPanel:
                 or "\x1b[?47h" in text
                 or "\x1b[?1047h" in text
             )
-            # Jangan anggap clear biasa (\x1b[2J dari `clear`) sebagai masuk nano
-            # kecuali ada alternate-screen / nano header
+            has_clear = (
+                "\x1b[2J" in text
+                or "\x1bc" in text
+                or "\x1b[3J" in text
+            )
             if (
                 not self._term_fullscreen
                 and not enter_fs
@@ -645,9 +644,26 @@ class ScpPanel:
             ):
                 enter_fs = True
 
+            # Perintah clear / CSI wipe — selalu hapus layar (keluar nano yang nyangkut)
+            if has_clear and not enter_fs:
+                self._term_fullscreen = False
+                try:
+                    self._ansi.clear()
+                except Exception:
+                    pass
+                self.term.delete("1.0", "end")
+                plain = strip_plain(text)
+                plain = plain.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
+                if plain:
+                    self.term.insert("end", plain + "\n")
+                self.term.see("end")
+                self._term_mark = self.term.index("end-1c")
+                if not self.session.connected:
+                    self.term.configure(state="disabled")
+                return
+
             if leave_fs:
                 self._exit_fullscreen_term()
-                # Sisa teks setelah keluar nano (biasanya kosong) — lanjut mode biasa
                 text = (
                     text.replace("\x1b[?1049l", "")
                     .replace("\x1b[?47l", "")
@@ -676,10 +692,6 @@ class ScpPanel:
                     pass
                 self._term_mark = self.term.index("end-1c")
             else:
-                # `clear` / CSI clear → kosongkan UI (bukan mode nano)
-                if "\x1b[2J" in text or "\x1bc" in text or "\x1b[3J" in text:
-                    self.term.delete("1.0", "end")
-                    self._ansi.clear()
                 plain = strip_plain(text)
                 plain = plain.replace("\r\n", "\n").replace("\r", "\n")
                 for ch in plain:
@@ -717,21 +729,27 @@ class ScpPanel:
             pass
 
     def _term_clear_ui(self) -> None:
-        was = str(self.term.cget("state"))
-        self._exit_fullscreen_term()
-        self.term.configure(state="normal")
-        self.term.delete("1.0", "end")
-        self._term_mark = "1.0"
-        if was == "disabled" or not self.session.connected:
-            self.term.configure(state="disabled")
+        """Kosongkan tampilan terminal (lokal)."""
+        connected = bool(self.session.connected)
+        self._term_fullscreen = False
+        try:
+            self._ansi.clear()
+        except Exception:
+            pass
+        try:
+            self.term.configure(state="normal")
+            self.term.delete("1.0", "end")
+            self._term_mark = "1.0"
+            if not connected:
+                self.term.configure(state="disabled")
+        except Exception:
+            pass
 
     def _on_term_clear(self, _event: Any = None) -> str:
-        """Ctrl+L / clear UI — keluar nano buffer lalu kirim clear ke shell."""
-        self._exit_fullscreen_term()
+        """Ctrl+L — hapus tampilan + kirim clear ke shell bila terhubung."""
         self._term_clear_ui()
-        if self._shell_chan is not None:
+        if self._shell_chan is not None and self.session.connected:
             try:
-                # RIS + clear screen sequence, lalu perintah clear
                 self._shell_chan.send("\x1bc")
                 self._shell_chan.send("clear\r")
             except Exception:

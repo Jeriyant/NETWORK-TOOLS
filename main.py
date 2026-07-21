@@ -2204,45 +2204,45 @@ class NetworkToolsApp(ctk.CTk):
                 inner = ctk.CTkFrame(card, fg_color="transparent")
                 inner.pack(fill="x", padx=16, pady=14)
 
-                head = ctk.CTkFrame(inner, fg_color="transparent")
-                head.pack(fill="x")
                 ctk.CTkLabel(
-                    head,
+                    inner,
                     text=item.get("label", "—"),
                     font=ctk.CTkFont(family="Segoe UI Semibold", size=16),
                     text_color=COLORS["text"],
-                    anchor="w",
-                ).pack(side="left", fill="x", expand=True)
+                    anchor="center",
+                    justify="center",
+                ).pack(fill="x")
 
                 st = str(item.get("status", "UNKNOWN"))
                 fg, on = _status_color(bool(item.get("ok")), st)
                 badge = ctk.CTkFrame(
-                    head,
+                    inner,
                     fg_color=fg,
-                    corner_radius=8,
-                    width=108,
-                    height=28,
+                    corner_radius=10,
+                    height=36,
                 )
-                badge.pack(side="right")
+                badge.pack(fill="x", pady=(10, 0))
                 badge.pack_propagate(False)
                 ctk.CTkLabel(
                     badge,
                     text=st,
-                    font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+                    font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
                     text_color=on,
                     anchor="center",
                     justify="center",
-                ).place(relx=0.5, rely=0.5, anchor="center")
+                ).pack(expand=True, fill="both", padx=8, pady=4)
 
-                ctk.CTkLabel(
-                    inner,
-                    text=item.get("detail", ""),
-                    font=ctk.CTkFont(family="Segoe UI", size=13),
-                    text_color=COLORS["muted"],
-                    anchor="w",
-                    justify="left",
-                    wraplength=720,
-                ).pack(fill="x", pady=(8, 0))
+                detail = str(item.get("detail", "") or "").strip()
+                if detail:
+                    ctk.CTkLabel(
+                        inner,
+                        text=detail,
+                        font=ctk.CTkFont(family="Segoe UI", size=13),
+                        text_color=COLORS["muted"],
+                        anchor="center",
+                        justify="center",
+                        wraplength=720,
+                    ).pack(fill="x", pady=(10, 0))
 
         def on_result(items: list[Any]) -> None:
             self.after(0, lambda: _render(items))
