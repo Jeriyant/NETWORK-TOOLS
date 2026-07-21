@@ -4,6 +4,7 @@ Network Tools — single-window desktop utility suite.
 
 from __future__ import annotations
 
+import random
 import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox
@@ -95,20 +96,24 @@ def tools_for_ui() -> list[tuple[str, str, str, str]]:
 # Backward-compatible alias — prefer tools_for_ui() for live language
 TOOLS = TOOL_DEFS
 
-# Warna tile dashboard (bg, hover) — tiap menu beda warna
+# Warna tile dashboard terang — diacak tiap aplikasi dibuka
 DASH_TILE_PALETTE: list[tuple[str, str]] = [
-    ("#2563EB", "#1D4ED8"),  # biru
-    ("#059669", "#047857"),  # hijau
-    ("#D97706", "#B45309"),  # oranye
-    ("#7C3AED", "#6D28D9"),  # ungu
-    ("#0891B2", "#0E7490"),  # cyan
-    ("#DB2777", "#BE185D"),  # pink
-    ("#4F46E5", "#4338CA"),  # indigo
-    ("#DC2626", "#B91C1C"),  # merah
-    ("#0D9488", "#0F766E"),  # teal
-    ("#CA8A04", "#A16207"),  # kuning
-    ("#9333EA", "#7E22CE"),  # violet
-    ("#EA580C", "#C2410C"),  # terakota
+    ("#38BDF8", "#0EA5E9"),  # sky
+    ("#22C55E", "#16A34A"),  # green
+    ("#F97316", "#EA580C"),  # orange
+    ("#A855F7", "#9333EA"),  # purple
+    ("#14B8A6", "#0D9488"),  # teal
+    ("#EC4899", "#DB2777"),  # pink
+    ("#6366F1", "#4F46E5"),  # indigo
+    ("#EF4444", "#DC2626"),  # red
+    ("#06B6D4", "#0891B2"),  # cyan
+    ("#EAB308", "#CA8A04"),  # yellow
+    ("#8B5CF6", "#7C3AED"),  # violet
+    ("#FB7185", "#F43F5E"),  # rose
+    ("#2DD4BF", "#14B8A6"),  # aqua
+    ("#84CC16", "#65A30D"),  # lime
+    ("#60A5FA", "#3B82F6"),  # blue
+    ("#F472B6", "#EC4899"),  # hot pink
 ]
 DASH_TILE_TEXT = "#FFFFFF"
 DASH_TILE_MUTED = "#E2E8F0"
@@ -217,6 +222,7 @@ class NetworkToolsApp(ctk.CTk):
         self._apps_list: list[dict[str, str]] = []
         self._security_items: list[Any] = []
         self._send_text_payload: str = ""
+        self._dash_palette_cycle = random.sample(DASH_TILE_PALETTE, k=len(DASH_TILE_PALETTE))
 
         self._header = ctk.CTkFrame(self, fg_color="transparent")
         self._sysinfo_strip = ctk.CTkFrame(self, fg_color="transparent")
@@ -1224,7 +1230,8 @@ class NetworkToolsApp(ctk.CTk):
 
         for idx, (key, title, icon, desc) in enumerate(tools):
             r, c = divmod(idx, cols)
-            tile_bg, tile_hover = DASH_TILE_PALETTE[idx % len(DASH_TILE_PALETTE)]
+            palette = getattr(self, "_dash_palette_cycle", DASH_TILE_PALETTE)
+            tile_bg, tile_hover = palette[idx % len(palette)]
             tile = ctk.CTkFrame(
                 grid,
                 fg_color=tile_bg,
