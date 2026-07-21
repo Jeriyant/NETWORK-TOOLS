@@ -1744,9 +1744,9 @@ class NetworkToolsApp(ctk.CTk):
                     text=t("app.send"),
                     width=120,
                     height=36,
-                    fg_color=COLORS["accent"],
-                    hover_color=COLORS["accent_dim"],
-                    text_color=COLORS["on_accent"],
+                    fg_color=COLORS.get("ok", "#12B76A"),
+                    hover_color=COLORS.get("ok_dim", "#0E9F5A"),
+                    text_color=COLORS.get("on_ok", "#FFFFFF"),
                     command=(
                         self._send_text_payload_to_telegram
                         if key in TEXT_SEND_TOOLS
@@ -1781,9 +1781,9 @@ class NetworkToolsApp(ctk.CTk):
             text=t("app.send"),
             width=120,
             height=36,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_dim"],
-            text_color=COLORS["on_accent"],
+            fg_color=COLORS.get("ok", "#12B76A"),
+            hover_color=COLORS.get("ok_dim", "#0E9F5A"),
+            text_color=COLORS.get("on_ok", "#FFFFFF"),
             command=(
                 self._send_text_payload_to_telegram
                 if text_send
@@ -1818,9 +1818,9 @@ class NetworkToolsApp(ctk.CTk):
                 text=t("app.send"),
                 width=100,
                 height=height,
-                fg_color=COLORS["accent"],
-                hover_color=COLORS["accent_dim"],
-                text_color=COLORS["on_accent"],
+                fg_color=COLORS.get("ok", "#12B76A"),
+                hover_color=COLORS.get("ok_dim", "#0E9F5A"),
+                text_color=COLORS.get("on_ok", "#FFFFFF"),
                 command=send_cmd,
             ).pack(side="right", padx=(8, 0))
             return
@@ -1830,9 +1830,9 @@ class NetworkToolsApp(ctk.CTk):
             text=t("app.send"),
             width=100,
             height=height,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_dim"],
-            text_color=COLORS["on_accent"],
+            fg_color=COLORS.get("ok", "#12B76A"),
+            hover_color=COLORS.get("ok_dim", "#0E9F5A"),
+            text_color=COLORS.get("on_ok", "#FFFFFF"),
             command=send_cmd,
         ).pack(side="left", padx=(8, 0))
         ctk.CTkButton(
@@ -1902,9 +1902,9 @@ class NetworkToolsApp(ctk.CTk):
             text=t("app.send"),
             width=100,
             height=32,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_dim"],
-            text_color=COLORS["on_accent"],
+            fg_color=COLORS.get("ok", "#12B76A"),
+            hover_color=COLORS.get("ok_dim", "#0E9F5A"),
+            text_color=COLORS.get("on_ok", "#FFFFFF"),
             command=self._send_text_payload_to_telegram,
         ).pack(side="right", padx=(8, 0))
         btn_refresh = ctk.CTkButton(
@@ -2143,9 +2143,9 @@ class NetworkToolsApp(ctk.CTk):
             text=t("app.send"),
             width=100,
             height=32,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_dim"],
-            text_color=COLORS["on_accent"],
+            fg_color=COLORS.get("ok", "#12B76A"),
+            hover_color=COLORS.get("ok_dim", "#0E9F5A"),
+            text_color=COLORS.get("on_ok", "#FFFFFF"),
             command=self._send_screenshot,
         ).pack(side="right", padx=(8, 0))
         btn_refresh = ctk.CTkButton(
@@ -2323,9 +2323,9 @@ class NetworkToolsApp(ctk.CTk):
             text=t("app.send"),
             width=100,
             height=32,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_dim"],
-            text_color=COLORS["on_accent"],
+            fg_color=COLORS.get("ok", "#12B76A"),
+            hover_color=COLORS.get("ok_dim", "#0E9F5A"),
+            text_color=COLORS.get("on_ok", "#FFFFFF"),
             command=self._send_screenshot,
         ).pack(side="right", padx=(8, 0))
 
@@ -2675,9 +2675,9 @@ class NetworkToolsApp(ctk.CTk):
                 text=t("app.send"),
                 width=150,
                 height=40,
-                fg_color=COLORS["accent"],
-                hover_color=COLORS["accent_dim"],
-                text_color=COLORS["on_accent"],
+                fg_color=COLORS.get("ok", "#12B76A"),
+                hover_color=COLORS.get("ok_dim", "#0E9F5A"),
+                text_color=COLORS.get("on_ok", "#FFFFFF"),
                 font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
                 corner_radius=10,
                 command=_send_status_shot,
@@ -2808,9 +2808,9 @@ class NetworkToolsApp(ctk.CTk):
             text=t("app.send"),
             width=100,
             height=32,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_dim"],
-            text_color=COLORS["on_accent"],
+            fg_color=COLORS.get("ok", "#12B76A"),
+            hover_color=COLORS.get("ok_dim", "#0E9F5A"),
+            text_color=COLORS.get("on_ok", "#FFFFFF"),
             command=self._send_screenshot,
         ).pack(side="right", padx=(8, 0))
 
@@ -3167,9 +3167,9 @@ class NetworkToolsApp(ctk.CTk):
             text=t("app.send"),
             width=100,
             height=32,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_dim"],
-            text_color=COLORS["on_accent"],
+            fg_color=COLORS.get("ok", "#12B76A"),
+            hover_color=COLORS.get("ok_dim", "#0E9F5A"),
+            text_color=COLORS.get("on_ok", "#FFFFFF"),
             command=self._send_screenshot,
         ).pack(side="right", padx=(8, 0))
 
@@ -3627,9 +3627,9 @@ class NetworkToolsApp(ctk.CTk):
             text=t("app.send"),
             width=100,
             height=30,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_dim"],
-            text_color=COLORS["on_accent"],
+            fg_color=COLORS.get("ok", "#12B76A"),
+            hover_color=COLORS.get("ok_dim", "#0E9F5A"),
+            text_color=COLORS.get("on_ok", "#FFFFFF"),
             command=self._send_screenshot,
         ).pack(side="left", padx=(0, 8))
         ctk.CTkButton(
@@ -4331,9 +4331,9 @@ class NetworkToolsApp(ctk.CTk):
             text=t("app.send"),
             width=100,
             height=32,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_dim"],
-            text_color=COLORS["on_accent"],
+            fg_color=COLORS.get("ok", "#12B76A"),
+            hover_color=COLORS.get("ok_dim", "#0E9F5A"),
+            text_color=COLORS.get("on_ok", "#FFFFFF"),
             command=self._send_screenshot,
         ).pack(side="right", padx=(8, 0))
         ctk.CTkButton(
@@ -4494,9 +4494,9 @@ class NetworkToolsApp(ctk.CTk):
                 text=t("app.send"),
                 width=120,
                 height=36,
-                fg_color=COLORS["accent"],
-                hover_color=COLORS["accent_dim"],
-                text_color=COLORS["on_accent"],
+                fg_color=COLORS.get("ok", "#12B76A"),
+                hover_color=COLORS.get("ok_dim", "#0E9F5A"),
+                text_color=COLORS.get("on_ok", "#FFFFFF"),
                 command=self._send_screenshot,
             ).pack(side="right")
         else:
@@ -4927,9 +4927,9 @@ class NetworkToolsApp(ctk.CTk):
             text=t("app.send"),
             width=160,
             height=40,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_dim"],
-            text_color=COLORS["on_accent"],
+            fg_color=COLORS.get("ok", "#12B76A"),
+            hover_color=COLORS.get("ok_dim", "#0E9F5A"),
+            text_color=COLORS.get("on_ok", "#FFFFFF"),
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             corner_radius=10,
             command=send_telegram,
