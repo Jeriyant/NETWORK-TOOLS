@@ -944,7 +944,11 @@ class ScpPanel:
             elif event.keysym == "BackSpace":
                 if self._typed_line:
                     self._typed_line = self._typed_line[:-1]
-                self._shell_chan.send("\x7f")  # nano biasanya DEL
+                # Shell/BusyBox biasanya erase=^H; nano/vim lebih suka DEL
+                if self._term_fullscreen:
+                    self._shell_chan.send("\x7f")
+                else:
+                    self._shell_chan.send("\x08")
             elif event.keysym == "Delete":
                 self._shell_chan.send("\x1b[3~")
             elif event.keysym == "Tab":
@@ -952,6 +956,18 @@ class ScpPanel:
             elif event.keysym == "Escape":
                 self._typed_line = ""
                 self._shell_chan.send("\x1b")
+            elif ch == "\x08":
+                # Beberapa layout kirim Backspace sebagai char tanpa keysym BackSpace
+                if self._typed_line:
+                    self._typed_line = self._typed_line[:-1]
+                if self._term_fullscreen:
+                    self._shell_chan.send("\x7f")
+                else:
+                    self._shell_chan.send("\x08")
+            elif ch == "\x7f":
+                if self._typed_line:
+                    self._typed_line = self._typed_line[:-1]
+                self._shell_chan.send("\x7f")
             elif ch:
                 if ch.isprintable() and not self._term_fullscreen:
                     self._typed_line += ch

@@ -1708,12 +1708,20 @@ class NetworkToolsApp(ctk.CTk):
         ).pack(side="left")
         self._build_sysinfo_bar(self._sysinfo_strip)
 
-        # AnyDesk: Kirim/Kembali di bawah bar info + Always on Top
+        # AnyDesk: hanya Kembali di menu (Kirim ada di notifikasi ID saja)
         if key == "anydesk":
             self._set_anydesk_topmost(True)
             controls = ctk.CTkFrame(self._content, fg_color="transparent")
             controls.pack(fill="x", pady=(0, 8))
-            self._pack_inline_send_back(controls, side="right", height=36)
+            ctk.CTkButton(
+                controls,
+                text=t("app.back"),
+                width=100,
+                height=36,
+                fg_color=COLORS["danger"],
+                hover_color=COLORS["danger_hover"],
+                command=self._cancel_to_dashboard,
+            ).pack(side="right", padx=(8, 0))
         elif key not in AUTO_RUN_TOOLS:
             self._set_anydesk_topmost(False)
             controls = ctk.CTkFrame(self._content, fg_color="transparent")

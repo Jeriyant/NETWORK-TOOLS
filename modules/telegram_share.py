@@ -435,6 +435,42 @@ def _is_group_already_open(hwnd: int, group_name: str) -> bool:
     return name in title
 
 
+def _click_telegram_send_button(hwnd: int) -> bool:
+    """Klik area tombol Send (pojok kanan-bawah jendela Telegram)."""
+    if not hwnd or os.name != "nt":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    rect = wintypes.RECT()
+    if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        return False
+    points = (
+        (rect.right - 44, rect.bottom - 46),
+        (rect.right - 60, rect.bottom - 52),
+        (rect.right - 36, rect.bottom - 40),
+    )
+    for x, y in points:
+        if x <= rect.left or y <= rect.top:
+            continue
+        user32.SetCursorPos(int(x), int(y))
+        user32.mouse_event(0x0002, 0, 0, 0, 0)  # LEFTDOWN
+        user32.mouse_event(0x0004, 0, 0, 0, 0)  # LEFTUP
+        return True
+    return False
+
+
+def _send_enter_key() -> None:
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    VK_RETURN = 0x0D
+    KEYEVENTF_KEYUP = 0x0002
+    user32.keybd_event(VK_RETURN, 0, 0, 0)
+    user32.keybd_event(VK_RETURN, 0, KEYEVENTF_KEYUP, 0)
+
+
 def _run_vbs_sendkeys(
     group_name: str,
     telegram_pid: int,
@@ -444,32 +480,30 @@ def _run_vbs_sendkeys(
     """Jalankan otomasi via WScript.Shell SendKeys (cepat, ala AutoHotkey)."""
     safe = _sendkeys_escape(group_name)
     vbs_title = (group_name or "Telegram").replace('"', '""')
-    # Jika grup sudah terbuka: jangan Ctrl+K (itu jadi search dalam chat → gagal)
+    # Grup sudah terbuka → jangan Ctrl+K (jadi search dalam chat)
     if skip_search:
         body = (
             'sh.SendKeys "{ESC}"\n'
-            "WScript.Sleep 80\n"
+            "WScript.Sleep 60\n"
             'sh.SendKeys "{ESC}"\n'
-            "WScript.Sleep 100\n"
+            "WScript.Sleep 80\n"
             'sh.SendKeys "^v"\n'
-            "WScript.Sleep 180\n"
-            'sh.SendKeys "{ENTER}"\n'
+            "WScript.Sleep 160\n"
         )
     else:
         body = (
             'sh.SendKeys "{ESC}"\n'
-            "WScript.Sleep 80\n"
+            "WScript.Sleep 60\n"
             'sh.SendKeys "{ESC}"\n'
-            "WScript.Sleep 100\n"
+            "WScript.Sleep 80\n"
             'sh.SendKeys "^k"\n'
-            "WScript.Sleep 220\n"
+            "WScript.Sleep 200\n"
             f'sh.SendKeys "{safe}"\n'
-            "WScript.Sleep 280\n"
+            "WScript.Sleep 260\n"
             'sh.SendKeys "{ENTER}"\n'
-            "WScript.Sleep 350\n"
+            "WScript.Sleep 320\n"
             'sh.SendKeys "^v"\n'
-            "WScript.Sleep 180\n"
-            'sh.SendKeys "{ENTER}"\n'
+            "WScript.Sleep 160\n"
         )
 
     vbs = (
@@ -521,8 +555,8 @@ def paste_and_send_to_telegram_group(
     root: Any | None = None,
 ) -> tuple[bool, str]:
     """
-    Aktifkan Telegram → (jika perlu) buka grup → Ctrl+V → Enter.
-    Jika grup sudah terbuka, lewati Ctrl+K agar tidak gagal (search dalam chat).
+    - Grup Monitoring jaringan sudah terbuka: paste → klik Send.
+    - Posisi lain / Telegram belum buka: buka → Ctrl+K cari → paste → klik Send.
     """
     import time
 
@@ -533,6 +567,7 @@ def paste_and_send_to_telegram_group(
     _release_our_focus(root)
 
     pids = _telegram_pids()
+    was_running = bool(pids)
     opened = open_telegram(telegram_exe, background=False)
     if not opened and not pids:
         return False, "Telegram Desktop tidak ditemukan."
@@ -543,9 +578,9 @@ def paste_and_send_to_telegram_group(
             pids = _telegram_pids()
             if pids:
                 break
-        time.sleep(max(0.25, settle_sec))
+        time.sleep(max(0.3, settle_sec))
     else:
-        time.sleep(max(0.2, settle_sec * 0.5))
+        time.sleep(max(0.15, settle_sec * 0.4))
 
     if not pids:
         return False, "Proses Telegram.exe tidak ditemukan."
@@ -553,11 +588,29 @@ def paste_and_send_to_telegram_group(
     hwnd = _find_telegram_hwnd()
     if hwnd:
         _activate_hwnd(hwnd)
-        time.sleep(0.12)
+        time.sleep(0.1)
     _release_our_focus(root)
 
     already = bool(hwnd and _is_group_already_open(hwnd, name))
-    return _run_vbs_sendkeys(name, pids[0], skip_search=already)
+    if not was_running:
+        already = False
+
+    ok, msg = _run_vbs_sendkeys(name, pids[0], skip_search=already)
+    if not ok:
+        return False, msg
+
+    hwnd2 = _find_telegram_hwnd() or hwnd
+    if hwnd2:
+        _activate_hwnd(hwnd2)
+        time.sleep(0.08)
+        _click_telegram_send_button(hwnd2)
+        time.sleep(0.12)
+    try:
+        _send_enter_key()
+    except Exception:
+        pass
+
+    return True, msg
 
 
 def send_via_telegram(
