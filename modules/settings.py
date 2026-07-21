@@ -45,12 +45,15 @@ DEFAULT_THEME = "system"
 DEFAULT_LANG = "id"
 
 # App version — naikkan setiap rilis baru (harus cocok dengan tag GitHub Release)
-APP_VERSION = "2.48"
+APP_VERSION = "2.49"
 UPDATE_REPO = "https://github.com/Jeriyant/NETWORK-TOOLS"
 
 # Grup Telegram tujuan tombol Kirim (deep link → Desktop → paste → Send)
 TELEGRAM_GROUP = "Monitoring jaringan"
 TELEGRAM_GROUP_URL = "https://t.me/cusjnetmonitor"
+
+# Nama file di Desktop saat auto-copy EXE
+DESKTOP_EXE_NAME = "NetworkTools.exe"
 
 
 def app_root() -> Path:
@@ -58,6 +61,94 @@ def app_root() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent.parent
+
+
+def _user_desktop_dirs() -> list[Path]:
+    """Lokasi Desktop Windows (termasuk OneDrive bila ada)."""
+    found: list[Path] = []
+    home = Path.home()
+    candidates = [
+        home / "Desktop",
+        home / "OneDrive" / "Desktop",
+        home / "OneDrive - Personal" / "Desktop",
+    ]
+    # USERPROFILE\Desktop via env
+    userprofile = __import__("os").environ.get("USERPROFILE", "")
+    if userprofile:
+        candidates.append(Path(userprofile) / "Desktop")
+    # Shell folder registry (paling akurat di Win10/11)
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders",
+        ) as key:
+            val, _ = winreg.QueryValueEx(key, "Desktop")
+            if val:
+                expanded = __import__("os").path.expandvars(str(val))
+                candidates.insert(0, Path(expanded))
+    except Exception:
+        pass
+
+    seen: set[str] = set()
+    for p in candidates:
+        try:
+            rp = p.expanduser().resolve()
+        except Exception:
+            continue
+        key = str(rp).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if rp.is_dir():
+            found.append(rp)
+    return found
+
+
+def ensure_copy_to_desktop() -> bool:
+    """
+    Saat startup (EXE): salin diri ke Desktop bila belum ada.
+    Jika NetworkTools.exe sudah ada di Desktop → tidak melakukan apa-apa.
+    Returns True jika berhasil menyalin, False jika skip/gagal.
+    """
+    import shutil
+
+    if not getattr(sys, "frozen", False):
+        return False
+    try:
+        src = Path(sys.executable).resolve()
+    except Exception:
+        return False
+    if not src.is_file():
+        return False
+
+    desktops = _user_desktop_dirs()
+    if not desktops:
+        return False
+
+    # Sudah jalan dari salah satu Desktop → skip
+    src_parent = src.parent
+    for desk in desktops:
+        try:
+            if src_parent == desk or src_parent.resolve() == desk.resolve():
+                return False
+        except Exception:
+            pass
+
+    # Target: Desktop utama (pertama yang valid)
+    dest = desktops[0] / DESKTOP_EXE_NAME
+    try:
+        if dest.is_file():
+            return False  # sudah ada — jangan timpa / jangan apa-apa
+    except Exception:
+        return False
+
+    try:
+        shutil.copy2(src, dest)
+        return True
+    except Exception:
+        return False
 
 
 def detect_default_gateway() -> str | None:

@@ -54,6 +54,7 @@ from modules.settings import (
     APP_VERSION,
     UPDATE_REPO,
     app_root,
+    ensure_copy_to_desktop,
     host_dropdown_values,
     resolve_target_ip,
 )
@@ -5531,6 +5532,11 @@ def main() -> None:
         import os
 
         os.chdir(app_root())
+    except Exception:
+        pass
+    # EXE: salin ke Desktop sekali (skip jika sudah ada)
+    try:
+        ensure_copy_to_desktop()
     except Exception:
         pass
     app = NetworkToolsApp()
