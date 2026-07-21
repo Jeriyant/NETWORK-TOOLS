@@ -1,8 +1,9 @@
-"""SCP / SFTP explorer UI (CustomTkinter)."""
+"""SSH panel — MobaXterm-style: explorer kiri + terminal interaktif kanan."""
 
 from __future__ import annotations
 
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any, Callable
@@ -10,11 +11,11 @@ from typing import Any, Callable
 import customtkinter as ctk
 
 from modules.i18n import t
-from modules.sftp_session import SftpSession
+from modules.sftp_session import RemoteEntry, SftpSession
 
 
 class ScpPanel:
-    """Form koneksi + file explorer SFTP + input perintah SSH."""
+    """Form koneksi + split: file explorer | terminal SSH."""
 
     def __init__(
         self,
@@ -29,9 +30,12 @@ class ScpPanel:
         self.colors = colors
         self.on_back = on_back
         self.session = SftpSession()
-        self._entries: dict[str, Any] = {}  # iid -> RemoteEntry
+        self._entries: dict[str, Any] = {}
         self._busy = False
-        self.protocol_var = tk.StringVar(value="SFTP")
+        self._shell_chan: Any = None
+        self._shell_stop = threading.Event()
+        self._shell_thread: threading.Thread | None = None
+        self._term_mark = "1.0"
 
         top = ctk.CTkFrame(header, fg_color="transparent")
         top.pack(fill="x")
@@ -59,7 +63,9 @@ class ScpPanel:
         self.user_var = tk.StringVar(value="")
         self.pass_var = tk.StringVar(value="")
 
-        def _field(parent: Any, label: str, var: tk.StringVar, width: int, show: str | None = None) -> ctk.CTkEntry:
+        def _field(
+            parent: Any, label: str, var: tk.StringVar, width: int, show: str | None = None
+        ) -> ctk.CTkEntry:
             cell = ctk.CTkFrame(parent, fg_color="transparent")
             cell.pack(side="left", padx=(0, 8))
             ctk.CTkLabel(
@@ -80,37 +86,11 @@ class ScpPanel:
             entry.pack(anchor="w", pady=(2, 0))
             return entry
 
-        proto_cell = ctk.CTkFrame(inner, fg_color="transparent")
-        proto_cell.pack(side="left", padx=(0, 8))
-        ctk.CTkLabel(
-            proto_cell,
-            text=t("scp.protocol"),
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-            text_color=colors["muted"],
-        ).pack(anchor="w")
-        self.proto_combo = ctk.CTkComboBox(
-            proto_cell,
-            values=["SSH", "SCP", "SFTP"],
-            variable=self.protocol_var,
-            width=90,
-            height=30,
-            state="readonly",
-            fg_color=colors["bg"],
-            border_color=colors["border"],
-            button_color=colors["accent"],
-            button_hover_color=colors["accent_dim"],
-            dropdown_fg_color=colors["panel"],
-            command=self._on_protocol_change,
-        )
-        self.proto_combo.set("SFTP")
-        self.proto_combo.pack(anchor="w", pady=(2, 0))
-
-        _field(inner, t("scp.host"), self.host_var, 160)
+        _field(inner, t("scp.host"), self.host_var, 180)
         _field(inner, t("scp.port"), self.port_var, 64)
-        _field(inner, t("scp.user"), self.user_var, 110)
-        _field(inner, t("scp.pass"), self.pass_var, 120, show="•")
+        _field(inner, t("scp.user"), self.user_var, 120)
+        _field(inner, t("scp.pass"), self.pass_var, 130, show="•")
 
-        # Sejajar kotak input: label spacer + baris tombol height 30
         btn_cell = ctk.CTkFrame(inner, fg_color="transparent")
         btn_cell.pack(side="left", padx=(4, 0))
         ctk.CTkLabel(
@@ -163,36 +143,72 @@ class ScpPanel:
         )
         self.status_lbl.pack(fill="x", padx=12, pady=(0, 8))
 
-        # --- Explorer toolbar ---
-        self.tools = ctk.CTkFrame(content, fg_color="transparent")
-        self.tools.pack(fill="x", pady=(0, 6))
+        # --- Split: kiri explorer | kanan terminal ---
+        split = tk.PanedWindow(
+            content,
+            orient=tk.HORIZONTAL,
+            sashwidth=6,
+            sashrelief=tk.FLAT,
+            bg=colors["bg"],
+            bd=0,
+        )
+        split.pack(fill="both", expand=True)
+
+        left = ctk.CTkFrame(
+            split,
+            fg_color=colors["panel"],
+            corner_radius=8,
+            border_width=1,
+            border_color=colors["border"],
+        )
+        right = ctk.CTkFrame(
+            split,
+            fg_color="#0C0C0C",
+            corner_radius=8,
+            border_width=1,
+            border_color=colors["border"],
+        )
+        split.add(left, minsize=280, stretch="always")
+        split.add(right, minsize=280, stretch="always")
+
+        # LEFT: toolbar + path + tree
+        left_inner = ctk.CTkFrame(left, fg_color="transparent")
+        left_inner.pack(fill="both", expand=True, padx=8, pady=8)
+
+        ctk.CTkLabel(
+            left_inner,
+            text="File Explorer",
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=12),
+            text_color=colors["text"],
+            anchor="w",
+        ).pack(fill="x", pady=(0, 4))
+
+        self.tools = ctk.CTkFrame(left_inner, fg_color="transparent")
+        self.tools.pack(fill="x", pady=(0, 4))
 
         self.path_var = tk.StringVar(value="")
-        ctk.CTkLabel(
-            self.tools,
-            text=t("scp.path"),
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            text_color=colors["muted"],
-        ).pack(side="left", padx=(0, 6))
         self.path_entry = ctk.CTkEntry(
             self.tools,
             textvariable=self.path_var,
             height=28,
-            fg_color=colors["panel"],
+            fg_color=colors["bg"],
             border_color=colors["border"],
+            placeholder_text="/path — tulis lalu Enter",
         )
-        self.path_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        self.path_entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
         self.path_entry.bind("<Return>", lambda _e: self._goto_path())
 
-        def _tbtn(text: str, cmd: Callable[[], None], w: int = 88, color: str | None = None) -> ctk.CTkButton:
+        def _tbtn(
+            text: str, cmd: Callable[[], None], w: int = 72, color: str | None = None
+        ) -> ctk.CTkButton:
             b = ctk.CTkButton(
                 self.tools,
                 text=text,
                 width=w,
                 height=28,
-                fg_color=color or colors["panel"],
+                fg_color=color or colors["bg"],
                 hover_color=colors.get("accent_dim", colors["accent"]),
-                text_color=colors["text"] if not color else colors.get("on_warn", "#1A1400"),
+                text_color=colors["text"] if not color else "#1A1400",
                 border_width=1 if not color else 0,
                 border_color=colors["border"],
                 command=cmd,
@@ -200,32 +216,22 @@ class ScpPanel:
             b.pack(side="left", padx=(0, 4))
             return b
 
-        self.btn_hist = _tbtn(t("scp.back"), self._go_back, 80)
-        self.btn_up = _tbtn(t("scp.up"), self._go_up, 70)
-        self.btn_ref = _tbtn(t("scp.refresh"), self._refresh, 80, colors.get("warn", "#E6B422"))
-        self.btn_mkdir = _tbtn(t("scp.new_folder"), self._new_folder, 100)
-        self.btn_mkfile = _tbtn(t("scp.new_file"), self._new_file, 90)
-        self.btn_upload = _tbtn(t("scp.upload"), self._upload, 80)
+        self.btn_up = _tbtn(t("scp.up"), self._go_up, 64)
+        self.btn_ref = _tbtn(t("scp.refresh"), self._refresh, 72, colors.get("warn", "#E6B422"))
+        self.btn_mkdir = _tbtn(t("scp.new_folder"), self._new_folder, 88)
+        self.btn_mkfile = _tbtn(t("scp.new_file"), self._new_file, 80)
+        self.btn_upload = _tbtn(t("scp.upload"), self._upload, 70)
 
-        # --- File list + drop zone ---
-        self.list_wrap = ctk.CTkFrame(
-            content,
-            fg_color=colors["panel"],
-            corner_radius=10,
-            border_width=1,
-            border_color=colors["border"],
-        )
-        self.list_wrap.pack(fill="both", expand=True, pady=(0, 8))
-        self.drop_hint = ctk.CTkLabel(
-            self.list_wrap,
+        ctk.CTkLabel(
+            left_inner,
             text=t("scp.drop_hint"),
-            font=ctk.CTkFont(family="Segoe UI", size=11),
+            font=ctk.CTkFont(family="Segoe UI", size=10),
             text_color=colors["muted"],
             anchor="w",
-        )
-        self.drop_hint.pack(fill="x", padx=12, pady=(8, 0))
-        host = tk.Frame(self.list_wrap, bg=colors["panel"], highlightthickness=0)
-        host.pack(fill="both", expand=True, padx=8, pady=8)
+        ).pack(fill="x", pady=(0, 4))
+
+        host = tk.Frame(left_inner, bg=colors["panel"], highlightthickness=0)
+        host.pack(fill="both", expand=True)
         self._tree_host = host
 
         style = ttk.Style()
@@ -239,7 +245,7 @@ class ScpPanel:
             foreground=colors["text"],
             fieldbackground=colors["bg"],
             borderwidth=0,
-            rowheight=28,
+            rowheight=26,
             font=("Segoe UI", 11),
         )
         style.configure(
@@ -268,10 +274,10 @@ class ScpPanel:
         self.tree.heading("size", text=t("scp.col.size"), anchor="e")
         self.tree.heading("mtime", text=t("scp.col.mtime"), anchor="w")
         self.tree.heading("type", text=t("scp.col.type"), anchor="w")
-        self.tree.column("name", width=320, minwidth=140, anchor="w", stretch=True)
-        self.tree.column("size", width=90, minwidth=60, anchor="e", stretch=False)
-        self.tree.column("mtime", width=140, minwidth=100, anchor="w", stretch=False)
-        self.tree.column("type", width=80, minwidth=60, anchor="w", stretch=False)
+        self.tree.column("name", width=200, minwidth=100, anchor="w", stretch=True)
+        self.tree.column("size", width=70, minwidth=50, anchor="e", stretch=False)
+        self.tree.column("mtime", width=110, minwidth=80, anchor="w", stretch=False)
+        self.tree.column("type", width=70, minwidth=50, anchor="w", stretch=False)
 
         vsb = ttk.Scrollbar(host, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
@@ -282,6 +288,7 @@ class ScpPanel:
         self.tree.tag_configure("odd", background=colors["bg"])
         self.tree.tag_configure("even", background=colors["panel"])
         self.tree.tag_configure("dir", foreground=colors["accent"])
+        self.tree.tag_configure("parent", foreground=colors["muted"])
 
         self.tree.bind("<Double-1>", self._on_double)
         self.tree.bind("<Button-3>", self._on_right_click)
@@ -296,87 +303,245 @@ class ScpPanel:
         self._menu.add_command(label=t("scp.rename"), command=self._rename)
         self._menu.add_command(label=t("scp.delete"), command=self._delete)
 
-        # --- SSH command ---
-        self.cmd_row = ctk.CTkFrame(content, fg_color="transparent")
-        self.cmd_row.pack(fill="x", pady=(0, 4))
+        # RIGHT: interactive terminal
+        right_inner = ctk.CTkFrame(right, fg_color="transparent")
+        right_inner.pack(fill="both", expand=True, padx=6, pady=6)
         ctk.CTkLabel(
-            self.cmd_row,
-            text=t("scp.cmd"),
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            text_color=colors["muted"],
-        ).pack(side="left", padx=(0, 6))
-        self.cmd_var = tk.StringVar(value="")
-        self.cmd_entry = ctk.CTkEntry(
-            self.cmd_row,
-            textvariable=self.cmd_var,
-            height=30,
-            fg_color=colors["panel"],
-            border_color=colors["border"],
-        )
-        self.cmd_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
-        self.cmd_entry.bind("<Return>", lambda _e: self._run_cmd())
-        ctk.CTkButton(
-            self.cmd_row,
-            text=t("scp.run"),
-            width=100,
-            height=30,
-            fg_color=colors["accent"],
-            hover_color=colors["accent_dim"],
-            text_color=colors["on_accent"],
-            command=self._run_cmd,
-        ).pack(side="left")
+            right_inner,
+            text="Terminal",
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=12),
+            text_color="#AAAAAA",
+            anchor="w",
+        ).pack(fill="x", pady=(0, 4))
 
-        self.log_host = ctk.CTkFrame(
-            content, fg_color=colors["console_bg"], height=120, corner_radius=8
+        term_host = tk.Frame(right_inner, bg="#0C0C0C", highlightthickness=0)
+        term_host.pack(fill="both", expand=True)
+        self.term = tk.Text(
+            term_host,
+            bg="#0C0C0C",
+            fg="#CCCCCC",
+            insertbackground="#FFFFFF",
+            selectbackground="#264F78",
+            selectforeground="#FFFFFF",
+            font=("Consolas", 11),
+            relief=tk.FLAT,
+            bd=0,
+            wrap=tk.CHAR,
+            undo=False,
+            insertwidth=2,
+            padx=6,
+            pady=6,
         )
-        self.log_host.pack(fill="x")
-        self.log_host.pack_propagate(False)
-        self.log_box = ctk.CTkTextbox(
-            self.log_host,
-            font=ctk.CTkFont(family="Consolas", size=11),
-            fg_color="transparent",
-            text_color=colors.get("console_fg", colors["text"]),
-            wrap="word",
-            activate_scrollbars=True,
+        term_sb = ttk.Scrollbar(term_host, orient="vertical", command=self.term.yview)
+        self.term.configure(yscrollcommand=term_sb.set)
+        self.term.pack(side="left", fill="both", expand=True)
+        term_sb.pack(side="right", fill="y")
+
+        self.term.bind("<Key>", self._on_term_key)
+        self.term.bind("<<Paste>>", self._on_term_paste)
+        self.term.bind("<Button-1>", lambda _e: self.term.focus_set())
+        self.term.bind("<Control-c>", self._on_term_ctrl_c)
+        self.term.bind("<Control-l>", self._on_term_clear)
+
+        self._term_write(
+            t("scp.need_connect") + "\n"
+            "Layout: explorer kiri · terminal kanan (ketik langsung setelah Hubungkan).\n"
         )
-        self.log_box.pack(fill="both", expand=True, padx=4, pady=4)
-        self.log_box.configure(state="disabled")
-        self._log(t("scp.need_connect"))
-        self._log(t("scp.mode_dual"))
+        self.term.configure(state="disabled")
 
         self._setup_drag_drop()
-        self._apply_protocol_layout()
-
         app._scp_session = self.session
         app.console = None
 
-    def _protocol(self) -> str:
-        return (self.protocol_var.get() or "SFTP").strip().upper()
+        def _set_sash() -> None:
+            try:
+                total = split.winfo_width()
+                if total > 100:
+                    split.sash_place(0, int(total * 0.48), 0)
+            except Exception:
+                pass
 
-    def _on_protocol_change(self, _choice: str | None = None) -> None:
-        proto = self._protocol()
-        self._log(t("scp.mode_dual") + f"  · preferensi transfer: {proto}")
-        self._apply_protocol_layout()
-        if self.session.connected:
-            self._refresh()
+        app.after(120, _set_sash)
 
-    def _apply_protocol_layout(self) -> None:
-        """Selalu dual: explorer (SFTP/SCP) + perintah SSH."""
+    # ----- terminal -----
+    def _term_write(self, text: str) -> None:
         try:
-            self.tools.pack(fill="x", pady=(0, 6))
-            self.list_wrap.pack(fill="both", expand=True, pady=(0, 8))
-            self.cmd_row.pack(fill="x", pady=(0, 4))
-            self.log_host.pack(fill="x")
-            self.log_host.configure(height=120)
+            self.term.configure(state="normal")
+            self.term.insert("end", text)
+            self.term.see("end")
+            self._term_mark = self.term.index("end-1c")
+            if not self.session.connected:
+                self.term.configure(state="disabled")
         except Exception:
             pass
 
+    def _term_clear_ui(self) -> None:
+        self.term.configure(state="normal")
+        self.term.delete("1.0", "end")
+        self._term_mark = "1.0"
+
+    def _on_term_clear(self, _event: Any = None) -> str:
+        if self._shell_chan is not None:
+            try:
+                self._shell_chan.send("\x0c")  # Ctrl+L
+            except Exception:
+                self._term_clear_ui()
+        else:
+            self._term_clear_ui()
+        return "break"
+
+    def _on_term_ctrl_c(self, _event: Any = None) -> str:
+        if self._shell_chan is not None:
+            try:
+                self._shell_chan.send("\x03")
+            except Exception:
+                pass
+        return "break"
+
+    def _on_term_paste(self, _event: Any = None) -> str:
+        if self._shell_chan is None:
+            return "break"
+        try:
+            data = self.app.clipboard_get()
+        except Exception:
+            return "break"
+        if data:
+            try:
+                self._shell_chan.send(data.replace("\r\n", "\n").replace("\r", "\n"))
+            except Exception:
+                pass
+        return "break"
+
+    def _on_term_key(self, event: Any) -> str | None:
+        if self._shell_chan is None:
+            return "break"
+        # biarkan navigasi / modifier tanpa kirim
+        if event.keysym in {
+            "Shift_L",
+            "Shift_R",
+            "Control_L",
+            "Control_R",
+            "Alt_L",
+            "Alt_R",
+            "Caps_Lock",
+            "Left",
+            "Right",
+            "Up",
+            "Down",
+            "Home",
+            "End",
+            "Prior",
+            "Next",
+        }:
+            return None
+        if event.state & 0x4:  # Control — ditangani binding khusus
+            return "break"
+
+        ch = event.char
+        try:
+            if event.keysym == "Return":
+                self._shell_chan.send("\r")
+            elif event.keysym == "BackSpace":
+                self._shell_chan.send("\x7f")
+            elif event.keysym == "Tab":
+                self._shell_chan.send("\t")
+            elif event.keysym == "Escape":
+                self._shell_chan.send("\x1b")
+            elif ch:
+                self._shell_chan.send(ch)
+        except Exception as exc:
+            self._term_write(f"\n[shell error: {exc}]\n")
+        return "break"
+
+    def _start_shell(self) -> None:
+        self._stop_shell()
+        try:
+            cols = max(40, int(self.term.winfo_width() / 8) or 100)
+            rows = max(10, int(self.term.winfo_height() / 16) or 30)
+            self._shell_chan = self.session.open_shell(width=cols, height=rows)
+        except Exception as exc:
+            self._term_write(f"\nGagal buka shell: {exc}\n")
+            self._shell_chan = None
+            return
+
+        self.term.configure(state="normal")
+        self._shell_stop.clear()
+
+        def reader() -> None:
+            chan = self._shell_chan
+            while not self._shell_stop.is_set() and chan is not None:
+                try:
+                    if chan.recv_ready():
+                        data = chan.recv(4096)
+                        if not data:
+                            break
+                        text = data.decode("utf-8", errors="replace")
+                        # strip crude ANSI warna (sederhana)
+                        text = self._strip_ansi(text)
+                        self._ui(lambda t=text: self._term_write(t))
+                    elif chan.closed or (hasattr(chan, "exit_status_ready") and chan.exit_status_ready()):
+                        break
+                    else:
+                        time.sleep(0.03)
+                except Exception:
+                    break
+            self._ui(lambda: self._term_write("\n[shell ditutup]\n"))
+
+        self._shell_thread = threading.Thread(target=reader, daemon=True)
+        self._shell_thread.start()
+        self.term.focus_set()
+
+    @staticmethod
+    def _strip_ansi(text: str) -> str:
+        import re
+
+        # CSI sequences
+        text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", text)
+        text = re.sub(r"\x1b\][^\x07]*\x07", "", text)
+        text = text.replace("\x1b", "")
+        return text
+
+    def _stop_shell(self) -> None:
+        self._shell_stop.set()
+        self._shell_chan = None
+        try:
+            self.session.close_shell()
+        except Exception:
+            pass
+        self._shell_thread = None
+
+    # ----- helpers -----
+    def _log(self, text: str) -> None:
+        """Status/pesan → terminal (bukan input terpisah)."""
+        self._term_write(text.rstrip() + "\n")
+
+    def _ui(self, fn: Callable[[], None]) -> None:
+        self.app.after(0, fn)
+
+    def _selected(self) -> Any | None:
+        sel = self.tree.selection()
+        if not sel:
+            return None
+        return self._entries.get(sel[0])
+
+    def _require_conn(self) -> bool:
+        if not self.session.connected:
+            messagebox.showinfo(t("tool.scp.title"), t("scp.need_connect"), parent=self.app)
+            return False
+        return True
+
+    def _set_connected_ui(self, ok: bool) -> None:
+        self.btn_connect.configure(state="disabled" if ok else "normal")
+        self.btn_disconnect.configure(state="normal" if ok else "disabled")
+        if ok:
+            self.term.configure(state="normal")
+        else:
+            self.term.configure(state="disabled")
+
     def _setup_drag_drop(self) -> None:
-        """Aktifkan drag & drop file ke area explorer (Windows)."""
         try:
             import windnd
         except Exception:
-            self._log("Drag & drop tidak tersedia (modul windnd). Gunakan tombol Upload.")
             return
 
         def _normalize(files: list[Any]) -> list[str]:
@@ -402,37 +567,8 @@ class ScpPanel:
         try:
             windnd.hook_dropfiles(self._tree_host, func=on_drop)
             windnd.hook_dropfiles(self.tree, func=on_drop)
-        except Exception as exc:
-            self._log(f"Drag & drop gagal diinisialisasi: {exc}")
-
-    # ----- helpers -----
-    def _log(self, text: str) -> None:
-        try:
-            self.log_box.configure(state="normal")
-            self.log_box.insert("end", text.rstrip() + "\n")
-            self.log_box.see("end")
-            self.log_box.configure(state="disabled")
         except Exception:
             pass
-
-    def _ui(self, fn: Callable[[], None]) -> None:
-        self.app.after(0, fn)
-
-    def _selected(self) -> Any | None:
-        sel = self.tree.selection()
-        if not sel:
-            return None
-        return self._entries.get(sel[0])
-
-    def _require_conn(self) -> bool:
-        if not self.session.connected:
-            messagebox.showinfo(t("tool.scp.title"), t("scp.need_connect"), parent=self.app)
-            return False
-        return True
-
-    def _set_connected_ui(self, ok: bool) -> None:
-        self.btn_connect.configure(state="disabled" if ok else "normal")
-        self.btn_disconnect.configure(state="normal" if ok else "disabled")
 
     # ----- connection -----
     def _connect(self) -> None:
@@ -449,12 +585,13 @@ class ScpPanel:
         self._busy = True
         self.status_lbl.configure(text=t("scp.connecting"))
         self.btn_connect.configure(state="disabled")
+        self._term_clear_ui()
+        self._log(f"Menghubungkan ke {user}@{host}:{port}…")
 
         def worker() -> None:
             err = None
-            proto = self._protocol()
             try:
-                self.session.connect(host, port, user, password, protocol=proto)
+                self.session.connect(host, port, user, password, protocol="SFTP")
             except Exception as exc:
                 err = str(exc)
 
@@ -473,13 +610,10 @@ class ScpPanel:
                     text=t("scp.connected", user=user, host=host, port=port)
                     + f"  [SSH✓ · {sftp_flag}]"
                 )
-                self._log(f"Connected (dual SSH+SFTP): {user}@{host}:{port}")
+                self._log(f"Terhubung: {user}@{host}:{port}  [{sftp_flag}]")
                 if note:
                     self._log(note)
-                banner = getattr(self.session, "last_banner", "") or ""
-                if banner:
-                    self._log(f"Banner: {banner}")
-                self._apply_protocol_layout()
+                self._start_shell()
                 self._refresh()
 
             self._ui(done)
@@ -487,6 +621,7 @@ class ScpPanel:
         threading.Thread(target=worker, daemon=True).start()
 
     def _disconnect(self) -> None:
+        self._stop_shell()
         try:
             self.session.disconnect()
         except Exception:
@@ -499,6 +634,7 @@ class ScpPanel:
         self._log("Disconnected.")
 
     def _leave(self) -> None:
+        self._stop_shell()
         try:
             self.session.disconnect()
         except Exception:
@@ -507,24 +643,51 @@ class ScpPanel:
         self.on_back()
 
     # ----- listing -----
+    def _parent_entry(self) -> RemoteEntry | None:
+        cwd = (self.session.cwd or "/").rstrip("/") or "/"
+        if cwd == "/":
+            return None
+        parent = cwd.rsplit("/", 1)[0] or "/"
+        return RemoteEntry(
+            name="..",
+            path=parent,
+            is_dir=True,
+            size=0,
+            mtime=0.0,
+            mode=0,
+        )
+
     def _fill(self, rows: list[Any]) -> None:
         self.tree.delete(*self.tree.get_children())
         self._entries.clear()
         self.path_var.set(self.session.cwd)
-        if not rows:
+
+        display: list[Any] = []
+        parent = self._parent_entry()
+        if parent is not None:
+            display.append(parent)
+        display.extend(rows)
+
+        if not display:
             self._log(t("scp.empty"))
             return
-        for idx, row in enumerate(rows):
+
+        for idx, row in enumerate(display):
             tag = "even" if idx % 2 == 0 else "odd"
-            tags = (tag, "dir") if row.is_dir else (tag,)
+            if row.name == "..":
+                tags = (tag, "parent", "dir")
+                label = "📁 .."
+            else:
+                tags = (tag, "dir") if row.is_dir else (tag,)
+                label = ("📁 " if row.is_dir else "📄 ") + row.name
             iid = self.tree.insert(
                 "",
                 "end",
                 values=(
-                    ("📁 " if row.is_dir else "📄 ") + row.name,
-                    row.size_label,
-                    row.mtime_label,
-                    row.type_label,
+                    label,
+                    "—" if row.name == ".." else row.size_label,
+                    "—" if row.name == ".." else row.mtime_label,
+                    "Folder" if row.is_dir else row.type_label,
                 ),
                 tags=tags,
             )
@@ -547,8 +710,6 @@ class ScpPanel:
                     self._log(f"List error: {err}")
                     messagebox.showerror(t("tool.scp.title"), err, parent=self.app)
                     return
-                mode = "SFTP" if self.session.sftp_ok else "shell"
-                self._log(f"Explorer ({mode}): {len(rows)} item · {self.session.cwd}")
                 self._fill(rows)
 
             self._ui(done)
@@ -596,24 +757,6 @@ class ScpPanel:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _go_back(self) -> None:
-        if not self._require_conn():
-            return
-
-        def worker() -> None:
-            prev = self.session.go_back()
-            if prev is None:
-                self._ui(lambda: self._log("Tidak ada folder sebelumnya."))
-                return
-            try:
-                rows = self.session.list_dir()
-            except Exception as exc:
-                self._ui(lambda: self._log(f"Back error: {exc}"))
-                return
-            self._ui(lambda: self._fill(rows))
-
-        threading.Thread(target=worker, daemon=True).start()
-
     def _on_double(self, _event: Any = None) -> None:
         self._open_selected()
 
@@ -627,10 +770,15 @@ class ScpPanel:
 
         def worker() -> None:
             try:
-                self.session.chdir(entry.path, record_history=True)
+                if entry.name == "..":
+                    self.session.go_up()
+                else:
+                    self.session.chdir(entry.path, record_history=True)
                 rows = self.session.list_dir()
             except Exception as exc:
-                self._ui(lambda: messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app))
+                self._ui(
+                    lambda: messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app)
+                )
                 return
             self._ui(lambda: self._fill(rows))
 
@@ -659,7 +807,9 @@ class ScpPanel:
                 path = self.session.mkdir(name.strip())
                 rows = self.session.list_dir()
             except Exception as exc:
-                self._ui(lambda: messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app))
+                self._ui(
+                    lambda: messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app)
+                )
                 return
             self._ui(lambda: (self._log(f"mkdir {path}"), self._fill(rows)))
 
@@ -677,7 +827,9 @@ class ScpPanel:
                 path = self.session.create_file(name.strip())
                 rows = self.session.list_dir()
             except Exception as exc:
-                self._ui(lambda: messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app))
+                self._ui(
+                    lambda: messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app)
+                )
                 return
             self._ui(lambda: (self._log(f"create {path}"), self._fill(rows)))
 
@@ -686,6 +838,8 @@ class ScpPanel:
     def _rename(self) -> None:
         entry = self._selected()
         if entry is None or not self._require_conn():
+            return
+        if entry.name == "..":
             return
         new_name = simpledialog.askstring(
             t("scp.rename"),
@@ -701,7 +855,9 @@ class ScpPanel:
                 path = self.session.rename(entry.path, new_name.strip())
                 rows = self.session.list_dir()
             except Exception as exc:
-                self._ui(lambda: messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app))
+                self._ui(
+                    lambda: messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app)
+                )
                 return
             self._ui(lambda: (self._log(f"rename → {path}"), self._fill(rows)))
 
@@ -710,6 +866,8 @@ class ScpPanel:
     def _delete(self) -> None:
         entry = self._selected()
         if entry is None or not self._require_conn():
+            return
+        if entry.name == "..":
             return
         if not messagebox.askyesno(
             t("scp.delete"),
@@ -723,7 +881,9 @@ class ScpPanel:
                 self.session.remove(entry.path)
                 rows = self.session.list_dir()
             except Exception as exc:
-                self._ui(lambda: messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app))
+                self._ui(
+                    lambda: messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app)
+                )
                 return
             self._ui(lambda: (self._log(f"deleted {entry.path}"), self._fill(rows)))
 
@@ -755,7 +915,7 @@ class ScpPanel:
         entry = self._selected()
         if entry is None or not self._require_conn():
             return
-        if entry.is_dir:
+        if entry.name == ".." or entry.is_dir:
             messagebox.showinfo(
                 t("tool.scp.title"),
                 "Download folder belum didukung — buka folder lalu unduh file.",
@@ -774,7 +934,9 @@ class ScpPanel:
             try:
                 self.session.download(entry.path, dest)
             except Exception as exc:
-                self._ui(lambda: messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app))
+                self._ui(
+                    lambda: messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app)
+                )
                 return
             self._ui(lambda: self._log(f"Downloaded → {dest}"))
 
@@ -783,31 +945,16 @@ class ScpPanel:
     def _upload(self) -> None:
         if not self._require_conn():
             return
-        if self._protocol() == "SSH":
-            messagebox.showinfo(
-                t("tool.scp.title"),
-                "Mode SSH tidak untuk transfer file.\nPilih protokol SCP atau SFTP.",
-                parent=self.app,
-            )
-            return
         paths = filedialog.askopenfilenames(parent=self.app, title=t("scp.upload"))
         if not paths:
             return
         self._upload_paths(list(paths))
 
     def _upload_paths(self, paths: list[str]) -> None:
-        """Upload daftar path lokal (dari dialog atau drag & drop)."""
         if not paths:
             return
         if not self.session.connected:
             messagebox.showinfo(t("tool.scp.title"), t("scp.need_connect"), parent=self.app)
-            return
-        if self._protocol() == "SSH":
-            messagebox.showinfo(
-                t("tool.scp.title"),
-                "Mode SSH tidak untuk transfer file.\nPilih protokol SCP atau SFTP.",
-                parent=self.app,
-            )
             return
 
         from pathlib import Path as _Path
@@ -817,8 +964,7 @@ class ScpPanel:
             self._log("Drop diabaikan — hanya file (bukan folder) yang di-upload.")
             return
 
-        proto = self._protocol()
-        self._log(f"Upload {len(files)} file via {proto}…")
+        self._log(f"Upload {len(files)} file…")
 
         def worker() -> None:
             ok = 0
@@ -839,24 +985,5 @@ class ScpPanel:
                     self._log(f"Upload selesai ({ok}/{len(files)})"),
                 )
             )
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _run_cmd(self) -> None:
-        if not self._require_conn():
-            return
-        cmd = self.cmd_var.get().strip()
-        if not cmd:
-            return
-        self._log(f"$ {cmd}")
-
-        def worker() -> None:
-            try:
-                code, _out, _err = self.session.exec_command(
-                    cmd, on_line=lambda line: self._ui(lambda l=line: self._log(l))
-                )
-                self._ui(lambda: self._log(f"[exit {code}]"))
-            except Exception as exc:
-                self._ui(lambda: self._log(f"SSH error: {exc}"))
 
         threading.Thread(target=worker, daemon=True).start()

@@ -145,10 +145,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "id": "Tidak ada Server-App di daftar host.",
         "en": "No Server-App hosts in the list.",
     },
-    "tool.scp.title": {"id": "SCP", "en": "SCP"},
+    "tool.scp.title": {"id": "SSH", "en": "SSH"},
     "tool.scp.desc": {
-        "id": "SSH / SCP / SFTP — explorer, drag-drop & perintah",
-        "en": "SSH / SCP / SFTP — explorer, drag-drop & commands",
+        "id": "SSH — explorer file kiri + terminal interaktif kanan",
+        "en": "SSH — left file explorer + right interactive terminal",
     },
     "scp.protocol": {"id": "Protokol", "en": "Protocol"},
     "scp.proto.ssh": {"id": "SSH", "en": "SSH"},

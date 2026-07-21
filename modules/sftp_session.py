@@ -143,6 +143,7 @@ class SftpSession:
         self.sftp_ok = False
         self.last_banner = ""
         self.connect_note = ""
+        self._shell = None
 
     @property
     def connected(self) -> bool:
@@ -646,6 +647,7 @@ class SftpSession:
         return uniq
 
     def disconnect(self) -> None:
+        self.close_shell()
         with self._lock:
             if self._sftp is not None:
                 try:
@@ -888,6 +890,44 @@ class SftpSession:
             except Exception:
                 pass
         return code, "\n".join(out_chunks), "\n".join(err_chunks)
+
+    def open_shell(
+        self,
+        *,
+        term: str = "xterm",
+        width: int = 120,
+        height: int = 36,
+    ) -> Any:
+        """Buka channel shell interaktif (PTY) untuk terminal panel."""
+        tr = self._require_transport()
+        self.close_shell()
+        chan = tr.open_session()
+        try:
+            chan.get_pty(term=term, width=width, height=height)
+        except Exception:
+            pass
+        chan.invoke_shell()
+        chan.settimeout(0.0)
+        self._shell = chan
+        return chan
+
+    def close_shell(self) -> None:
+        chan = getattr(self, "_shell", None)
+        self._shell = None
+        if chan is not None:
+            try:
+                chan.close()
+            except Exception:
+                pass
+
+    def resize_shell(self, width: int, height: int) -> None:
+        chan = getattr(self, "_shell", None)
+        if chan is None:
+            return
+        try:
+            chan.resize_pty(width=max(20, width), height=max(5, height))
+        except Exception:
+            pass
 
     def write_text_file(self, path: str, text: str) -> None:
         data = (text or "").encode("utf-8")

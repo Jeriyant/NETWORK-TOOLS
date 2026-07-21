@@ -83,7 +83,7 @@ TOOL_DEFS: list[tuple[str, str]] = [
     ("refresh", "↻"),
     ("printer", "🖨"),
     ("fixrdp", "⧉"),
-    ("scp", "⇅"),
+    ("scp", "⌘"),
     ("anydesk", "⌨"),
 ]
 
@@ -4281,9 +4281,9 @@ class NetworkToolsApp(ctk.CTk):
                 "Tombol Fix RDP: reset client + Clear Cache (butuh Admin)."
             ),
             "scp": (
-                "Isi Host/IP, Port, Username, Password lalu Hubungkan.\n"
-                "Explorer SFTP: naik/kembali folder, new folder/file, upload/download,\n"
-                "klik kanan rename/hapus/salin path. Perintah SSH di kolom bawah."
+                "SSH ala MobaXterm: explorer kiri + terminal kanan.\n"
+                "Path bisa diketik lalu Enter. Folder .. untuk naik.\n"
+                "Setelah Hubungkan, ketik langsung di terminal hitam."
             ),
             "anydesk": (
                 "Menjalankan otomatis: tutup AnyDesk lama, buka baru,\n"
