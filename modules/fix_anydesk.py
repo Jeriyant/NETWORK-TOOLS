@@ -108,14 +108,29 @@ def _taskkill_anydesk() -> str:
 
 
 def _start_anydesk(exe: Path) -> tuple[bool, str]:
-    """Jalankan AnyDesk.exe (normal)."""
+    """Jalankan AnyDesk di system tray (--tray), jendela utama tidak muncul."""
+    # --tray / --control: proses tray saja (tanpa UI utama)
+    for args, label in (
+        ([str(exe), "--tray"], "--tray"),
+        ([str(exe), "--control"], "--control"),
+    ):
+        try:
+            subprocess.Popen(
+                args,
+                shell=False,
+                creationflags=_creation(),
+            )
+            return True, f"Menjalankan (tray {label}): {exe}"
+        except Exception:
+            continue
+    # Cadangan: jalankan normal jika flag tray ditolak OS/antivirus
     try:
         subprocess.Popen(
             [str(exe)],
             shell=False,
             creationflags=_creation(),
         )
-        return True, f"Menjalankan: {exe}"
+        return True, f"Menjalankan (normal): {exe}"
     except Exception as exc:
         return False, str(exc)
 
@@ -173,7 +188,7 @@ class AnydeskRunner:
             self.on_line("  Selesai.")
             time.sleep(1.0)
 
-            self.on_line("2/3 Menjalankan AnyDesk.exe…")
+            self.on_line("2/3 Menjalankan AnyDesk.exe (--tray)…")
             ok, start_msg = _start_anydesk(exe)
             self.on_line(f"  {start_msg}")
             if not ok:

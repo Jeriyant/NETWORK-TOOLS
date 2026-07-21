@@ -5276,7 +5276,7 @@ class NetworkToolsApp(ctk.CTk):
                 "Setelah Hubungkan, ketik langsung di terminal hitam."
             ),
             "anydesk": (
-                "Alur (tanpa UAC): taskkill AnyDesk.exe (best-effort) → jalankan AnyDesk.exe → notifikasi ID.\n"
+                "Alur (tanpa UAC): taskkill AnyDesk.exe → jalankan AnyDesk.exe --tray (system tray) → notifikasi ID.\n"
                 "Jendela & notifikasi Always on Top selama menu AnyDesk aktif."
             ),
         }
