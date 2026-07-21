@@ -45,7 +45,7 @@ DEFAULT_THEME = "system"
 DEFAULT_LANG = "id"
 
 # App version — naikkan setiap rilis baru (harus cocok dengan tag GitHub Release)
-APP_VERSION = "2.42"
+APP_VERSION = "2.43"
 UPDATE_REPO = "https://github.com/Jeriyant/NETWORK-TOOLS"
 
 # Grup Telegram tujuan tombol Kirim (otomatis cari + paste + kirim)

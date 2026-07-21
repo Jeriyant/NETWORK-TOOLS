@@ -433,12 +433,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Telegram: group opened & sent",
     },
     "anydesk.telegram_sending": {
-        "id": "Mengirim ke Telegram…",
-        "en": "Sending to Telegram…",
+        "id": "Menutup & membuka Telegram, lalu mengirim…",
+        "en": "Restarting Telegram, then sending…",
     },
     "anydesk.telegram_missing": {
-        "id": "Telegram tidak ditemukan / otomasi gagal",
-        "en": "Telegram not found / automation failed",
+        "id": "Kirim gagal — cek login / Local Passcode Telegram",
+        "en": "Send failed — check Telegram login / Local Passcode",
     },
     # Done notifications
     "done.title": {"id": "Proses selesai", "en": "Process complete"},
