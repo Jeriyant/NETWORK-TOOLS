@@ -309,8 +309,8 @@ del /F /Q "%TEMPSRC%" >nul 2>&1
 del /F /Q "%TARGET%.old" >nul 2>&1
 echo OK> "%OKLOG%"
 
-rem Tunggu sebentar agar handle file lepas, lalu jalankan ulang app
-timeout /t 1 /nobreak >nul 2>&1
+rem Tunggu 5 detik agar handle file lepas, lalu jalankan ulang app
+timeout /t 5 /nobreak >nul 2>&1
 start "" "%TARGET%"
 
 del /F /Q "{vbs}" >nul 2>&1

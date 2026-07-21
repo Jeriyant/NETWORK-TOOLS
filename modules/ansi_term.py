@@ -47,15 +47,35 @@ class AnsiScreen:
         except Exception:
             return False
 
+    def cursor_pos(self) -> tuple[int, int]:
+        """Return (row, col) 0-based cursor position."""
+        try:
+            cy = int(self._screen.cursor.y)
+            cx = int(self._screen.cursor.x)
+        except Exception:
+            return 0, 0
+        cy = max(0, min(self.rows - 1, cy))
+        cx = max(0, min(self.cols - 1, cx))
+        return cy, cx
+
     def render(self) -> str:
+        """Render semua baris (termasuk help nano di bawah) — jangan trim."""
         try:
             lines = list(self._screen.display)
         except Exception:
             return ""
-        # Jangan potong baris kosong di tengah (nano butuh layout tetap)
-        while lines and not lines[-1].rstrip():
-            lines.pop()
-        return "\n".join(lines) + ("\n" if lines else "")
+        # Pastikan tepat `rows` baris agar layout nano (title + body + help) utuh
+        while len(lines) < self.rows:
+            lines.append("")
+        lines = lines[: self.rows]
+        padded: list[str] = []
+        for row in lines:
+            if len(row) < self.cols:
+                row = row + (" " * (self.cols - len(row)))
+            elif len(row) > self.cols:
+                row = row[: self.cols]
+            padded.append(row)
+        return "\n".join(padded)
 
 
 def strip_plain(text: str) -> str:

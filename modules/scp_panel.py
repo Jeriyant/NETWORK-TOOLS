@@ -473,6 +473,11 @@ class ScpPanel:
 
         # Terminal kosong sampai terhubung
         self.term.configure(state="disabled")
+        self.term.tag_configure(
+            "term_cursor",
+            background="#F0F0F0",
+            foreground="#0C0C0C",
+        )
 
         self._setup_drag_drop()
         app._scp_session = self.session
@@ -621,6 +626,36 @@ class ScpPanel:
             pass
 
     # ----- terminal -----
+    def _term_cell_size(self) -> tuple[int, int]:
+        """Hitung cols/rows agar cocok dengan area Text (nano help tetap terlihat)."""
+        try:
+            self.term.update_idletasks()
+            w = max(1, int(self.term.winfo_width()))
+            h = max(1, int(self.term.winfo_height()))
+            # Consolas 11 ≈ 8×18 px (termasuk line spacing)
+            cols = max(40, w // 8)
+            rows = max(12, h // 18)
+            return cols, rows
+        except Exception:
+            return 100, 30
+
+    def _paint_term_cursor(self, cy: int, cx: int) -> None:
+        """Gambar blok kursor di posisi nano/vim (pyte)."""
+        try:
+            self.term.tag_remove("term_cursor", "1.0", "end")
+            line_no = cy + 1
+            line = self.term.get(f"{line_no}.0", f"{line_no}.end")
+            if len(line) <= cx:
+                self.term.insert(f"{line_no}.end", " " * (cx - len(line) + 1))
+            start = f"{line_no}.{cx}"
+            end = f"{line_no}.{cx + 1}"
+            self.term.tag_add("term_cursor", start, end)
+            # Pastikan baris kursor & baris bawah (help) dalam viewport
+            self.term.see("end")
+            self.term.see(start)
+        except Exception:
+            pass
+
     @staticmethod
     def _is_clear_seq(text: str) -> bool:
         """BusyBox/xterm clear biasanya \\x1b[H\\x1b[J, bukan hanya \\x1b[2J."""
@@ -692,8 +727,7 @@ class ScpPanel:
 
             if enter_fs and not self._term_fullscreen:
                 self._term_fullscreen = True
-                cols = max(40, int(self.term.winfo_width() / 7) or 100)
-                rows = max(12, int(self.term.winfo_height() / 16) or 30)
+                cols, rows = self._term_cell_size()
                 self._ansi.resize(rows, cols)
                 self._ansi.clear()
                 try:
@@ -704,12 +738,10 @@ class ScpPanel:
             if self._term_fullscreen:
                 self._ansi.feed(text)
                 screen = self._ansi.render()
+                cy, cx = self._ansi.cursor_pos()
                 self.term.delete("1.0", "end")
                 self.term.insert("1.0", screen)
-                try:
-                    self.term.see("1.0")
-                except Exception:
-                    pass
+                self._paint_term_cursor(cy, cx)
                 self._term_mark = self.term.index("end-1c")
             else:
                 plain = strip_plain(text)
@@ -930,16 +962,7 @@ class ScpPanel:
 
     def _start_shell(self) -> None:
         self._stop_shell()
-        def _term_cols_rows() -> tuple[int, int]:
-            try:
-                # Consolas 11 ≈ 7x16 px per cell
-                cols = max(40, int(self.term.winfo_width() / 7) or 100)
-                rows = max(12, int(self.term.winfo_height() / 16) or 30)
-                return cols, rows
-            except Exception:
-                return 100, 30
-
-        cols, rows = _term_cols_rows()
+        cols, rows = self._term_cell_size()
         self._ansi.resize(rows, cols)
         try:
             self._shell_chan = self.session.open_shell(width=cols, height=rows)
@@ -983,8 +1006,7 @@ class ScpPanel:
         if self._shell_chan is None:
             return
         try:
-            cols = max(40, int(self.term.winfo_width() / 7) or 100)
-            rows = max(12, int(self.term.winfo_height() / 16) or 30)
+            cols, rows = self._term_cell_size()
             self._ansi.resize(rows, cols)
             self.session.resize_shell(cols, rows)
         except Exception:

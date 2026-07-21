@@ -429,12 +429,16 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "{label} copied",
     },
     "anydesk.telegram_opened": {
-        "id": "Telegram dibuka — tempel dengan Ctrl+V",
-        "en": "Telegram opened — paste with Ctrl+V",
+        "id": "Telegram: grup dibuka & dikirim",
+        "en": "Telegram: group opened & sent",
+    },
+    "anydesk.telegram_sending": {
+        "id": "Mengirim ke Telegram…",
+        "en": "Sending to Telegram…",
     },
     "anydesk.telegram_missing": {
-        "id": "Telegram tidak ditemukan. ID sudah di clipboard.",
-        "en": "Telegram not found. ID is on the clipboard.",
+        "id": "Telegram tidak ditemukan / otomasi gagal",
+        "en": "Telegram not found / automation failed",
     },
     # Done notifications
     "done.title": {"id": "Proses selesai", "en": "Process complete"},

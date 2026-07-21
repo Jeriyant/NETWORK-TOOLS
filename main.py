@@ -2215,31 +2215,22 @@ class NetworkToolsApp(ctk.CTk):
 
                 st = str(item.get("status", "UNKNOWN"))
                 fg, on = _status_color(bool(item.get("ok")), st)
-                # Pill kecil — teks di tengah via pack expand
-                badge = ctk.CTkFrame(
+                # Badge compact: CTkButton memusatkan teks lebih rapi dari Frame+Label
+                badge_w = max(68, 10 * len(st) + 28)
+                ctk.CTkButton(
                     head,
-                    fg_color=fg,
-                    corner_radius=6,
-                    height=22,
-                )
-                badge.pack(side="right")
-                badge.pack_propagate(False)
-                lbl = ctk.CTkLabel(
-                    badge,
                     text=st,
-                    font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                    width=badge_w,
+                    height=26,
+                    corner_radius=8,
+                    fg_color=fg,
+                    hover_color=fg,
                     text_color=on,
-                    anchor="center",
-                    justify="center",
-                )
-                lbl.pack(expand=True, fill="both", padx=10, pady=0)
-                # Lebar mengikuti teks + padding
-                try:
-                    badge.update_idletasks()
-                    tw = max(56, int(lbl.winfo_reqwidth()) + 20)
-                    badge.configure(width=tw)
-                except Exception:
-                    badge.configure(width=72)
+                    font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                    cursor="arrow",
+                    state="normal",
+                    command=lambda: None,
+                ).pack(side="right")
 
                 detail = str(item.get("detail", "") or "").strip()
                 if detail:
@@ -4889,18 +4880,35 @@ class NetworkToolsApp(ctk.CTk):
         ).pack(side="left", pady=6)
 
         def send_telegram() -> None:
-            from modules.telegram_share import copy_text_to_clipboard, open_telegram
+            from modules.telegram_share import (
+                copy_text_to_clipboard,
+                paste_and_send_to_telegram_group,
+            )
 
             block = self._anydesk_info_block(anydesk_id, local_id, local_ip)
-            copy_text_to_clipboard(block)
-            if open_telegram(background=False):
-                copied_lbl.configure(text=t("anydesk.telegram_opened"))
-            else:
-                copied_lbl.configure(text=t("anydesk.telegram_missing"))
-            try:
-                self._set_anydesk_topmost(True)
-            except Exception:
-                pass
+            copy_text_to_clipboard(block, root=self)
+
+            def _run() -> None:
+                ok, msg = paste_and_send_to_telegram_group()
+                tip = (
+                    t("anydesk.telegram_opened")
+                    if ok
+                    else t("anydesk.telegram_missing")
+                )
+                if ok:
+                    tip = f"{tip} — {msg}"
+
+                def _ui() -> None:
+                    copied_lbl.configure(text=tip)
+                    try:
+                        self._set_anydesk_topmost(True)
+                    except Exception:
+                        pass
+
+                self.after(0, _ui)
+
+            threading.Thread(target=_run, daemon=True).start()
+            copied_lbl.configure(text=t("anydesk.telegram_sending"))
 
         ctk.CTkButton(
             footer,
@@ -5152,8 +5160,8 @@ class NetworkToolsApp(ctk.CTk):
                 pass
             self._show_kirim_dialog(
                 tips,
-                title="Screenshot siap",
-                subtitle="Buka chat Telegram, lalu tempel gambar:",
+                title="Screenshot dikirim",
+                subtitle='Otomatis ke grup "Monitoring jaringan":',
                 sound=False,
             )
         except Exception as exc:
@@ -5191,8 +5199,8 @@ class NetworkToolsApp(ctk.CTk):
                 _ok, tips, path = send_apps_file_via_telegram(text)
                 self._show_kirim_dialog(
                     tips,
-                    title="File siap dikirim",
-                    subtitle="Buka chat Telegram, lalu tempel file (Ctrl+V):",
+                    title="File dikirim",
+                    subtitle='Otomatis ke grup "Monitoring jaringan":',
                 )
             except Exception as exc:
                 self._show_kirim_dialog([f"Gagal kirim file: {exc}"])
