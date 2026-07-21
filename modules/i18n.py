@@ -139,6 +139,20 @@ _STRINGS: dict[str, dict[str, str]] = {
         "id": "Menjalankan Fix Printer (clear spooler)…",
         "en": "Running Fix Printer (clear spooler)…",
     },
+    "printer.uninstall": {"id": "Uninstall", "en": "Uninstall"},
+    "printer.reinstall": {"id": "Reinstall", "en": "Reinstall"},
+    "printer.confirm_uninstall": {
+        "id": "Uninstall driver printer “{name}”?\nPrinter yang memakai driver ini juga akan dihapus.",
+        "en": "Uninstall printer driver “{name}”?\nPrinters using this driver will also be removed.",
+    },
+    "printer.confirm_reinstall": {
+        "id": "Reinstall driver “{name}”?",
+        "en": "Reinstall driver “{name}”?",
+    },
+    "printer.select": {
+        "id": "Pilih driver terlebih dahulu.",
+        "en": "Select a driver first.",
+    },
     "tool.fixrdp.title": {"id": "RDP", "en": "RDP"},
     "tool.fixrdp.desc": {
         "id": "Status RDP Server-App + Fix RDP/cache",
@@ -252,6 +266,25 @@ _STRINGS: dict[str, dict[str, str]] = {
     "apps.col.name": {"id": "NAMA APLIKASI", "en": "APPLICATION"},
     "apps.col.version": {"id": "VERSI", "en": "VERSION"},
     "apps.col.publisher": {"id": "PUBLISHER", "en": "PUBLISHER"},
+    "apps.uninstall": {"id": "Uninstall", "en": "Uninstall"},
+    "apps.clean_uninstall": {"id": "Uninstall Bersih", "en": "Clean Uninstall"},
+    "apps.reinstall": {"id": "Reinstall", "en": "Reinstall"},
+    "apps.confirm_uninstall": {
+        "id": "Uninstall “{name}”?",
+        "en": "Uninstall “{name}”?",
+    },
+    "apps.confirm_clean": {
+        "id": "Uninstall bersih “{name}”?\nUninstaller + hapus sisa folder instalasi.",
+        "en": "Clean uninstall “{name}”?\nRuns uninstaller and removes leftover install folder.",
+    },
+    "apps.confirm_reinstall": {
+        "id": "Reinstall “{name}”?\nAkan mencoba winget / installer.",
+        "en": "Reinstall “{name}”?\nWill try winget / installer.",
+    },
+    "apps.select": {
+        "id": "Pilih aplikasi terlebih dahulu.",
+        "en": "Select an application first.",
+    },
     "apps.report.title": {
         "id": "=== DAFTAR APLIKASI TERINSTALL ===",
         "en": "=== INSTALLED APPLICATIONS ===",
@@ -281,6 +314,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "sec.firewall": {"id": "Windows Firewall", "en": "Windows Firewall"},
     "sec.defender": {"id": "Windows Defender", "en": "Windows Defender"},
     "sec.wu": {"id": "Windows Update", "en": "Windows Update"},
+    "sec.netprofile": {"id": "Profil Jaringan", "en": "Network Profile"},
     # IP Scanner
     "ipscan.local_ip": {"id": "IP LOKAL", "en": "LOCAL IP"},
     "ipscan.subnet": {"id": "SUBNET", "en": "SUBNET"},

@@ -258,14 +258,36 @@ class NetworkToolsApp(ctk.CTk):
         self._footer.pack_propagate(False)
 
         year = datetime.now().year
+        foot_inner = ctk.CTkFrame(self._footer, fg_color="transparent")
+        foot_inner.pack(expand=True, fill="both")
+        self._footer_anim_frames = ("✦ · ✦", "✧ · ✧", "★ · ★", "✩ · ✩", "✧ · ✧")
+        self._footer_anim_i = 0
+        self._footer_left = ctk.CTkLabel(
+            foot_inner,
+            text=self._footer_anim_frames[0],
+            font=ctk.CTkFont(family="Segoe UI Symbol", size=12),
+            text_color=COLORS["accent"],
+            width=72,
+        )
+        self._footer_left.pack(side="left", padx=(16, 8))
         self._footer_label = ctk.CTkLabel(
-            self._footer,
+            foot_inner,
             text=f"Copyright © {year} JERIYANT - BARAMCITY",
             font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color=COLORS["muted"],
             justify="center",
         )
-        self._footer_label.pack(expand=True)
+        self._footer_label.pack(side="left", expand=True)
+        self._footer_right = ctk.CTkLabel(
+            foot_inner,
+            text=self._footer_anim_frames[0],
+            font=ctk.CTkFont(family="Segoe UI Symbol", size=12),
+            text_color=COLORS["accent"],
+            width=72,
+        )
+        self._footer_right.pack(side="right", padx=(8, 16))
+        self._footer_anim_job: str | None = None
+        self.after(400, self._tick_footer_anim)
 
         # Footer dulu (bawah), lalu konten expand — copyright tetap terlihat saat resize
         self._footer.pack(fill="x", side="bottom")
@@ -282,7 +304,7 @@ class NetworkToolsApp(ctk.CTk):
             self.attributes("-disabled", False)
         except Exception:
             pass
-        self.after(200, self._maybe_resume_elevated_tool)
+        self.after(400, self._maybe_resume_elevated_tool)
         self.after(600, self._start_update_backend_poll)
         # Failsafe: sembunyikan loading startup jika sysinfo lambat/gagal
         self.after(20_000, self._hide_startup_loading)
@@ -365,6 +387,26 @@ class NetworkToolsApp(ctk.CTk):
                     desc_lbl.configure(wraplength=max(tw - 28, 80))
             except Exception:
                 pass
+
+    def _tick_footer_anim(self) -> None:
+        """Animasi dekoratif kiri/kanan copyright."""
+        try:
+            frames = getattr(self, "_footer_anim_frames", ())
+            if not frames:
+                return
+            self._footer_anim_i = (getattr(self, "_footer_anim_i", 0) + 1) % len(frames)
+            text = frames[self._footer_anim_i]
+            accent = COLORS.get("accent", "#2563EB")
+            muted = COLORS.get("muted", "#888888")
+            # Selang-seling warna agar terasa hidup
+            color = accent if self._footer_anim_i % 2 == 0 else muted
+            if hasattr(self, "_footer_left"):
+                self._footer_left.configure(text=text, text_color=color)
+            if hasattr(self, "_footer_right"):
+                self._footer_right.configure(text=text, text_color=color)
+        except Exception:
+            pass
+        self._footer_anim_job = self.after(480, self._tick_footer_anim)
 
     def _ensure_footer_visible(self) -> None:
         """Pastikan bar copyright selalu terpasang di bawah jendela."""
@@ -1016,6 +1058,10 @@ class NetworkToolsApp(ctk.CTk):
             self._footer.configure(fg_color=COLORS["panel"])
         if hasattr(self, "_footer_label"):
             self._footer_label.configure(text_color=COLORS["muted"])
+        if hasattr(self, "_footer_left"):
+            self._footer_left.configure(text_color=COLORS["accent"])
+        if hasattr(self, "_footer_right"):
+            self._footer_right.configure(text_color=COLORS["accent"])
         if not refresh_ui:
             return
         # Rebuild sysinfo strip labels in new language/theme
@@ -1765,12 +1811,16 @@ class NetworkToolsApp(ctk.CTk):
         ).pack(side="left", padx=(8, 0))
 
     def _open_apps_list_view(self) -> None:
-        """Daftar aplikasi terinstall — tabel rapi + Kirim teks ke Telegram."""
+        """Daftar aplikasi terinstall — icon, uninstall/reinstall, Kirim teks."""
+        from modules.app_manage import AppActionRunner
         from modules.system_info import hostname as get_hostname
+        from modules.win_icons import load_icon_photo
         from tkinter import ttk
 
         self.console = None
         self._apps_list = []
+        self._apps_by_iid: dict[str, dict[str, str]] = {}
+        self._app_icon_refs: list[Any] = []
         self._send_text_payload = ""
 
         top = ctk.CTkFrame(self._header, fg_color="transparent")
@@ -1803,7 +1853,6 @@ class NetworkToolsApp(ctk.CTk):
         )
         count_lbl.pack(side="left", fill="x", expand=True)
 
-        # Urutan kanan→kiri: Kembali, Kirim, Cek Ulang (kuning + teks hitam, sebelum Kirim)
         ctk.CTkButton(
             sum_row,
             text=t("app.back"),
@@ -1833,6 +1882,35 @@ class NetworkToolsApp(ctk.CTk):
             text_color="#1A1400",
         )
         btn_refresh.pack(side="right", padx=(8, 0))
+        btn_reinstall = ctk.CTkButton(
+            sum_row,
+            text=t("apps.reinstall"),
+            width=100,
+            height=32,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+        )
+        btn_reinstall.pack(side="right", padx=(8, 0))
+        btn_clean = ctk.CTkButton(
+            sum_row,
+            text=t("apps.clean_uninstall"),
+            width=130,
+            height=32,
+            fg_color=COLORS.get("warn", "#E6B422"),
+            hover_color=COLORS.get("warn_hover", "#C99A12"),
+            text_color="#1A1400",
+        )
+        btn_clean.pack(side="right", padx=(8, 0))
+        btn_uninstall = ctk.CTkButton(
+            sum_row,
+            text=t("apps.uninstall"),
+            width=100,
+            height=32,
+            fg_color=COLORS["danger"],
+            hover_color=COLORS["danger_hover"],
+        )
+        btn_uninstall.pack(side="right", padx=(8, 0))
 
         list_wrap = ctk.CTkFrame(
             self._content,
@@ -1844,7 +1922,7 @@ class NetworkToolsApp(ctk.CTk):
         list_wrap.pack(fill="both", expand=True, padx=0, pady=0)
 
         table_host = tk.Frame(list_wrap, bg=COLORS["panel"], highlightthickness=0)
-        table_host.pack(fill="both", expand=True, padx=12, pady=12)
+        table_host.pack(fill="both", expand=True, padx=12, pady=(12, 4))
 
         style = ttk.Style()
         try:
@@ -1857,7 +1935,7 @@ class NetworkToolsApp(ctk.CTk):
             foreground=COLORS["text"],
             fieldbackground=COLORS["bg"],
             borderwidth=0,
-            rowheight=32,
+            rowheight=34,
             font=("Segoe UI", 11),
         )
         style.configure(
@@ -1873,25 +1951,23 @@ class NetworkToolsApp(ctk.CTk):
             background=[("selected", COLORS["accent"])],
             foreground=[("selected", COLORS["on_accent"])],
         )
-        style.map(
-            "Apps.Treeview.Heading",
-            background=[("active", COLORS["tile_hover"])],
-        )
 
         cols = ("name", "version", "publisher")
         tree = ttk.Treeview(
             table_host,
             columns=cols,
-            show="headings",
+            show="tree headings",
             style="Apps.Treeview",
             selectmode="browse",
         )
+        tree.heading("#0", text="")
         tree.heading("name", text=t("apps.col.name"), anchor="w")
         tree.heading("version", text=t("apps.col.version"), anchor="w")
         tree.heading("publisher", text=t("apps.col.publisher"), anchor="w")
-        tree.column("name", width=360, minwidth=180, anchor="w", stretch=True)
-        tree.column("version", width=120, minwidth=80, anchor="w", stretch=False)
-        tree.column("publisher", width=240, minwidth=120, anchor="w", stretch=True)
+        tree.column("#0", width=40, minwidth=36, stretch=False, anchor="center")
+        tree.column("name", width=340, minwidth=160, anchor="w", stretch=True)
+        tree.column("version", width=110, minwidth=70, anchor="w", stretch=False)
+        tree.column("publisher", width=220, minwidth=100, anchor="w", stretch=True)
 
         vsb = ttk.Scrollbar(table_host, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=vsb.set)
@@ -1899,21 +1975,46 @@ class NetworkToolsApp(ctk.CTk):
         vsb.grid(row=0, column=1, sticky="ns")
         table_host.grid_rowconfigure(0, weight=1)
         table_host.grid_columnconfigure(0, weight=1)
-
         tree.tag_configure("odd", background=COLORS["bg"])
         tree.tag_configure("even", background=COLORS["panel"])
 
+        log_host = ctk.CTkFrame(
+            self._content, fg_color=COLORS["console_bg"], height=110, corner_radius=8
+        )
+        log_host.pack(fill="x", pady=(8, 0))
+        log_host.pack_propagate(False)
+        self.console = ConsoleView(log_host)
+        self.console.pack(fill="both", expand=True, padx=2, pady=2)
+
+        def _selected_app() -> dict[str, str] | None:
+            sel = tree.selection()
+            if not sel:
+                return None
+            return self._apps_by_iid.get(sel[0])
+
         def _fill(apps: list[dict[str, str]]) -> None:
             self._apps_list = apps
+            self._apps_by_iid = {}
+            self._app_icon_refs = []
             host = get_hostname()
             self._send_text_payload = format_apps_text(apps, hostname=host)
             count_lbl.configure(text=t("apps.count", n=len(apps)))
             tree.delete(*tree.get_children())
             for idx, app in enumerate(apps):
                 tag = "even" if idx % 2 == 0 else "odd"
-                tree.insert(
+                photo = None
+                if idx < 150:
+                    try:
+                        photo = load_icon_photo(app.get("icon", ""), size=20)
+                    except Exception:
+                        photo = None
+                if photo is not None:
+                    self._app_icon_refs.append(photo)
+                iid = tree.insert(
                     "",
                     "end",
+                    text="",
+                    image=photo if photo is not None else "",
                     values=(
                         app.get("name", "—"),
                         app.get("version", "—"),
@@ -1921,6 +2022,7 @@ class NetworkToolsApp(ctk.CTk):
                     ),
                     tags=(tag,),
                 )
+                self._apps_by_iid[iid] = app
 
         def on_apps(apps: list[dict[str, str]]) -> None:
             self.after(0, lambda: _fill(apps))
@@ -1929,6 +2031,8 @@ class NetworkToolsApp(ctk.CTk):
             def ui() -> None:
                 count_lbl.configure(text=t("apps.fail"))
                 tree.delete(*tree.get_children())
+                if self.console:
+                    self.log(msg)
 
             self.after(0, ui)
 
@@ -1937,6 +2041,46 @@ class NetworkToolsApp(ctk.CTk):
             tree.delete(*tree.get_children())
             InstalledAppsRunner(on_apps=on_apps, on_error=on_error).start()
 
+        def _run_action(action: str) -> None:
+            app = _selected_app()
+            if app is None:
+                messagebox.showinfo(t("tool.apps.title"), t("apps.select"), parent=self)
+                return
+            name = app.get("name", "")
+            if action == "uninstall":
+                conf = t("apps.confirm_uninstall", name=name)
+            elif action == "clean":
+                conf = t("apps.confirm_clean", name=name)
+            else:
+                conf = t("apps.confirm_reinstall", name=name)
+            if not messagebox.askyesno(t("tool.apps.title"), conf, parent=self):
+                return
+            if self.console:
+                self.console.clear()
+
+            def done(_ok: bool) -> None:
+                self.after(400, load)
+
+            AppActionRunner(action, app, on_line=self.log, on_done=done).start()
+
+        def on_right(event: Any) -> None:
+            row = tree.identify_row(event.y)
+            if row:
+                tree.selection_set(row)
+                tree.focus(row)
+            menu = tk.Menu(tree, tearoff=0)
+            menu.add_command(label=t("apps.uninstall"), command=lambda: _run_action("uninstall"))
+            menu.add_command(label=t("apps.clean_uninstall"), command=lambda: _run_action("clean"))
+            menu.add_command(label=t("apps.reinstall"), command=lambda: _run_action("reinstall"))
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+
+        tree.bind("<Button-3>", on_right)
+        btn_uninstall.configure(command=lambda: _run_action("uninstall"))
+        btn_clean.configure(command=lambda: _run_action("clean"))
+        btn_reinstall.configure(command=lambda: _run_action("reinstall"))
         btn_refresh.configure(command=load)
         self.after(80, load)
 
@@ -2004,7 +2148,9 @@ class NetworkToolsApp(ctk.CTk):
 
         def _status_color(ok: bool, status: str) -> tuple[str, str]:
             st = (status or "").upper()
-            if ok and st in {"ON", "READY", "RUNNING", "ONLINE"}:
+            if st == "PUBLIC":
+                return COLORS["danger"], COLORS["on_accent"]
+            if ok and st in {"ON", "READY", "RUNNING", "ONLINE", "PRIVATE", "DOMAIN"}:
                 return COLORS.get("ok", "#12B76A"), COLORS.get("on_ok", "#FFFFFF")
             if ok:
                 return COLORS.get("ok", "#12B76A"), COLORS.get("on_ok", "#FFFFFF")
@@ -2049,19 +2195,27 @@ class NetworkToolsApp(ctk.CTk):
                     font=ctk.CTkFont(family="Segoe UI Semibold", size=16),
                     text_color=COLORS["text"],
                     anchor="w",
-                ).pack(side="left")
+                ).pack(side="left", fill="x", expand=True)
 
                 st = str(item.get("status", "UNKNOWN"))
                 fg, on = _status_color(bool(item.get("ok")), st)
-                badge = ctk.CTkLabel(
+                badge = ctk.CTkFrame(
                     head,
-                    text=f"  {st}  ",
-                    font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-                    text_color=on,
                     fg_color=fg,
-                    corner_radius=6,
+                    corner_radius=8,
+                    width=108,
+                    height=28,
                 )
                 badge.pack(side="right")
+                badge.pack_propagate(False)
+                ctk.CTkLabel(
+                    badge,
+                    text=st,
+                    font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+                    text_color=on,
+                    anchor="center",
+                    justify="center",
+                ).place(relx=0.5, rely=0.5, anchor="center")
 
                 ctk.CTkLabel(
                     inner,
@@ -2309,9 +2463,10 @@ class NetworkToolsApp(ctk.CTk):
         """Daftar driver printer + tombol Fix Printer / Refresh / Kembali."""
         from tkinter import ttk
 
-        from modules.printer_info import PrinterDriversRunner
+        from modules.printer_info import PrinterDriverActionRunner, PrinterDriversRunner
 
         self.console = None
+        self._printer_by_iid: dict[str, dict[str, str]] = {}
 
         top = ctk.CTkFrame(self._header, fg_color="transparent")
         top.pack(fill="x")
@@ -2377,6 +2532,27 @@ class NetworkToolsApp(ctk.CTk):
             text_color=COLORS["on_accent"],
         )
         btn_fix.pack(side="right", padx=(8, 0))
+
+        btn_reinstall = ctk.CTkButton(
+            toolbar,
+            text=t("printer.reinstall"),
+            width=100,
+            height=32,
+            fg_color=COLORS.get("warn", "#E6B422"),
+            hover_color=COLORS.get("warn_hover", "#C99A12"),
+            text_color=COLORS.get("on_warn", "#1A1400"),
+        )
+        btn_reinstall.pack(side="right", padx=(8, 0))
+
+        btn_uninstall = ctk.CTkButton(
+            toolbar,
+            text=t("printer.uninstall"),
+            width=100,
+            height=32,
+            fg_color=COLORS["danger"],
+            hover_color=COLORS["danger_hover"],
+        )
+        btn_uninstall.pack(side="right", padx=(8, 0))
 
         list_wrap = ctk.CTkFrame(
             self._content,
@@ -2453,6 +2629,7 @@ class NetworkToolsApp(ctk.CTk):
         self.console.pack(fill="both", expand=True, padx=2, pady=2)
 
         def _fill(rows: list[dict[str, str]]) -> None:
+            self._printer_by_iid = {}
             tree.delete(*tree.get_children())
             if not rows:
                 status_lbl.configure(text=t("printer.empty"))
@@ -2460,7 +2637,7 @@ class NetworkToolsApp(ctk.CTk):
             status_lbl.configure(text=t("printer.count", n=len(rows)))
             for idx, row in enumerate(rows):
                 tag = "even" if idx % 2 == 0 else "odd"
-                tree.insert(
+                iid = tree.insert(
                     "",
                     "end",
                     values=(
@@ -2471,6 +2648,7 @@ class NetworkToolsApp(ctk.CTk):
                     ),
                     tags=(tag,),
                 )
+                self._printer_by_iid[iid] = row
 
         def on_drivers(rows: list[dict[str, str]]) -> None:
             self.after(0, lambda: _fill(rows))
@@ -2495,17 +2673,86 @@ class NetworkToolsApp(ctk.CTk):
             if self.console:
                 self.console.clear()
             status_lbl.configure(text=t("printer.fixing"))
+
+            def after_fix() -> None:
+                self._notify_tool_done("done.printer")
+                # Selalu muat ulang daftar driver setelah Fix / UAC
+                self.after(200, load)
+
             FixPrinterRunner(
                 on_line=self.log,
-                on_done=lambda: self._notify_tool_done("done.printer"),
+                on_done=lambda: self.after(0, after_fix),
             ).start()
 
+        def _selected_driver() -> dict[str, str] | None:
+            sel = tree.selection()
+            if not sel:
+                return None
+            return self._printer_by_iid.get(sel[0])
+
+        def _run_driver_action(action: str) -> None:
+            drv = _selected_driver()
+            if drv is None:
+                messagebox.showinfo(t("tool.printer.title"), t("printer.select"), parent=self)
+                return
+            name = drv.get("name", "")
+            if action == "uninstall":
+                if not messagebox.askyesno(
+                    t("tool.printer.title"),
+                    t("printer.confirm_uninstall", name=name),
+                    parent=self,
+                ):
+                    return
+            else:
+                if not messagebox.askyesno(
+                    t("tool.printer.title"),
+                    t("printer.confirm_reinstall", name=name),
+                    parent=self,
+                ):
+                    return
+            if not self._ensure_admin_for("printer"):
+                return
+            if self.console:
+                self.console.clear()
+
+            def done(_ok: bool) -> None:
+                self.after(300, load)
+
+            PrinterDriverActionRunner(
+                action, drv, on_line=self.log, on_done=done
+            ).start()
+
+        def on_right(event: Any) -> None:
+            row = tree.identify_row(event.y)
+            if row:
+                tree.selection_set(row)
+                tree.focus(row)
+            menu = tk.Menu(tree, tearoff=0)
+            menu.add_command(
+                label=t("printer.uninstall"),
+                command=lambda: _run_driver_action("uninstall"),
+            )
+            menu.add_command(
+                label=t("printer.reinstall"),
+                command=lambda: _run_driver_action("reinstall"),
+            )
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+
+        tree.bind("<Button-3>", on_right)
         btn_refresh.configure(command=load)
         btn_fix.configure(command=run_fix)
-        self.after(80, load)
+        btn_uninstall.configure(command=lambda: _run_driver_action("uninstall"))
+        btn_reinstall.configure(command=lambda: _run_driver_action("reinstall"))
+
+        # Setelah UAC: muat driver dulu, baru Fix, lalu reload di on_done
         if auto_fix:
-            # Langsung Fix setelah UAC (tanpa klik ulang)
-            self.after(250, run_fix)
+            self.after(350, load)
+            self.after(1200, run_fix)
+        else:
+            self.after(80, load)
 
     def _open_scp_view(self) -> None:
         """SFTP/SSH explorer: form koneksi + file manager + perintah remote."""

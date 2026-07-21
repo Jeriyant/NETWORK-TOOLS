@@ -417,8 +417,100 @@ def check_windows_update() -> SecurityItem:
     }
 
 
+def check_network_profile() -> SecurityItem:
+    """Cek apakah koneksi aktif Private (OK) atau Public (merah)."""
+    out = _run_ps(
+        "Get-NetConnectionProfile -ErrorAction SilentlyContinue | "
+        "ForEach-Object { \"$($_.Name)|$($_.NetworkCategory)|$($_.InterfaceAlias)\" }"
+    )
+    profiles: list[tuple[str, str, str]] = []
+    for line in out.splitlines():
+        line = line.strip()
+        if "|" not in line:
+            continue
+        parts = line.split("|", 2)
+        if len(parts) < 2:
+            continue
+        name = parts[0].strip() or "—"
+        cat = parts[1].strip()
+        iface = parts[2].strip() if len(parts) > 2 else ""
+        profiles.append((name, cat, iface))
+
+    if not profiles:
+        # Fallback netsh
+        netsh = _run_cmd(["netsh", "wlan", "show", "interfaces"])
+        # Juga coba kategori firewall profile aktif
+        cat_ps = _run_ps(
+            "(Get-NetConnectionProfile -ErrorAction SilentlyContinue | "
+            "Select-Object -First 1 -ExpandProperty NetworkCategory)"
+        ).strip()
+        if cat_ps:
+            profiles.append(("Network", cat_ps, ""))
+
+    if not profiles:
+        return {
+            "key": "netprofile",
+            "label": "Profil Jaringan",
+            "status": "UNKNOWN",
+            "detail": "Tidak dapat membaca profil jaringan (Private/Public).",
+            "ok": False,
+        }
+
+    # Jika ada yang Public → status merah
+    publics = [p for p in profiles if p[1].lower() == "public"]
+    privates = [p for p in profiles if p[1].lower() == "private"]
+    domains = [p for p in profiles if "domain" in p[1].lower()]
+
+    def _fmt(rows: list[tuple[str, str, str]]) -> str:
+        bits = []
+        for name, cat, iface in rows:
+            bit = f"{name} ({cat})"
+            if iface:
+                bit += f" @ {iface}"
+            bits.append(bit)
+        return "; ".join(bits)
+
+    if publics:
+        return {
+            "key": "netprofile",
+            "label": "Profil Jaringan",
+            "status": "PUBLIC",
+            "detail": f"Jaringan Public terdeteksi — ubah ke Private di Settings. {_fmt(publics)}",
+            "ok": False,
+        }
+    if domains:
+        return {
+            "key": "netprofile",
+            "label": "Profil Jaringan",
+            "status": "DOMAIN",
+            "detail": _fmt(domains + privates),
+            "ok": True,
+        }
+    if privates:
+        return {
+            "key": "netprofile",
+            "label": "Profil Jaringan",
+            "status": "PRIVATE",
+            "detail": _fmt(privates),
+            "ok": True,
+        }
+    # Kategori lain
+    return {
+        "key": "netprofile",
+        "label": "Profil Jaringan",
+        "status": profiles[0][1].upper() or "UNKNOWN",
+        "detail": _fmt(profiles),
+        "ok": False,
+    }
+
+
 def collect_security_status() -> list[SecurityItem]:
-    return [check_firewall(), check_defender(), check_windows_update()]
+    return [
+        check_firewall(),
+        check_defender(),
+        check_windows_update(),
+        check_network_profile(),
+    ]
 
 
 def format_security_text(items: list[SecurityItem], hostname: str = "") -> str:

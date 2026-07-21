@@ -22,7 +22,7 @@ def _read_str(key: winreg.HKEYType, name: str) -> str:
 
 
 def collect_installed_apps() -> list[dict[str, str]]:
-    """Return sorted unique apps with name / version / publisher."""
+    """Return sorted unique apps with name / version / publisher / uninstall / icon."""
     seen: set[str] = set()
     apps: list[dict[str, str]] = []
 
@@ -47,7 +47,6 @@ def collect_installed_apps() -> list[dict[str, str]]:
                     display = _read_str(sub, "DisplayName")
                     if not display:
                         continue
-                    # Skip system updates / KB patches noise
                     if display.startswith("Update for ") or display.startswith("Security Update"):
                         continue
                     try:
@@ -65,6 +64,11 @@ def collect_installed_apps() -> list[dict[str, str]]:
                             "name": display,
                             "version": _read_str(sub, "DisplayVersion") or "—",
                             "publisher": _read_str(sub, "Publisher") or "—",
+                            "icon": _read_str(sub, "DisplayIcon"),
+                            "uninstall": _read_str(sub, "UninstallString"),
+                            "quiet_uninstall": _read_str(sub, "QuietUninstallString"),
+                            "install_location": _read_str(sub, "InstallLocation"),
+                            "key_path": f"{path}\\{sub_name}",
                         }
                     )
                 finally:
