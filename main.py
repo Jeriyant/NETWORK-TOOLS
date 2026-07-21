@@ -95,6 +95,27 @@ def tools_for_ui() -> list[tuple[str, str, str, str]]:
 # Backward-compatible alias — prefer tools_for_ui() for live language
 TOOLS = TOOL_DEFS
 
+# Warna tile dashboard (bg, hover) — tiap menu beda warna
+DASH_TILE_PALETTE: list[tuple[str, str]] = [
+    ("#2563EB", "#1D4ED8"),  # biru
+    ("#059669", "#047857"),  # hijau
+    ("#D97706", "#B45309"),  # oranye
+    ("#7C3AED", "#6D28D9"),  # ungu
+    ("#0891B2", "#0E7490"),  # cyan
+    ("#DB2777", "#BE185D"),  # pink
+    ("#4F46E5", "#4338CA"),  # indigo
+    ("#DC2626", "#B91C1C"),  # merah
+    ("#0D9488", "#0F766E"),  # teal
+    ("#CA8A04", "#A16207"),  # kuning
+    ("#9333EA", "#7E22CE"),  # violet
+    ("#EA580C", "#C2410C"),  # terakota
+]
+DASH_TILE_TEXT = "#FFFFFF"
+DASH_TILE_MUTED = "#E2E8F0"
+DASH_TILE_BTN = "#FFFFFF"
+DASH_TILE_BTN_HOVER = "#F1F5F9"
+DASH_TILE_BTN_TEXT = "#1E293B"
+
 SEND_TOOLS = {"ping", "traceroute", "dns", "ipscan", "speedtest", "apps", "security"}
 TEXT_SEND_TOOLS = frozenset({"apps", "ipscan"})
 
@@ -198,14 +219,10 @@ class NetworkToolsApp(ctk.CTk):
         self._send_text_payload: str = ""
 
         self._header = ctk.CTkFrame(self, fg_color="transparent")
-        self._header.pack(fill="x", padx=16, pady=(10, 2))
         self._sysinfo_strip = ctk.CTkFrame(self, fg_color="transparent")
-        self._sysinfo_strip.pack(fill="x", padx=16, pady=(0, 0))
         self._content = ctk.CTkFrame(self, fg_color="transparent")
-        self._content.pack(fill="both", expand=True, padx=12, pady=4)
         self._action_bar = ctk.CTkFrame(self, fg_color="transparent")
         self._footer = ctk.CTkFrame(self, fg_color=COLORS["panel"], height=34, corner_radius=0)
-        self._footer.pack(fill="x", side="bottom")
         self._footer.pack_propagate(False)
 
         year = datetime.now().year
@@ -217,6 +234,13 @@ class NetworkToolsApp(ctk.CTk):
             justify="center",
         )
         self._footer_label.pack(expand=True)
+
+        # Footer dulu (bawah), lalu konten expand — copyright tetap terlihat saat resize
+        self._footer.pack(fill="x", side="bottom")
+        self._header.pack(fill="x", padx=16, pady=(10, 2))
+        self._sysinfo_strip.pack(fill="x", padx=16, pady=(0, 0))
+        self._content.pack(fill="both", expand=True, padx=12, pady=4)
+        self.bind("<Configure>", self._on_main_window_configure)
 
         self.show_dashboard()
         # Pastikan window utama tidak terkunci dari sesi update sebelumnya
@@ -287,6 +311,23 @@ class NetworkToolsApp(ctk.CTk):
                     desc_lbl.configure(wraplength=max(tw - 28, 80))
             except Exception:
                 pass
+
+    def _ensure_footer_visible(self) -> None:
+        """Pastikan bar copyright selalu terpasang di bawah jendela."""
+        try:
+            if not self._footer.winfo_ismapped():
+                self._footer.pack(fill="x", side="bottom")
+            self._content.pack_configure(fill="both", expand=True)
+            self._footer.lift()
+        except Exception:
+            pass
+
+    def _on_main_window_configure(self, event: Any = None) -> None:
+        if event is not None and event.widget is not self:
+            return
+        if self._current_tool is not None:
+            return
+        self._ensure_footer_visible()
 
     def _apply_window_icon(self) -> None:
         """Samakan icon jendela dengan icon file EXE."""
@@ -1134,10 +1175,10 @@ class NetworkToolsApp(ctk.CTk):
         pad = int(getattr(self, "_side_pad", 16))
         try:
             self._header.pack_configure(padx=pad, pady=(6, 2))
-            # expand=True agar area konten terisi tile (tidak ada lubang kosong)
             self._content.pack_configure(fill="both", expand=True, padx=pad, pady=(4, 4))
             if self._sysinfo_strip.winfo_ismapped():
                 self._sysinfo_strip.pack_configure(padx=pad, pady=(0, 0))
+            self._ensure_footer_visible()
         except Exception:
             pass
 
@@ -1183,52 +1224,36 @@ class NetworkToolsApp(ctk.CTk):
 
         for idx, (key, title, icon, desc) in enumerate(tools):
             r, c = divmod(idx, cols)
+            tile_bg, tile_hover = DASH_TILE_PALETTE[idx % len(DASH_TILE_PALETTE)]
             tile = ctk.CTkFrame(
                 grid,
-                fg_color=COLORS["tile"],
-                corner_radius=12,
-                border_width=1,
-                border_color=COLORS["border"],
+                fg_color=tile_bg,
+                corner_radius=8,
+                border_width=0,
             )
             tile.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
-            accent_strip = ctk.CTkFrame(
-                tile, fg_color=COLORS["accent_dim"], height=5, corner_radius=12
-            )
-            accent_strip.pack(fill="x", side="top", padx=0, pady=0)
-
             inner = ctk.CTkFrame(tile, fg_color="transparent")
-            inner.pack(fill="both", expand=True, padx=12, pady=(10, 10))
-
-            icon_box = ctk.CTkFrame(
-                inner,
-                fg_color=COLORS["tile_hover"],
-                corner_radius=10,
-                border_width=1,
-                border_color=COLORS["border"],
-            )
-            icon_box.pack(anchor="w", fill="x", pady=(0, 10))
+            inner.pack(fill="both", expand=True, padx=10, pady=8)
             ctk.CTkLabel(
-                icon_box,
+                inner,
                 text=icon,
                 font=ctk.CTkFont(size=18),
-                text_color=COLORS["accent"],
+                text_color=DASH_TILE_TEXT,
                 height=20,
-            ).pack(anchor="w", padx=10, pady=6)
-
+            ).pack(anchor="w")
             ctk.CTkLabel(
                 inner,
                 text=title,
-                font=ctk.CTkFont(family="Segoe UI Semibold", size=14),
-                text_color=COLORS["text"],
+                font=ctk.CTkFont(family="Segoe UI Semibold", size=13),
+                text_color=DASH_TILE_TEXT,
                 height=18,
-            ).pack(anchor="w", pady=(0, 2))
-
+            ).pack(anchor="w", pady=(2, 0))
             desc_lbl = ctk.CTkLabel(
                 inner,
                 text=desc,
                 font=ctk.CTkFont(size=10),
-                text_color=COLORS["muted"],
-                wraplength=180,
+                text_color=DASH_TILE_MUTED,
+                wraplength=140,
                 justify="left",
                 anchor="nw",
             )
@@ -1237,28 +1262,25 @@ class NetworkToolsApp(ctk.CTk):
             btn = ctk.CTkButton(
                 inner,
                 text=t("app.open"),
-                width=92,
-                height=28,
-                fg_color=COLORS["accent_dim"],
-                hover_color=COLORS["accent"],
-                text_color=COLORS["on_accent"],
-                corner_radius=10,
+                width=70,
+                height=26,
+                fg_color=DASH_TILE_BTN,
+                hover_color=DASH_TILE_BTN_HOVER,
+                text_color=DASH_TILE_BTN_TEXT,
                 command=lambda k=key: self.open_tool(k),
             )
-            btn.pack(anchor="w", pady=(10, 0))
+            btn.pack(anchor="w", pady=(6, 0))
 
             def _open(_event: Any = None, k: str = key) -> None:
                 self.open_tool(k)
 
-            def _tile_enter(_event: Any = None) -> None:
-                tile.configure(fg_color=COLORS["tile_hover"], border_color=COLORS["accent_dim"])
-                accent_strip.configure(fg_color=COLORS["accent"])
+            def _tile_enter(_event: Any = None, bg=tile_hover, t=tile) -> None:
+                t.configure(fg_color=bg)
 
-            def _tile_leave(_event: Any = None) -> None:
-                tile.configure(fg_color=COLORS["tile"], border_color=COLORS["border"])
-                accent_strip.configure(fg_color=COLORS["accent_dim"])
+            def _tile_leave(_event: Any = None, bg=tile_bg, t=tile) -> None:
+                t.configure(fg_color=bg)
 
-            for widget in (tile, inner, accent_strip, icon_box):
+            for widget in (tile, inner):
                 widget.bind("<Enter>", _tile_enter)
                 widget.bind("<Leave>", _tile_leave)
                 widget.bind("<Button-1>", _open)
@@ -1267,8 +1289,8 @@ class NetworkToolsApp(ctk.CTk):
                     continue
                 try:
                     child.bind("<Button-1>", _open)
-                    child.bind("<Enter>", lambda e: _tile_enter(e))
-                    child.bind("<Leave>", lambda e: _tile_leave(e))
+                    child.bind("<Enter>", _tile_enter)
+                    child.bind("<Leave>", _tile_leave)
                 except Exception:
                     pass
 
