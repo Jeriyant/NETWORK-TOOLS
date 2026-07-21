@@ -465,8 +465,8 @@ class ScpPanel:
 
         self._term_write(
             t("scp.need_connect") + "\n"
-            "Terminal interaktif — klik kanan: Copy / Paste.\n"
-            "Explorer: drop = upload · seret file remote = download.\n"
+            "Terminal — arrow/Ctrl untuk nano/vim · klik kanan: Copy/Paste.\n"
+            "Explorer: drop=upload · seret=download · Buka+Save=upload otomatis.\n"
         )
         self.term.configure(state="disabled")
 
@@ -486,6 +486,9 @@ class ScpPanel:
 
     def _bind_tooltip(self, widget: Any, text: str) -> None:
         tip: dict[str, Any] = {"win": None}
+        if not hasattr(self, "_tooltips"):
+            self._tooltips: list[dict[str, Any]] = []
+        self._tooltips.append(tip)
 
         def show(_e: Any = None) -> None:
             if tip["win"] is not None:
@@ -521,8 +524,27 @@ class ScpPanel:
                 except Exception:
                     pass
 
+        tip["hide"] = hide
         widget.bind("<Enter>", show)
         widget.bind("<Leave>", hide)
+        widget.bind("<Destroy>", hide)
+
+    def _clear_tooltips(self) -> None:
+        for tip in getattr(self, "_tooltips", []) or []:
+            hide = tip.get("hide")
+            if callable(hide):
+                try:
+                    hide()
+                except Exception:
+                    pass
+            w = tip.get("win")
+            tip["win"] = None
+            if w is not None:
+                try:
+                    w.destroy()
+                except Exception:
+                    pass
+        self._tooltips = []
 
     def _bind_entry_clipboard(self, entry: ctk.CTkEntry) -> None:
         def _paste(_e: Any = None) -> str:
@@ -713,7 +735,7 @@ class ScpPanel:
     def _on_term_key(self, event: Any) -> str | None:
         if self._shell_chan is None:
             return "break"
-        # biarkan navigasi / modifier tanpa kirim
+        # Modifier saja
         if event.keysym in {
             "Shift_L",
             "Shift_R",
@@ -722,25 +744,59 @@ class ScpPanel:
             "Alt_L",
             "Alt_R",
             "Caps_Lock",
-            "Left",
-            "Right",
-            "Up",
-            "Down",
-            "Home",
-            "End",
-            "Prior",
-            "Next",
+            "Win_L",
+            "Win_R",
         }:
-            return None
-        if event.state & 0x4:  # Control — ditangani binding khusus
             return "break"
 
-        ch = event.char
         try:
+            # Arrow / nav — penting untuk nano/vim
+            arrows = {
+                "Up": "\x1b[A",
+                "Down": "\x1b[B",
+                "Right": "\x1b[C",
+                "Left": "\x1b[D",
+                "Home": "\x1b[H",
+                "End": "\x1b[F",
+                "Prior": "\x1b[5~",
+                "Next": "\x1b[6~",
+                "Insert": "\x1b[2~",
+                "F1": "\x1bOP",
+                "F2": "\x1bOQ",
+                "F3": "\x1bOR",
+                "F4": "\x1bOS",
+                "F5": "\x1b[15~",
+                "F6": "\x1b[17~",
+                "F7": "\x1b[18~",
+                "F8": "\x1b[19~",
+                "F9": "\x1b[20~",
+                "F10": "\x1b[21~",
+                "F11": "\x1b[23~",
+                "F12": "\x1b[24~",
+            }
+            if event.keysym in arrows:
+                self._shell_chan.send(arrows[event.keysym])
+                return "break"
+
+            # Ctrl+Letter → kirim ke shell (nano: Ctrl+O/X/G, dll.)
+            # Kecuali Ctrl+C/V/A/L yang punya binding khusus
+            if event.state & 0x4:
+                if event.keysym.lower() in {"c", "v", "a", "l"}:
+                    return "break"
+                ch = event.keysym.lower()
+                if len(ch) == 1 and "a" <= ch <= "z":
+                    self._shell_chan.send(chr(ord(ch) - 96))
+                    return "break"
+                if event.keysym == "bracketleft":  # Ctrl+[
+                    self._shell_chan.send("\x1b")
+                    return "break"
+                return "break"
+
+            ch = event.char
             if event.keysym == "Return":
                 self._shell_chan.send("\r")
             elif event.keysym == "BackSpace":
-                self._shell_chan.send("\x08")
+                self._shell_chan.send("\x7f")  # nano biasanya DEL
             elif event.keysym == "Delete":
                 self._shell_chan.send("\x1b[3~")
             elif event.keysym == "Tab":
@@ -788,6 +844,22 @@ class ScpPanel:
         self._shell_thread = threading.Thread(target=reader, daemon=True)
         self._shell_thread.start()
         self.term.focus_set()
+        # Sync ukuran PTY (penting untuk nano)
+        try:
+            self.session.resize_shell(cols, rows)
+        except Exception:
+            pass
+        self.term.bind("<Configure>", self._on_term_resize, add="+")
+
+    def _on_term_resize(self, _event: Any = None) -> None:
+        if self._shell_chan is None:
+            return
+        try:
+            cols = max(40, int(self.term.winfo_width() / 8) or 100)
+            rows = max(10, int(self.term.winfo_height() / 16) or 30)
+            self.session.resize_shell(cols, rows)
+        except Exception:
+            pass
 
     @staticmethod
     def _strip_ansi(text: str) -> str:
@@ -1096,13 +1168,30 @@ class ScpPanel:
         self._log("Disconnected.")
 
     def _leave(self) -> None:
+        self._clear_tooltips()
+        self._stop_edit_watchers()
         self._stop_shell()
         try:
             self.session.disconnect()
         except Exception:
             pass
         self.app._scp_session = None
+        # Hapus hint/status agar tidak tertinggal di UI
+        try:
+            self.drop_hint.configure(text="")
+            self.status_lbl.configure(text="")
+        except Exception:
+            pass
         self.on_back()
+
+    def _stop_edit_watchers(self) -> None:
+        for job in list(getattr(self, "_edit_watch_jobs", []) or []):
+            try:
+                self.app.after_cancel(job)
+            except Exception:
+                pass
+        self._edit_watch_jobs = []
+        self._edit_watchers = {}
 
     # ----- listing -----
     def _parent_entry(self) -> RemoteEntry | None:
@@ -1271,7 +1360,7 @@ class ScpPanel:
         threading.Thread(target=worker, daemon=True).start()
 
     def _open_remote_file(self, entry: Any) -> None:
-        """Download ke temp lalu buka dialog 'Open with' / aplikasi sesuai tipe file."""
+        """Download ke temp, buka editor, pantau save → upload otomatis ke remote."""
         import os
         import subprocess
         import tempfile
@@ -1305,25 +1394,146 @@ class ScpPanel:
                     return
                 self._xfer_stop(f"Dibuka: {entry.name}")
                 path = str(dest)
-                # Dialog "Open with" agar user pilih teks editor / app sesuai tipe
-                try:
-                    subprocess.Popen(
-                        ["rundll32.exe", "shell32.dll,OpenAs_RunDLL", path],
-                        shell=False,
-                    )
-                    self._status(f"Open with → {entry.name}")
-                    return
-                except Exception:
-                    pass
-                try:
-                    os.startfile(path)  # type: ignore[attr-defined]
-                    self._status(f"Opened → {entry.name}")
-                except Exception as exc:
-                    messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app)
+                opened = False
+                # Prefer notepad untuk file teks agar mudah edit+save
+                text_ext = {
+                    ".txt",
+                    ".conf",
+                    ".cfg",
+                    ".ini",
+                    ".json",
+                    ".xml",
+                    ".yml",
+                    ".yaml",
+                    ".sh",
+                    ".py",
+                    ".js",
+                    ".css",
+                    ".html",
+                    ".md",
+                    ".log",
+                    ".service",
+                    ".env",
+                }
+                suf = dest.suffix.lower()
+                if suf in text_ext or suf == "":
+                    try:
+                        subprocess.Popen(["notepad.exe", path], shell=False)
+                        opened = True
+                        self._status(f"Notepad → {entry.name} (save = upload otomatis)")
+                    except Exception:
+                        opened = False
+                if not opened:
+                    try:
+                        subprocess.Popen(
+                            ["rundll32.exe", "shell32.dll,OpenAs_RunDLL", path],
+                            shell=False,
+                        )
+                        opened = True
+                        self._status(f"Open with → {entry.name} (save = upload otomatis)")
+                    except Exception:
+                        pass
+                if not opened:
+                    try:
+                        os.startfile(path)  # type: ignore[attr-defined]
+                        self._status(f"Opened → {entry.name} (save = upload otomatis)")
+                    except Exception as exc:
+                        messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app)
+                        return
+                self._start_edit_watch(entry.path, dest)
 
             self._ui(done)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _start_edit_watch(self, remote_path: str, local_path: Any) -> None:
+        """Pantau mtime file lokal; bila berubah (Save) → upload ke remote."""
+        from pathlib import Path as _Path
+
+        path = _Path(local_path)
+        try:
+            last_mtime = path.stat().st_mtime
+            last_size = path.stat().st_size
+        except Exception:
+            last_mtime = 0.0
+            last_size = -1
+
+        if not hasattr(self, "_edit_watch_jobs"):
+            self._edit_watch_jobs = []
+        if not hasattr(self, "_edit_watchers"):
+            self._edit_watchers = {}
+
+        key = str(path)
+        # Hentikan watcher lama untuk file yang sama
+        old = self._edit_watchers.pop(key, None)
+        if old is not None:
+            try:
+                self.app.after_cancel(old)
+            except Exception:
+                pass
+
+        state = {"mtime": last_mtime, "size": last_size, "busy": False, "ticks": 0}
+
+        def poll() -> None:
+            if not self.session.connected:
+                self._edit_watchers.pop(key, None)
+                return
+            state["ticks"] += 1
+            # Berhenti setelah ~2 jam idle poll
+            if state["ticks"] > 7200:
+                self._edit_watchers.pop(key, None)
+                return
+            try:
+                st = path.stat()
+                mtime, size = st.st_mtime, st.st_size
+            except Exception:
+                job = self.app.after(1200, poll)
+                self._edit_watchers[key] = job
+                return
+
+            changed = mtime > state["mtime"] + 0.05 or size != state["size"]
+            if changed and not state["busy"]:
+                state["mtime"] = mtime
+                state["size"] = size
+                state["busy"] = True
+                self._status(f"Menyimpan ke remote: {path.name}…")
+                self._xfer_start(f"⬆ Save {path.name}")
+
+                def up() -> None:
+                    err = None
+                    try:
+                        # Tunggu sebentar agar Notepad selesai flush
+                        import time as _time
+
+                        _time.sleep(0.35)
+                        self.session.upload(str(path), remote_path)
+                    except Exception as exc:
+                        err = str(exc)
+
+                    def done() -> None:
+                        state["busy"] = False
+                        if err:
+                            self._xfer_stop(f"Upload gagal: {err}")
+                            self._status(f"Upload gagal: {err}")
+                        else:
+                            self._xfer_stop(f"Tersimpan → {remote_path}")
+                            self._status(f"Tersimpan ke remote: {remote_path}")
+                            try:
+                                rows = self.session.list_dir()
+                                self._fill(rows)
+                            except Exception:
+                                pass
+
+                    self._ui(done)
+
+                threading.Thread(target=up, daemon=True).start()
+
+            job = self.app.after(800, poll)
+            self._edit_watchers[key] = job
+
+        job = self.app.after(1000, poll)
+        self._edit_watchers[key] = job
+        self._edit_watch_jobs.append(job)
 
     def _on_right_click(self, event: Any) -> None:
         row = self.tree.identify_row(event.y)

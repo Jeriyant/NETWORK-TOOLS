@@ -75,6 +75,54 @@ def list_net_adapters() -> list[dict[str, str]]:
     return rows
 
 
+def get_adapter_details(name: str) -> dict[str, str]:
+    """Detail adapter untuk dialog Status/Informasi."""
+    n = (name or "").replace('"', "")
+    if not n:
+        return {}
+    code, out = _run_ps(
+        f'$a = Get-NetAdapter -Name "{n}" -ErrorAction SilentlyContinue; '
+        "if (-not $a) { '{}' ; exit }; "
+        "$ip = Get-NetIPAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 "
+        "-ErrorAction SilentlyContinue | Select-Object -First 1; "
+        "$gw = Get-NetRoute -InterfaceIndex $a.ifIndex -DestinationPrefix '0.0.0.0/0' "
+        "-ErrorAction SilentlyContinue | Select-Object -First 1; "
+        "[pscustomobject]@{ "
+        "Name=$a.Name; Status=$a.Status; MacAddress=$a.MacAddress; "
+        "LinkSpeed=$a.LinkSpeed; InterfaceDescription=$a.InterfaceDescription; "
+        "ifIndex=$a.ifIndex; MediaType=$a.MediaType; "
+        "IPv4=($(if($ip){$ip.IPAddress}else{''})); "
+        "Prefix=($(if($ip){$ip.PrefixLength}else{''})); "
+        "Gateway=($(if($gw){$gw.NextHop}else{''})) "
+        "} | ConvertTo-Json -Compress"
+    )
+    if code != 0 or not out.strip():
+        return {"name": n}
+    import json
+
+    try:
+        start = out.find("{")
+        if start >= 0:
+            out = out[start:]
+        data = json.loads(out)
+    except Exception:
+        return {"name": n}
+    if not isinstance(data, dict):
+        return {"name": n}
+    return {
+        "name": str(data.get("Name") or n),
+        "status": str(data.get("Status") or ""),
+        "mac": str(data.get("MacAddress") or ""),
+        "speed": str(data.get("LinkSpeed") or ""),
+        "desc": str(data.get("InterfaceDescription") or ""),
+        "ifindex": str(data.get("ifIndex") or ""),
+        "media": str(data.get("MediaType") or ""),
+        "ipv4": str(data.get("IPv4") or ""),
+        "prefix": str(data.get("Prefix") or ""),
+        "gateway": str(data.get("Gateway") or ""),
+    }
+
+
 def set_adapter_enabled(name: str, enabled: bool) -> tuple[bool, str]:
     """Enable/Disable-NetAdapter. Return (ok, message)."""
     n = (name or "").replace('"', "")

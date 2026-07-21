@@ -860,8 +860,11 @@ class SftpSession:
 
     def upload(self, local_path: str | Path, remote_name: str | None = None) -> str:
         local_path = Path(local_path)
-        name = remote_name or local_path.name
-        remote = self._join(name)
+        if remote_name and str(remote_name).startswith("/"):
+            remote = str(remote_name)
+        else:
+            name = remote_name or local_path.name
+            remote = self._join(name)
         if self._sftp is not None:
             with self._lock:
                 self._sftp.put(str(local_path), remote)
@@ -930,7 +933,7 @@ class SftpSession:
     def open_shell(
         self,
         *,
-        term: str = "xterm",
+        term: str = "xterm-256color",
         width: int = 120,
         height: int = 36,
     ) -> Any:
@@ -941,7 +944,10 @@ class SftpSession:
         try:
             chan.get_pty(term=term, width=width, height=height)
         except Exception:
-            pass
+            try:
+                chan.get_pty(term="xterm", width=width, height=height)
+            except Exception:
+                pass
         chan.invoke_shell()
         chan.settimeout(0.0)
         self._shell = chan

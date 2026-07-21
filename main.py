@@ -37,6 +37,7 @@ from modules.multi_ping import MultiHostPingRunner
 from modules.prefs import load_prefs, save_prefs
 from modules.refresh_network import (
     RefreshNetworkRunner,
+    get_adapter_details,
     list_net_adapters,
     open_adapter_properties,
     set_adapter_enabled,
@@ -566,7 +567,7 @@ class NetworkToolsApp(ctk.CTk):
             pass
 
         if key == "printer":
-            if action in ("uninstall_driver", "reinstall_driver"):
+            if action in ("uninstall_driver", "reinstall_driver", "fix"):
                 self._elevate_printer_action = (action, payload)
             else:
                 self._elevate_auto_fix_printer = True
@@ -2368,12 +2369,30 @@ class NetworkToolsApp(ctk.CTk):
             for idx, row in enumerate(rows):
                 r, c = divmod(idx, cols)
                 st = row.get("status") or "—"
+                st_low = st.lower()
+                disabled = st_low in (
+                    "disabled",
+                    "disconnected",
+                    "down",
+                    "not present",
+                )
+                # Box kusam jika adapter disable / down
+                if disabled:
+                    card_bg = COLORS.get("tile", COLORS["panel"])
+                    # Blend ke abu-abu
+                    card_bg = COLORS.get("border", "#3A3A3A")
+                    text_col = COLORS.get("muted", "#888888")
+                    border_col = COLORS.get("muted", "#666666")
+                else:
+                    card_bg = COLORS["panel"]
+                    text_col = COLORS["text"]
+                    border_col = COLORS["border"]
                 card = ctk.CTkFrame(
                     grid,
-                    fg_color=COLORS["panel"],
+                    fg_color=card_bg,
                     corner_radius=12,
                     border_width=1,
-                    border_color=COLORS["border"],
+                    border_color=border_col,
                 )
                 card.grid(row=r, column=c, sticky="nsew", padx=6, pady=6)
                 card_widgets.append(card)
@@ -2391,7 +2410,7 @@ class NetworkToolsApp(ctk.CTk):
                     head,
                     text=row.get("name") or "—",
                     font=ctk.CTkFont(family="Segoe UI Semibold", size=13),
-                    text_color=COLORS["text"],
+                    text_color=text_col,
                     anchor="w",
                 ).pack(side="left", fill="x", expand=True)
 
@@ -2426,6 +2445,11 @@ class NetworkToolsApp(ctk.CTk):
                     def on_right(event: Any, ad=adapter) -> str:
                         menu = tk.Menu(self, tearoff=0)
                         menu.add_command(
+                            label=t("network.status"),
+                            command=lambda: _adapter_action("status", ad),
+                        )
+                        menu.add_separator()
+                        menu.add_command(
                             label=t("network.enable"),
                             command=lambda: _adapter_action("enable", ad),
                         )
@@ -2453,9 +2477,37 @@ class NetworkToolsApp(ctk.CTk):
 
                 _bind_adapter_menu(card, row)
 
+        def _show_adapter_status(adapter: dict[str, str]) -> None:
+            name = adapter.get("name") or "—"
+            details = get_adapter_details(name) or adapter
+            lines = [
+                f"{t('network.info.name')}: {details.get('name') or name}",
+                f"{t('network.info.status')}: {details.get('status') or adapter.get('status') or '—'}",
+                f"{t('network.info.desc')}: {details.get('desc') or adapter.get('desc') or '—'}",
+                f"{t('network.info.mac')}: {details.get('mac') or adapter.get('mac') or '—'}",
+                f"{t('network.info.speed')}: {details.get('speed') or adapter.get('speed') or '—'}",
+                f"{t('network.info.media')}: {details.get('media') or '—'}",
+                f"{t('network.info.ipv4')}: {details.get('ipv4') or '—'}"
+                + (
+                    f"/{details.get('prefix')}"
+                    if details.get("prefix")
+                    else ""
+                ),
+                f"{t('network.info.gateway')}: {details.get('gateway') or '—'}",
+                f"ifIndex: {details.get('ifindex') or '—'}",
+            ]
+            messagebox.showinfo(
+                t("network.status"),
+                "\n".join(lines),
+                parent=self,
+            )
+
         def _adapter_action(kind: str, adapter: dict[str, str]) -> None:
             name = adapter.get("name") or ""
             if not name:
+                return
+            if kind == "status":
+                _show_adapter_status(adapter)
                 return
             if kind == "properties":
                 ok, msg = open_adapter_properties(name)
@@ -2734,7 +2786,20 @@ class NetworkToolsApp(ctk.CTk):
             PrinterDriversRunner(on_drivers=on_drivers, on_error=on_error).start()
 
         def run_fix() -> None:
-            if not self._ensure_admin_for("printer", resume_action="fix"):
+            drv = _selected_driver()
+            if drv is None:
+                messagebox.showinfo(
+                    t("tool.printer.title"),
+                    t("printer.fix_need_select"),
+                    parent=self,
+                )
+                return
+            import json as _json
+
+            payload = _json.dumps(drv, ensure_ascii=False)
+            if not self._ensure_admin_for(
+                "printer", resume_action="fix", resume_payload=payload
+            ):
                 return
             self._stop_runner()
             if self.console:
@@ -2748,6 +2813,7 @@ class NetworkToolsApp(ctk.CTk):
             FixPrinterRunner(
                 on_line=self.log,
                 on_done=lambda: self.after(0, after_fix),
+                driver=drv,
             ).start()
 
         def _selected_driver() -> dict[str, str] | None:
@@ -2841,14 +2907,43 @@ class NetworkToolsApp(ctk.CTk):
                 drv = {}
             self.after(350, load)
             if isinstance(drv, dict) and drv.get("name"):
-                action = "uninstall" if act == "uninstall_driver" else "reinstall"
-                self.after(
-                    900,
-                    lambda a=action, d=drv: _run_driver_action(a, d, skip_confirm=True),
-                )
+                if act == "fix":
+
+                    def resume_fix(d=drv) -> None:
+                        if self.console:
+                            self.console.clear()
+                        status_lbl.configure(text=t("printer.fixing"))
+
+                        def after_fix() -> None:
+                            self._notify_tool_done("done.printer")
+                            self.after(200, load)
+
+                        FixPrinterRunner(
+                            on_line=self.log,
+                            on_done=lambda: self.after(0, after_fix),
+                            driver=d,
+                        ).start()
+
+                    self.after(900, resume_fix)
+                else:
+                    action = "uninstall" if act == "uninstall_driver" else "reinstall"
+                    self.after(
+                        900,
+                        lambda a=action, d=drv: _run_driver_action(
+                            a, d, skip_confirm=True
+                        ),
+                    )
         elif auto_fix:
+            # UAC dari Fix tanpa payload — minta pilih driver
             self.after(350, load)
-            self.after(1200, run_fix)
+            self.after(
+                800,
+                lambda: messagebox.showinfo(
+                    t("tool.printer.title"),
+                    t("printer.fix_need_select"),
+                    parent=self,
+                ),
+            )
         else:
             self.after(80, load)
 
@@ -2858,13 +2953,14 @@ class NetworkToolsApp(ctk.CTk):
 
         self.console = None
         self._hide_sysinfo_strip()
-        ScpPanel(
+        panel = ScpPanel(
             self,
             self._header,
             self._content,
             COLORS,
             on_back=self._cancel_to_dashboard,
         )
+        self._scp_panel = panel
 
     def _open_rdp_status_view(self, auto_fix: bool = False) -> None:
         """Kartu status RDP Server-App1..App8 + tombol Fix RDP."""
@@ -4280,6 +4376,23 @@ class NetworkToolsApp(ctk.CTk):
             self._speedtest_click_job = self.after(1500, self._speedtest_auto_start)
 
     def _cancel_to_dashboard(self) -> None:
+        # Bersihkan tooltip SSH yang bisa tertinggal
+        try:
+            sess_ui = getattr(self, "_scp_panel", None)
+            if sess_ui is not None and hasattr(sess_ui, "_clear_tooltips"):
+                sess_ui._clear_tooltips()
+        except Exception:
+            pass
+        # Destroy orphan tooltip windows
+        try:
+            for w in list(self.winfo_children()):
+                if isinstance(w, tk.Toplevel) and w.wm_overrideredirect():
+                    try:
+                        w.destroy()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         self._stop_runner()
         self.show_dashboard()
 
