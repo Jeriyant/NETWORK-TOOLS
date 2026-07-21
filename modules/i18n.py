@@ -279,8 +279,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     },
     "tool.anydesk.title": {"id": "Anydesk", "en": "Anydesk"},
     "tool.anydesk.desc": {
-        "id": "UAC, taskkill, jalankan AnyDesk, tampilkan ID",
-        "en": "UAC, taskkill, run AnyDesk, show ID",
+        "id": "Taskkill, jalankan AnyDesk, tampilkan ID (tanpa UAC)",
+        "en": "Taskkill, run AnyDesk, show ID (no UAC)",
     },
     # Apps list
     "apps.loading": {"id": "Memuat daftar aplikasi…", "en": "Loading application list…"},
@@ -422,7 +422,12 @@ _STRINGS: dict[str, dict[str, str]] = {
     "anydesk.local_id_label": {"id": "ID Lokal", "en": "Local ID"},
     "anydesk.local_ip_label": {"id": "Alamat IP Lokal", "en": "Local IP Address"},
     "anydesk.copy_all": {"id": "Salin semua", "en": "Copy all"},
+    "anydesk.copy_one": {"id": "Salin", "en": "Copy"},
     "anydesk.copied": {"id": "Tersalin ke clipboard", "en": "Copied to clipboard"},
+    "anydesk.copied_one": {
+        "id": "{label} tersalin",
+        "en": "{label} copied",
+    },
     "anydesk.telegram_opened": {
         "id": "Telegram dibuka — tempel dengan Ctrl+V",
         "en": "Telegram opened — paste with Ctrl+V",

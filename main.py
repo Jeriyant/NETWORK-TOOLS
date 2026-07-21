@@ -71,7 +71,7 @@ from modules.traceroute_runner import TracerouteRunner
 from modules.trace_topology import TracerouteTopologyRunner
 
 # Tools that require Administrator (UAC)
-ADMIN_TOOLS = frozenset({"refresh", "printer", "fixrdp", "anydesk"})
+ADMIN_TOOLS = frozenset({"refresh", "printer", "fixrdp"})
 # Langsung jalan saat menu dibuka (tanpa tombol Jalankan)
 AUTO_RUN_TOOLS = frozenset({"anydesk"})
 
@@ -578,8 +578,6 @@ class NetworkToolsApp(ctk.CTk):
                 self._elevate_network_action = (action, payload)
             else:
                 self._elevate_auto_fix_refresh = True
-        elif key == "anydesk":
-            self._elevate_auto_run_anydesk = True
         self.open_tool(key)
 
     def _show_startup_loading(self) -> None:
@@ -4798,6 +4796,29 @@ class NetworkToolsApp(ctk.CTk):
         ]
         entries: list[ctk.CTkEntry] = []
 
+        copied_lbl = ctk.CTkLabel(
+            body,
+            text="",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color=COLORS["accent"],
+        )
+
+        def _copy_value(value: str, tip: str = "") -> None:
+            from modules.telegram_share import copy_text_to_clipboard
+
+            if copy_text_to_clipboard(value):
+                copied_lbl.configure(text=tip or t("anydesk.copied"))
+
+        def copy_all() -> None:
+            from modules.telegram_share import copy_text_to_clipboard
+
+            block = self._anydesk_info_block(anydesk_id, local_id, local_ip)
+            if copy_text_to_clipboard(block):
+                copied_lbl.configure(text=t("anydesk.copied"))
+            if entries:
+                entries[0].focus_set()
+                entries[0].select_range(0, "end")
+
         for label, value in fields:
             ctk.CTkLabel(
                 body,
@@ -4821,34 +4842,49 @@ class NetworkToolsApp(ctk.CTk):
                 "<Control-a>",
                 lambda e, ent=entry: (ent.select_range(0, "end"), ent.icursor("end"), "break"),
             )
+            entry.bind(
+                "<Control-c>",
+                lambda e, v=value: (_copy_value(v), "break"),
+            )
+
+            ctx = tk.Menu(entry, tearoff=0)
+            ctx.add_command(
+                label=t("anydesk.copy_one"),
+                command=lambda v=value, lb=label: _copy_value(
+                    v, tip=t("anydesk.copied_one", label=lb)
+                ),
+            )
+            ctx.add_command(
+                label=t("anydesk.copy_all"),
+                command=copy_all,
+            )
+
+            def _popup(event: Any, menu: tk.Menu = ctx) -> str:
+                try:
+                    menu.tk_popup(event.x_root, event.y_root)
+                finally:
+                    menu.grab_release()
+                return "break"
+
+            entry.bind("<Button-3>", _popup)
+            try:
+                entry._entry.bind("<Button-3>", _popup)  # type: ignore[attr-defined]
+            except Exception:
+                pass
             entries.append(entry)
 
-        copied_lbl = ctk.CTkLabel(
-            body,
-            text="",
-            font=ctk.CTkFont(family="Segoe UI", size=12),
-            text_color=COLORS["accent"],
-        )
         copied_lbl.pack(anchor="w", padx=14, pady=(0, 4))
-
-        def copy_all() -> None:
-            from modules.telegram_share import copy_text_to_clipboard
-
-            block = self._anydesk_info_block(anydesk_id, local_id, local_ip)
-            if copy_text_to_clipboard(block):
-                copied_lbl.configure(text=t("anydesk.copied"))
-            entries[0].focus_set()
-            entries[0].select_range(0, "end")
 
         ctk.CTkButton(
             footer,
             text=t("anydesk.copy_all"),
             width=130,
             height=40,
-            fg_color=COLORS["tile"],
-            hover_color=COLORS["tile_hover"],
-            text_color=COLORS["text"],
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            corner_radius=10,
             command=copy_all,
         ).pack(side="left", pady=6)
 
@@ -5211,7 +5247,7 @@ class NetworkToolsApp(ctk.CTk):
                 "Setelah Hubungkan, ketik langsung di terminal hitam."
             ),
             "anydesk": (
-                "Alur (Admin/UAC): taskkill AnyDesk.exe → jalankan AnyDesk.exe → notifikasi ID.\n"
+                "Alur (tanpa UAC): taskkill AnyDesk.exe (best-effort) → jalankan AnyDesk.exe → notifikasi ID.\n"
                 "Jendela & notifikasi Always on Top selama menu AnyDesk aktif."
             ),
         }
@@ -5433,10 +5469,6 @@ class NetworkToolsApp(ctk.CTk):
             pass
 
     def _start_anydesk(self) -> None:
-        # UAC dulu — setelah elevasi app dibuka ulang ke menu AnyDesk
-        if not self._ensure_admin_for("anydesk", resume_action="run"):
-            return
-
         self._set_anydesk_topmost(True)
         self._stop_runner()
         if self.console:

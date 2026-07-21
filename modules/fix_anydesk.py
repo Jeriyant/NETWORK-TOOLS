@@ -90,7 +90,7 @@ def get_anydesk_id_cli(exe: Path) -> str | None:
 
 
 def _taskkill_anydesk() -> str:
-    """taskkill /F /IM AnyDesk.exe /T (butuh Admin agar Access Denied hilang)."""
+    """taskkill /F /IM AnyDesk.exe /T (best-effort, tanpa Admin)."""
     try:
         completed = subprocess.run(
             ["taskkill", "/F", "/IM", "AnyDesk.exe", "/T"],
