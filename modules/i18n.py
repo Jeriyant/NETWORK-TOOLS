@@ -155,8 +155,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "scp.proto.scp": {"id": "SCP", "en": "SCP"},
     "scp.proto.sftp": {"id": "SFTP", "en": "SFTP"},
     "scp.drop_hint": {
-        "id": "Seret & lepas file ke sini untuk upload  ·  atau klik Upload",
-        "en": "Drag & drop files here to upload  ·  or click Upload",
+        "id": "Drop file = upload  ·  drop folder = download file terpilih  ·  seret file remote = download",
+        "en": "Drop files = upload  ·  drop folder = download selected  ·  drag remote file = download",
     },
     "scp.mode_ssh": {
         "id": "Mode SSH — perintah remote (tetap dual: explorer + terminal).",

@@ -201,29 +201,41 @@ class ScpPanel:
         self.path_entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
         self.path_entry.bind("<Return>", lambda _e: self._goto_path())
 
-        def _tbtn(
-            text: str, cmd: Callable[[], None], w: int = 72, color: str | None = None
+        def _icon_btn(
+            icon: str,
+            cmd: Callable[[], None],
+            tip: str,
+            *,
+            color: str | None = None,
         ) -> ctk.CTkButton:
             b = ctk.CTkButton(
                 self.tools,
-                text=text,
-                width=w,
+                text=icon,
+                width=34,
                 height=28,
+                font=ctk.CTkFont(family="Segoe UI Emoji", size=14),
                 fg_color=color or colors["bg"],
                 hover_color=colors.get("accent_dim", colors["accent"]),
-                text_color=colors["text"] if not color else "#1A1400",
-                border_width=1 if not color else 0,
+                text_color="#1A1400" if color else colors["text"],
+                border_width=0 if color else 1,
                 border_color=colors["border"],
                 command=cmd,
             )
-            b.pack(side="left", padx=(0, 4))
+            b.pack(side="left", padx=(0, 3))
+            self._bind_tooltip(b, tip)
             return b
 
-        self.btn_up = _tbtn(t("scp.up"), self._go_up, 64)
-        self.btn_ref = _tbtn(t("scp.refresh"), self._refresh, 72, colors.get("warn", "#E6B422"))
-        self.btn_mkdir = _tbtn(t("scp.new_folder"), self._new_folder, 88)
-        self.btn_mkfile = _tbtn(t("scp.new_file"), self._new_file, 80)
-        self.btn_upload = _tbtn(t("scp.upload"), self._upload, 70)
+        self.btn_up = _icon_btn("↑", self._go_up, t("scp.up"))
+        self.btn_ref = _icon_btn(
+            "↻", self._refresh, t("scp.refresh"), color=colors.get("warn", "#E6B422")
+        )
+        self.btn_mkdir = _icon_btn("📁+", self._new_folder, t("scp.new_folder"))
+        self.btn_mkfile = _icon_btn("📄+", self._new_file, t("scp.new_file"))
+        self.btn_upload = _icon_btn("⬆", self._upload, t("scp.upload"))
+        self.btn_download = _icon_btn("⬇", self._download, t("scp.download"))
+
+        self._drag_start: tuple[int, int] | None = None
+        self._drag_entry: Any | None = None
 
         self.drop_hint = ctk.CTkLabel(
             left_inner,
@@ -234,7 +246,12 @@ class ScpPanel:
         )
         self.drop_hint.pack(fill="x", pady=(0, 4))
 
-        host = tk.Frame(left_inner, bg=colors["bg"], highlightthickness=1, highlightbackground=colors["border"])
+        host = tk.Frame(
+            left_inner,
+            bg=colors["bg"],
+            highlightthickness=1,
+            highlightbackground=colors["border"],
+        )
         host.pack(fill="both", expand=True)
         self._tree_host = host
 
@@ -297,6 +314,9 @@ class ScpPanel:
         self.tree.bind("<Double-1>", self._on_double)
         self.tree.bind("<Button-3>", self._on_right_click)
         self.tree.bind("<Return>", self._on_double)
+        self.tree.bind("<ButtonPress-1>", self._on_tree_press)
+        self.tree.bind("<B1-Motion>", self._on_tree_motion)
+        self.tree.bind("<ButtonRelease-1>", self._on_tree_release)
 
         self._menu = tk.Menu(self.tree, tearoff=0)
         self._menu.add_command(label=t("scp.open"), command=self._open_selected)
@@ -344,12 +364,23 @@ class ScpPanel:
         self.term.bind("<Key>", self._on_term_key)
         self.term.bind("<<Paste>>", self._on_term_paste)
         self.term.bind("<Button-1>", lambda _e: self.term.focus_set())
+        self.term.bind("<Button-3>", self._on_term_right_click)
         self.term.bind("<Control-c>", self._on_term_ctrl_c)
+        self.term.bind("<Control-v>", self._on_term_paste)
+        self.term.bind("<Control-a>", self._on_term_select_all)
         self.term.bind("<Control-l>", self._on_term_clear)
+
+        self._term_menu = tk.Menu(self.term, tearoff=0)
+        self._term_menu.add_command(label="Copy", command=self._term_copy)
+        self._term_menu.add_command(label="Paste", command=lambda: self._on_term_paste())
+        self._term_menu.add_separator()
+        self._term_menu.add_command(label="Select All", command=self._on_term_select_all)
+        self._term_menu.add_command(label="Clear", command=self._term_clear_ui)
 
         self._term_write(
             t("scp.need_connect") + "\n"
-            "Layout: explorer kiri · terminal kanan (ketik langsung setelah Hubungkan).\n"
+            "Explorer: ikon ↑ ↻ 📁+ 📄+ ⬆ ⬇  ·  drop file=upload, drop folder=download\n"
+            "Terminal: klik kanan untuk Copy / Paste.\n"
         )
         self.term.configure(state="disabled")
 
@@ -367,6 +398,46 @@ class ScpPanel:
 
         app.after(120, _set_sash)
 
+    def _bind_tooltip(self, widget: Any, text: str) -> None:
+        tip: dict[str, Any] = {"win": None}
+
+        def show(_e: Any = None) -> None:
+            if tip["win"] is not None:
+                return
+            try:
+                x = widget.winfo_rootx() + 8
+                y = widget.winfo_rooty() + widget.winfo_height() + 4
+            except Exception:
+                return
+            win = tk.Toplevel(self.app)
+            win.wm_overrideredirect(True)
+            win.attributes("-topmost", True)
+            win.geometry(f"+{x}+{y}")
+            tk.Label(
+                win,
+                text=text,
+                bg="#1E1E1E",
+                fg="#F0F0F0",
+                font=("Segoe UI", 9),
+                padx=8,
+                pady=4,
+                relief=tk.SOLID,
+                bd=1,
+            ).pack()
+            tip["win"] = win
+
+        def hide(_e: Any = None) -> None:
+            w = tip["win"]
+            tip["win"] = None
+            if w is not None:
+                try:
+                    w.destroy()
+                except Exception:
+                    pass
+
+        widget.bind("<Enter>", show)
+        widget.bind("<Leave>", hide)
+
     # ----- terminal -----
     def _term_write(self, text: str) -> None:
         try:
@@ -380,9 +451,44 @@ class ScpPanel:
             pass
 
     def _term_clear_ui(self) -> None:
+        was = str(self.term.cget("state"))
         self.term.configure(state="normal")
         self.term.delete("1.0", "end")
         self._term_mark = "1.0"
+        if was == "disabled" or not self.session.connected:
+            self.term.configure(state="disabled")
+
+    def _on_term_right_click(self, event: Any) -> None:
+        try:
+            self.term.focus_set()
+            self._term_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            try:
+                self._term_menu.grab_release()
+            except Exception:
+                pass
+
+    def _term_copy(self) -> None:
+        try:
+            if not self.term.tag_ranges("sel"):
+                return
+            text = self.term.get("sel.first", "sel.last")
+            self.app.clipboard_clear()
+            self.app.clipboard_append(text)
+        except Exception:
+            pass
+
+    def _on_term_select_all(self, _event: Any = None) -> str:
+        try:
+            was = str(self.term.cget("state"))
+            self.term.configure(state="normal")
+            self.term.tag_add("sel", "1.0", "end-1c")
+            self.term.mark_set("insert", "1.0")
+            if was == "disabled":
+                self.term.configure(state="disabled")
+        except Exception:
+            pass
+        return "break"
 
     def _on_term_clear(self, _event: Any = None) -> str:
         if self._shell_chan is not None:
@@ -395,6 +501,13 @@ class ScpPanel:
         return "break"
 
     def _on_term_ctrl_c(self, _event: Any = None) -> str:
+        # Jika ada seleksi teks → copy; jika tidak → interrupt shell
+        try:
+            if self.term.tag_ranges("sel"):
+                self._term_copy()
+                return "break"
+        except Exception:
+            pass
         if self._shell_chan is not None:
             try:
                 self._shell_chan.send("\x03")
@@ -403,15 +516,16 @@ class ScpPanel:
         return "break"
 
     def _on_term_paste(self, _event: Any = None) -> str:
-        if self._shell_chan is None:
-            return "break"
         try:
             data = self.app.clipboard_get()
         except Exception:
             return "break"
-        if data:
+        if not data:
+            return "break"
+        data = data.replace("\r\n", "\n").replace("\r", "\n")
+        if self._shell_chan is not None:
             try:
-                self._shell_chan.send(data.replace("\r\n", "\n").replace("\r", "\n"))
+                self._shell_chan.send(data)
             except Exception:
                 pass
         return "break"
@@ -566,13 +680,88 @@ class ScpPanel:
         def on_drop(files: list[Any]) -> None:
             paths = _normalize(files)
             if paths:
-                self._ui(lambda p=paths: self._upload_paths(p))
+                self._ui(lambda p=paths: self._handle_drop_paths(p))
 
         try:
             windnd.hook_dropfiles(self._tree_host, func=on_drop)
             windnd.hook_dropfiles(self.tree, func=on_drop)
         except Exception:
             pass
+
+    def _handle_drop_paths(self, paths: list[str]) -> None:
+        """Drop file lokal = upload; drop folder lokal = download file terpilih ke folder itu."""
+        if not self.session.connected:
+            messagebox.showinfo(t("tool.scp.title"), t("scp.need_connect"), parent=self.app)
+            return
+
+        from pathlib import Path as _Path
+
+        files = [p for p in paths if _Path(p).is_file()]
+        dirs = [p for p in paths if _Path(p).is_dir()]
+
+        if files:
+            self._upload_paths(files)
+
+        if dirs:
+            entry = self._selected()
+            if entry is None or entry.name == ".." or entry.is_dir:
+                messagebox.showinfo(
+                    t("tool.scp.title"),
+                    "Pilih file remote dulu, lalu lepas folder lokal untuk download ke folder itu.",
+                    parent=self.app,
+                )
+                return
+            dest = str(_Path(dirs[0]) / entry.name)
+            self._download_to(entry, dest)
+
+    def _on_tree_press(self, event: Any) -> None:
+        row = self.tree.identify_row(event.y)
+        if row:
+            self.tree.selection_set(row)
+            self.tree.focus(row)
+        self._drag_start = (event.x_root, event.y_root)
+        self._drag_entry = self._selected()
+
+    def _on_tree_motion(self, event: Any) -> None:
+        if self._drag_start is None:
+            return
+        dx = abs(event.x_root - self._drag_start[0])
+        dy = abs(event.y_root - self._drag_start[1])
+        if dx + dy > 12:
+            try:
+                self.tree.configure(cursor="hand2")
+            except Exception:
+                pass
+
+    def _on_tree_release(self, event: Any) -> None:
+        try:
+            self.tree.configure(cursor="")
+        except Exception:
+            pass
+        start = self._drag_start
+        entry = self._drag_entry
+        self._drag_start = None
+        self._drag_entry = None
+        if start is None or entry is None:
+            return
+        if entry.name == ".." or entry.is_dir:
+            return
+        dx = abs(event.x_root - start[0])
+        dy = abs(event.y_root - start[1])
+        # Seret jauh = download (pilih folder lokal)
+        if dx + dy < 40:
+            return
+        if not self.session.connected:
+            return
+        folder = filedialog.askdirectory(
+            parent=self.app,
+            title=t("scp.download") + " — pilih folder lokal",
+        )
+        if not folder:
+            return
+        from pathlib import Path as _Path
+
+        self._download_to(entry, str(_Path(folder) / entry.name))
 
     # ----- connection -----
     def _connect(self) -> None:
@@ -961,6 +1150,10 @@ class ScpPanel:
         )
         if not dest:
             return
+        self._download_to(entry, dest)
+
+    def _download_to(self, entry: Any, dest: str) -> None:
+        self._log(f"Download {entry.path} → {dest}")
 
         def worker() -> None:
             try:
@@ -993,7 +1186,7 @@ class ScpPanel:
 
         files = [p for p in paths if _Path(p).is_file()]
         if not files:
-            self._log("Drop diabaikan — hanya file (bukan folder) yang di-upload.")
+            self._log("Drop diabaikan — tidak ada file untuk di-upload.")
             return
 
         self._log(f"Upload {len(files)} file…")
