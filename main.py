@@ -1361,7 +1361,6 @@ class NetworkToolsApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI Semibold", size=22),
             text_color=COLORS["text"],
         ).pack(side="left")
-        self._header_actions(top)
         self._build_sysinfo_bar(self._sysinfo_strip)
 
         # Tool-specific controls at top of content
@@ -1459,7 +1458,6 @@ class NetworkToolsApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI Semibold", size=24),
             text_color=COLORS["text"],
         ).pack(side="left")
-        self._header_actions(top)
         self._build_sysinfo_bar(self._sysinfo_strip)
 
         summary = ctk.CTkFrame(
@@ -1617,7 +1615,6 @@ class NetworkToolsApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI Semibold", size=24),
             text_color=COLORS["text"],
         ).pack(side="left")
-        self._header_actions(top)
         self._build_sysinfo_bar(self._sysinfo_strip)
 
         toolbar = ctk.CTkFrame(self._content, fg_color="transparent")
@@ -1769,7 +1766,6 @@ class NetworkToolsApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI Semibold", size=24),
             text_color=COLORS["text"],
         ).pack(side="left")
-        self._header_actions(top)
         self._hide_sysinfo_strip()
 
         # Ringkasan subnet (rapat)
