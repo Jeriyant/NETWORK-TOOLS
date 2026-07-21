@@ -1,4 +1,4 @@
-"""Open AnyDesk, copy client ID to clipboard, and open Telegram."""
+"""Open AnyDesk, copy client ID to clipboard; Telegram dibuka dari tombol Kirim."""
 
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ def find_anydesk_exe() -> Path | None:
     which = shutil.which("AnyDesk.exe")
     if which:
         candidates.append(Path(which))
-    # Portable / common custom locations
     for p in (
         Path(r"C:\Program Files (x86)\AnyDesk\AnyDesk.exe"),
         Path(r"C:\Program Files\AnyDesk\AnyDesk.exe"),
@@ -88,7 +87,6 @@ def get_anydesk_id_cli(exe: Path) -> str | None:
 
 
 def _anydesk_process_running() -> bool:
-    """True jika ada proses AnyDesk.exe yang masih hidup."""
     creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
         completed = subprocess.run(
@@ -107,10 +105,6 @@ def _anydesk_process_running() -> bool:
 
 
 def close_all_anydesk() -> tuple[bool, str]:
-    """
-    Tutup semua proses AnyDesk yang berjalan (UI + background).
-    Returns (ada_yang_ditutup_atau_sudah_mati, pesan_log).
-    """
     creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     if not _anydesk_process_running():
         return False, "Tidak ada AnyDesk yang sedang berjalan."
@@ -126,21 +120,18 @@ def close_all_anydesk() -> tuple[bool, str]:
             creationflags=creation,
         )
     except Exception as exc:
-        return False, f"Gagal menutup AnyDesk: {exc}"
+        return False, f"Gagal taskkill: {exc}"
 
-    # Tunggu sampai proses benar-benar hilang
-    for _ in range(20):
+    for _ in range(8):
+        time.sleep(0.4)
         if not _anydesk_process_running():
-            return True, "Semua proses AnyDesk ditutup."
-        time.sleep(0.25)
-
+            return True, "AnyDesk ditutup paksa."
     if _anydesk_process_running():
-        return False, "AnyDesk masih berjalan setelah taskkill (mungkin terkunci)."
-    return True, "Semua proses AnyDesk ditutup."
+        return False, "AnyDesk masih berjalan setelah taskkill."
+    return True, "AnyDesk ditutup paksa."
 
 
 def format_anydesk_share_text(anydesk_id: str, local_id: str, local_ip: str) -> str:
-    """Teks untuk clipboard / tempel Telegram."""
     return (
         f"ID Anydesk\n{anydesk_id}\n\n"
         f"ID Lokal\n{local_id}\n\n"
@@ -176,43 +167,42 @@ class AnydeskRunner:
 
             self.on_line(f"Menemukan: {exe}")
 
-            # Ambil ID dulu tanpa buka UI jika memungkinkan
-            self.on_line("Membaca AnyDesk ID...")
-            anydesk_id = get_anydesk_id_cli(exe) or read_anydesk_id_from_files()
+            # 1) Tutup paksa
+            self.on_line("Menutup AnyDesk secara paksa…")
+            closed, msg = close_all_anydesk()
+            self.on_line(msg)
+            if closed:
+                time.sleep(1.0)
 
-            if not anydesk_id:
-                self.on_line("Menutup AnyDesk yang sedang berjalan...")
-                closed, msg = close_all_anydesk()
-                self.on_line(msg)
-                if closed:
-                    time.sleep(1.0)
+            # 2) Buka di latar (minimized)
+            self.on_line("Membuka AnyDesk di latar belakang…")
+            try:
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = 6  # SW_MINIMIZE
+                subprocess.Popen([str(exe)], shell=False, startupinfo=si)
+            except Exception as exc:
+                self.on_line(f"Gagal membuka AnyDesk: {exc}")
+                return
 
-                self.on_line("Menjalankan AnyDesk di latar (minimized)…")
-                try:
-                    si = subprocess.STARTUPINFO()
-                    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                    si.wShowWindow = 6  # SW_MINIMIZE
-                    subprocess.Popen([str(exe)], shell=False, startupinfo=si)
-                except Exception as exc:
-                    self.on_line(f"Gagal membuka AnyDesk: {exc}")
-                    return
-
-                time.sleep(2.5)
+            # 3) Ambil & salin ID
+            self.on_line("Menunggu ID AnyDesk…")
+            for wait in (2.5, 2.0, 2.0, 2.0):
+                time.sleep(wait)
                 anydesk_id = get_anydesk_id_cli(exe) or read_anydesk_id_from_files()
-                if not anydesk_id:
-                    time.sleep(2.0)
-                    anydesk_id = get_anydesk_id_cli(exe) or read_anydesk_id_from_files()
+                if anydesk_id:
+                    break
 
             if not anydesk_id:
                 self.on_line("AnyDesk ID belum tersedia.")
-                self.on_line("Buka AnyDesk sampai ID tampil, lalu Jalankan lagi.")
+                self.on_line("Tunggu ID tampil di AnyDesk, lalu Jalankan lagi.")
                 return
 
             self.on_line(f"AnyDesk ID: {anydesk_id}")
-            self.on_line("Menyalin info ke clipboard...")
+            self.on_line("Menyalin info ke clipboard…")
 
             from modules.system_info import hostname, primary_ipv4
-            from modules.telegram_share import copy_text_to_clipboard, open_telegram
+            from modules.telegram_share import copy_text_to_clipboard
 
             local_id = hostname()
             local_ip = primary_ipv4()
@@ -223,14 +213,8 @@ class AnydeskRunner:
             else:
                 self.on_line("Gagal menyalin ke clipboard.")
 
-            self.on_line("Membuka Telegram di latar belakang...")
-            if open_telegram(background=True):
-                self.on_line("Telegram dibuka (minimized) — tempel ID dengan Ctrl+V.")
-            else:
-                self.on_line("Telegram tidak ditemukan. ID sudah di clipboard.")
-
             self.on_line("")
-            self.on_line("Selesai.")
+            self.on_line("Selesai — notifikasi siap. Tekan Kirim untuk buka Telegram.")
         except Exception as exc:
             self.on_line(f"Error: {exc}")
         finally:

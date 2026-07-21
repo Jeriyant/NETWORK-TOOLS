@@ -466,7 +466,7 @@ class ScpPanel:
         self._term_write(
             t("scp.need_connect") + "\n"
             "Terminal interaktif — klik kanan: Copy / Paste.\n"
-            "Explorer: drop file Windows = upload · seret file remote = unduh ke folder.\n"
+            "Explorer: drop = upload · seret file remote = download.\n"
         )
         self.term.configure(state="disabled")
 
@@ -596,7 +596,7 @@ class ScpPanel:
 
     # ----- terminal -----
     def _term_write(self, text: str) -> None:
-        """Tulis ke terminal dengan handle clear-screen / backspace / CR."""
+        """Tulis ke terminal dengan handle clear-screen / backspace."""
         try:
             self.term.configure(state="normal")
             if (
@@ -607,27 +607,19 @@ class ScpPanel:
             ):
                 self.term.delete("1.0", "end")
             text = self._strip_ansi(text)
-            import re as _re
-
-            text = _re.sub(r"\x1b\[[0-9;?]*[HJKfh]", "", text)
+            # Jangan hapus baris pada \r — itu yang membuat output (ip a, dll) hilang
+            text = text.replace("\r\n", "\n").replace("\r", "\n")
             for ch in text:
                 if ch in ("\x08", "\x7f"):
                     try:
                         self.term.delete("end-2c")
                     except Exception:
                         pass
-                elif ch == "\r":
-                    try:
-                        line_start = self.term.index("end-1c linestart")
-                        line_end = self.term.index("end-1c")
-                        self.term.delete(line_start, line_end)
-                    except Exception:
-                        pass
                 elif ch == "\n":
                     self.term.insert("end", "\n")
                 elif ch == "\x07":
                     pass
-                else:
+                elif ch:
                     self.term.insert("end", ch)
             self.term.see("end")
             self._term_mark = self.term.index("end-1c")
@@ -990,11 +982,11 @@ class ScpPanel:
             self._drag_entry = None
 
     def _begin_drag_out(self, entry: Any) -> None:
-        """Download ke temp; simpan ke folder Windows (OLE drag dinonaktifkan — crash Tk)."""
+        """Download ke temp lalu OLE drag ke Windows Explorer (tanpa pilih folder)."""
         import tempfile
         from pathlib import Path as _Path
 
-        self._status(f"Menyiapkan download: {entry.name}…")
+        self._status(f"Menyiapkan drag download: {entry.name}…")
         self._xfer_start(f"⬇ {entry.name}")
 
         def worker() -> None:
@@ -1024,24 +1016,20 @@ class ScpPanel:
                     self._status(f"Download gagal: {err}")
                     messagebox.showerror(t("tool.scp.title"), err, parent=self.app)
                     return
-                folder = filedialog.askdirectory(
-                    parent=self.app,
-                    title=t("scp.download") + " — pilih folder lokal",
-                )
-                if not folder:
-                    self._xfer_stop("Dibatalkan")
-                    self._status("Download dibatalkan.")
-                    return
-                target = str(_Path(folder) / entry.name)
+                self._xfer_stop(f"Seret ke Explorer: {entry.name}")
+                self._status(f"Seret ke folder Windows: {entry.name}")
                 try:
-                    import shutil
+                    from modules.win_file_drag import drag_files
 
-                    shutil.copy2(str(dest), target)
-                    self._xfer_stop(f"Selesai → {entry.name}")
-                    self._status(f"Downloaded → {target}")
-                except Exception as e2:
-                    self._xfer_stop(f"Copy gagal: {e2}")
-                    self._status(f"Copy gagal: {e2}")
+                    ok = bool(drag_files([str(dest)]))
+                    if ok:
+                        self._status(f"Download selesai: {entry.name}")
+                        self._xfer_stop(f"Selesai → {entry.name}")
+                    else:
+                        self._status("Drag dibatalkan.")
+                except Exception as exc:
+                    self._status(f"Drag gagal ({exc}) — pakai Unduh…")
+                    self._download_to(entry, str(dest))
 
             self._ui(done)
 
@@ -1082,14 +1070,11 @@ class ScpPanel:
                     return
                 self._set_connected_ui(True)
                 note = getattr(self.session, "connect_note", "") or ""
-                sftp_flag = "SFTP✓" if self.session.sftp_ok else "SFTP✗"
+                mode = note or ("Mode SFTP" if self.session.sftp_ok else "Mode shell/SCP")
                 self.status_lbl.configure(
-                    text=t("scp.connected", user=user, host=host, port=port)
-                    + f"  [SSH✓ · {sftp_flag}]"
+                    text=t("scp.connected", user=user, host=host, port=port) + f"  [{mode}]"
                 )
-                self._log(f"Terhubung: {user}@{host}:{port}  [{sftp_flag}]")
-                if note:
-                    self._log(note)
+                self._log(f"Terhubung: {user}@{host}:{port}  [{mode}]")
                 # Isi explorer dulu, baru buka shell interaktif
                 self._refresh(then_shell=True)
 
@@ -1148,9 +1133,9 @@ class ScpPanel:
         # Sembunyikan petunjuk drag-drop saat sudah ada isi / sudah connect
         try:
             if self.session.connected:
+                mode = "SFTP" if self.session.sftp_ok else "shell/SCP"
                 self.drop_hint.configure(
-                    text=f"{len(rows)} item  ·  {self.session.cwd}"
-                    + ("  ·  SFTP" if self.session.sftp_ok else "  ·  shell")
+                    text=f"{len(rows)} item  ·  {self.session.cwd}  ·  {mode}"
                 )
             else:
                 self.drop_hint.configure(text=t("scp.drop_hint"))
@@ -1266,7 +1251,7 @@ class ScpPanel:
         if entry is None or not self._require_conn():
             return
         if not entry.is_dir:
-            self._download()
+            self._open_remote_file(entry)
             return
 
         def worker() -> None:
@@ -1282,6 +1267,61 @@ class ScpPanel:
                 )
                 return
             self._ui(lambda: self._fill(rows))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _open_remote_file(self, entry: Any) -> None:
+        """Download ke temp lalu buka dialog 'Open with' / aplikasi sesuai tipe file."""
+        import os
+        import subprocess
+        import tempfile
+        from pathlib import Path as _Path
+
+        self._status(f"Membuka {entry.name}…")
+        self._xfer_start(f"Open {entry.name}")
+
+        def worker() -> None:
+            tmp_dir = _Path(tempfile.gettempdir()) / "NetworkToolsOpen"
+            try:
+                tmp_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            dest = tmp_dir / entry.name
+            try:
+                if dest.exists():
+                    dest.unlink()
+            except Exception:
+                pass
+            err = None
+            try:
+                self.session.download(entry.path, str(dest))
+            except Exception as exc:
+                err = str(exc)
+
+            def done() -> None:
+                if err:
+                    self._xfer_stop(f"Gagal: {err}")
+                    messagebox.showerror(t("tool.scp.title"), err, parent=self.app)
+                    return
+                self._xfer_stop(f"Dibuka: {entry.name}")
+                path = str(dest)
+                # Dialog "Open with" agar user pilih teks editor / app sesuai tipe
+                try:
+                    subprocess.Popen(
+                        ["rundll32.exe", "shell32.dll,OpenAs_RunDLL", path],
+                        shell=False,
+                    )
+                    self._status(f"Open with → {entry.name}")
+                    return
+                except Exception:
+                    pass
+                try:
+                    os.startfile(path)  # type: ignore[attr-defined]
+                    self._status(f"Opened → {entry.name}")
+                except Exception as exc:
+                    messagebox.showerror(t("tool.scp.title"), str(exc), parent=self.app)
+
+            self._ui(done)
 
         threading.Thread(target=worker, daemon=True).start()
 

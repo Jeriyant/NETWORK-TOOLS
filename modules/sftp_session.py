@@ -376,7 +376,7 @@ class SftpSession:
         Jika SFTP gagal (EOF subsystem), session SSH tetap hidup + fallback shell/SCP.
         """
         if not want_sftp:
-            return None, f"Mode {protocol} — tanpa SFTP"
+            return None, "Mode shell/SCP"
         return self._try_open_sftp(transport, timeout)
 
     def _authenticate(

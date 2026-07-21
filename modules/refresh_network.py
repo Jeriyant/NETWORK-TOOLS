@@ -75,6 +75,34 @@ def list_net_adapters() -> list[dict[str, str]]:
     return rows
 
 
+def set_adapter_enabled(name: str, enabled: bool) -> tuple[bool, str]:
+    """Enable/Disable-NetAdapter. Return (ok, message)."""
+    n = (name or "").replace('"', "")
+    if not n:
+        return False, "Nama adapter kosong."
+    cmd = "Enable-NetAdapter" if enabled else "Disable-NetAdapter"
+    code, out = _run_ps(f'{cmd} -Name "{n}" -Confirm:$false')
+    if code == 0:
+        return True, out or f"{'Enable' if enabled else 'Disable'} OK: {n}"
+    return False, out or f"Gagal {cmd} (mungkin butuh Administrator)."
+
+
+def open_adapter_properties(name: str = "") -> tuple[bool, str]:
+    """Buka jendela Network Connections (ncpa.cpl) / properti adapter."""
+    creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        # ncpa.cpl — user bisa klik kanan Properti pada adapter
+        subprocess.Popen(
+            ["control.exe", "ncpa.cpl"],
+            shell=False,
+            creationflags=creation,
+        )
+        hint = f"Buka Properti pada “{name}” di Network Connections." if name else "Network Connections dibuka."
+        return True, hint
+    except Exception as exc:
+        return False, str(exc)
+
+
 class RefreshNetworkRunner:
     def __init__(
         self,

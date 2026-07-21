@@ -35,7 +35,12 @@ from modules.ip_scanner import IpScannerRunner
 from modules.ping_runner import PingRunner
 from modules.multi_ping import MultiHostPingRunner
 from modules.prefs import load_prefs, save_prefs
-from modules.refresh_network import RefreshNetworkRunner, list_net_adapters
+from modules.refresh_network import (
+    RefreshNetworkRunner,
+    list_net_adapters,
+    open_adapter_properties,
+    set_adapter_enabled,
+)
 from modules.security_check import SecurityCheckRunner, format_security_text
 from modules.settings import (
     DEFAULT_LANG,
@@ -533,7 +538,7 @@ class NetworkToolsApp(ctk.CTk):
             save_prefs(theme=self.theme_mode, lang=get_lang())
 
     def _maybe_resume_elevated_tool(self) -> None:
-        """Setelah UAC, buka ulang tool & jalankan otomatis."""
+        """Setelah UAC, buka ulang tool & jalankan aksi tertunda (fix/uninstall/dll)."""
         import sys
 
         if "--elevate-tool" not in sys.argv:
@@ -547,15 +552,32 @@ class NetworkToolsApp(ctk.CTk):
             return
         if not is_admin():
             return
+
+        prefs = load_prefs()
+        action = str(prefs.get("pending_elevate_action") or "fix")
+        payload = str(prefs.get("pending_elevate_payload") or "")
+        try:
+            save_prefs(
+                pending_elevate_action="",
+                pending_elevate_payload="",
+                pending_elevate_tool="",
+            )
+        except Exception:
+            pass
+
         if key == "printer":
-            # Setelah UAC dari tombol Fix — buka menu lalu langsung jalankan fix
-            self._elevate_auto_fix_printer = True
+            if action in ("uninstall_driver", "reinstall_driver"):
+                self._elevate_printer_action = (action, payload)
+            else:
+                self._elevate_auto_fix_printer = True
         elif key == "fixrdp":
             self._elevate_auto_fix_rdp = True
         elif key == "refresh":
-            self._elevate_auto_fix_refresh = True
+            if action in ("enable_adapter", "disable_adapter"):
+                self._elevate_network_action = (action, payload)
+            else:
+                self._elevate_auto_fix_refresh = True
         self.open_tool(key)
-        # AUTO_RUN_TOOLS sudah dijalankan dari open_tool
 
     def _show_startup_loading(self) -> None:
         """Overlay loading hingga bar info sistem terisi."""
@@ -1874,38 +1896,18 @@ class NetworkToolsApp(ctk.CTk):
         ).pack(side="right", padx=(8, 0))
         btn_refresh = ctk.CTkButton(
             sum_row,
-            text=t("app.recheck"),
-            width=110,
+            text=t("app.refresh"),
+            width=100,
             height=32,
             fg_color=COLORS.get("warn", "#E6B422"),
             hover_color=COLORS.get("warn_hover", "#C99A12"),
             text_color="#1A1400",
         )
         btn_refresh.pack(side="right", padx=(8, 0))
-        btn_reinstall = ctk.CTkButton(
-            sum_row,
-            text=t("apps.reinstall"),
-            width=100,
-            height=32,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_dim"],
-            text_color=COLORS["on_accent"],
-        )
-        btn_reinstall.pack(side="right", padx=(8, 0))
-        btn_clean = ctk.CTkButton(
-            sum_row,
-            text=t("apps.clean_uninstall"),
-            width=130,
-            height=32,
-            fg_color=COLORS.get("warn", "#E6B422"),
-            hover_color=COLORS.get("warn_hover", "#C99A12"),
-            text_color="#1A1400",
-        )
-        btn_clean.pack(side="right", padx=(8, 0))
         btn_uninstall = ctk.CTkButton(
             sum_row,
             text=t("apps.uninstall"),
-            width=100,
+            width=110,
             height=32,
             fg_color=COLORS["danger"],
             hover_color=COLORS["danger_hover"],
@@ -2041,19 +2043,17 @@ class NetworkToolsApp(ctk.CTk):
             tree.delete(*tree.get_children())
             InstalledAppsRunner(on_apps=on_apps, on_error=on_error).start()
 
-        def _run_action(action: str) -> None:
+        def _run_action(action: str = "clean") -> None:
             app = _selected_app()
             if app is None:
                 messagebox.showinfo(t("tool.apps.title"), t("apps.select"), parent=self)
                 return
             name = app.get("name", "")
-            if action == "uninstall":
-                conf = t("apps.confirm_uninstall", name=name)
-            elif action == "clean":
-                conf = t("apps.confirm_clean", name=name)
-            else:
-                conf = t("apps.confirm_reinstall", name=name)
-            if not messagebox.askyesno(t("tool.apps.title"), conf, parent=self):
+            if not messagebox.askyesno(
+                t("tool.apps.title"),
+                t("apps.confirm_clean", name=name),
+                parent=self,
+            ):
                 return
             if self.console:
                 self.console.clear()
@@ -2061,7 +2061,8 @@ class NetworkToolsApp(ctk.CTk):
             def done(_ok: bool) -> None:
                 self.after(400, load)
 
-            AppActionRunner(action, app, on_line=self.log, on_done=done).start()
+            # Uninstall = uninstall bersih
+            AppActionRunner("clean", app, on_line=self.log, on_done=done).start()
 
         def on_right(event: Any) -> None:
             row = tree.identify_row(event.y)
@@ -2069,18 +2070,14 @@ class NetworkToolsApp(ctk.CTk):
                 tree.selection_set(row)
                 tree.focus(row)
             menu = tk.Menu(tree, tearoff=0)
-            menu.add_command(label=t("apps.uninstall"), command=lambda: _run_action("uninstall"))
-            menu.add_command(label=t("apps.clean_uninstall"), command=lambda: _run_action("clean"))
-            menu.add_command(label=t("apps.reinstall"), command=lambda: _run_action("reinstall"))
+            menu.add_command(label=t("apps.uninstall"), command=_run_action)
             try:
                 menu.tk_popup(event.x_root, event.y_root)
             finally:
                 menu.grab_release()
 
         tree.bind("<Button-3>", on_right)
-        btn_uninstall.configure(command=lambda: _run_action("uninstall"))
-        btn_clean.configure(command=lambda: _run_action("clean"))
-        btn_reinstall.configure(command=lambda: _run_action("reinstall"))
+        btn_uninstall.configure(command=_run_action)
         btn_refresh.configure(command=load)
         self.after(80, load)
 
@@ -2425,6 +2422,61 @@ class NetworkToolsApp(ctk.CTk):
                     anchor="w",
                 ).pack(fill="x", pady=(2, 0))
 
+                def _bind_adapter_menu(widget: Any, adapter: dict[str, str]) -> None:
+                    def on_right(event: Any, ad=adapter) -> str:
+                        menu = tk.Menu(self, tearoff=0)
+                        menu.add_command(
+                            label=t("network.enable"),
+                            command=lambda: _adapter_action("enable", ad),
+                        )
+                        menu.add_command(
+                            label=t("network.disable"),
+                            command=lambda: _adapter_action("disable", ad),
+                        )
+                        menu.add_separator()
+                        menu.add_command(
+                            label=t("network.properties"),
+                            command=lambda: _adapter_action("properties", ad),
+                        )
+                        try:
+                            menu.tk_popup(event.x_root, event.y_root)
+                        finally:
+                            menu.grab_release()
+                        return "break"
+
+                    widget.bind("<Button-3>", on_right)
+                    for child in widget.winfo_children():
+                        try:
+                            child.bind("<Button-3>", on_right)
+                        except Exception:
+                            pass
+
+                _bind_adapter_menu(card, row)
+
+        def _adapter_action(kind: str, adapter: dict[str, str]) -> None:
+            name = adapter.get("name") or ""
+            if not name:
+                return
+            if kind == "properties":
+                ok, msg = open_adapter_properties(name)
+                self.log(msg)
+                return
+            resume = "enable_adapter" if kind == "enable" else "disable_adapter"
+            if not self._ensure_admin_for(
+                "refresh", resume_action=resume, resume_payload=name
+            ):
+                return
+            if self.console:
+                self.console.clear()
+            self.log(f"{'Enable' if kind == 'enable' else 'Disable'} adapter: {name}")
+
+            def worker() -> None:
+                ok, msg = set_adapter_enabled(name, kind == "enable")
+                self.after(0, lambda: self.log(msg))
+                self.after(400, load)
+
+            threading.Thread(target=worker, daemon=True).start()
+
         def load() -> None:
             status_lbl.configure(text=t("network.loading"))
 
@@ -2435,7 +2487,7 @@ class NetworkToolsApp(ctk.CTk):
             threading.Thread(target=worker, daemon=True).start()
 
         def run_fix() -> None:
-            if not self._ensure_admin_for("refresh"):
+            if not self._ensure_admin_for("refresh", resume_action="fix"):
                 return
             self._stop_runner()
             if self.console:
@@ -2455,7 +2507,22 @@ class NetworkToolsApp(ctk.CTk):
 
         btn_reload.configure(command=load)
         btn_fix.configure(command=run_fix)
-        self.after(80, load)
+
+        pending_net = getattr(self, "_elevate_network_action", None)
+        self._elevate_network_action = None
+        if pending_net:
+            act, name = pending_net
+            self.after(80, load)
+
+            def resume_net() -> None:
+                if not name:
+                    return
+                kind = "enable" if act == "enable_adapter" else "disable"
+                _adapter_action(kind, {"name": name})
+
+            self.after(600, resume_net)
+        else:
+            self.after(80, load)
         if auto_fix:
             self.after(250, run_fix)
 
@@ -2667,7 +2734,7 @@ class NetworkToolsApp(ctk.CTk):
             PrinterDriversRunner(on_drivers=on_drivers, on_error=on_error).start()
 
         def run_fix() -> None:
-            if not self._ensure_admin_for("printer"):
+            if not self._ensure_admin_for("printer", resume_action="fix"):
                 return
             self._stop_runner()
             if self.console:
@@ -2676,7 +2743,6 @@ class NetworkToolsApp(ctk.CTk):
 
             def after_fix() -> None:
                 self._notify_tool_done("done.printer")
-                # Selalu muat ulang daftar driver setelah Fix / UAC
                 self.after(200, load)
 
             FixPrinterRunner(
@@ -2690,30 +2756,46 @@ class NetworkToolsApp(ctk.CTk):
                 return None
             return self._printer_by_iid.get(sel[0])
 
-        def _run_driver_action(action: str) -> None:
-            drv = _selected_driver()
+        def _run_driver_action(
+            action: str,
+            drv: dict[str, str] | None = None,
+            *,
+            skip_confirm: bool = False,
+        ) -> None:
+            if drv is None:
+                drv = _selected_driver()
             if drv is None:
                 messagebox.showinfo(t("tool.printer.title"), t("printer.select"), parent=self)
                 return
             name = drv.get("name", "")
             if action == "uninstall":
-                if not messagebox.askyesno(
+                if not skip_confirm and not messagebox.askyesno(
                     t("tool.printer.title"),
                     t("printer.confirm_uninstall", name=name),
                     parent=self,
                 ):
                     return
+                resume = "uninstall_driver"
             else:
-                if not messagebox.askyesno(
+                if not skip_confirm and not messagebox.askyesno(
                     t("tool.printer.title"),
                     t("printer.confirm_reinstall", name=name),
                     parent=self,
                 ):
                     return
-            if not self._ensure_admin_for("printer"):
+                resume = "reinstall_driver"
+            import json as _json
+
+            payload = _json.dumps(drv, ensure_ascii=False)
+            if not self._ensure_admin_for(
+                "printer", resume_action=resume, resume_payload=payload
+            ):
                 return
             if self.console:
                 self.console.clear()
+            status_lbl.configure(
+                text=t("printer.uninstalling") if action == "uninstall" else t("printer.reinstalling")
+            )
 
             def done(_ok: bool) -> None:
                 self.after(300, load)
@@ -2747,8 +2829,24 @@ class NetworkToolsApp(ctk.CTk):
         btn_uninstall.configure(command=lambda: _run_driver_action("uninstall"))
         btn_reinstall.configure(command=lambda: _run_driver_action("reinstall"))
 
-        # Setelah UAC: muat driver dulu, baru Fix, lalu reload di on_done
-        if auto_fix:
+        pending = getattr(self, "_elevate_printer_action", None)
+        self._elevate_printer_action = None
+        if pending:
+            act, payload = pending
+            import json as _json
+
+            try:
+                drv = _json.loads(payload) if payload else {}
+            except Exception:
+                drv = {}
+            self.after(350, load)
+            if isinstance(drv, dict) and drv.get("name"):
+                action = "uninstall" if act == "uninstall_driver" else "reinstall"
+                self.after(
+                    900,
+                    lambda a=action, d=drv: _run_driver_action(a, d, skip_confirm=True),
+                )
+        elif auto_fix:
             self.after(350, load)
             self.after(1200, run_fix)
         else:
@@ -4418,9 +4516,25 @@ class NetworkToolsApp(ctk.CTk):
             command=copy_all,
         ).pack(side="left", pady=6)
 
+        def send_telegram() -> None:
+            from modules.telegram_share import copy_text_to_clipboard, open_telegram
+
+            block = self._anydesk_info_block(anydesk_id, local_id, local_ip)
+            copy_text_to_clipboard(block)
+            if open_telegram(background=False):
+                copied_lbl.configure(text=t("anydesk.telegram_opened"))
+            else:
+                copied_lbl.configure(text=t("anydesk.telegram_missing"))
+            try:
+                self.lift()
+                self.attributes("-topmost", True)
+                self.after(800, lambda: self.attributes("-topmost", False))
+            except Exception:
+                pass
+
         ctk.CTkButton(
             footer,
-            text=t("send.ok"),
+            text=t("app.send"),
             width=150,
             height=40,
             fg_color=COLORS["accent"],
@@ -4428,7 +4542,7 @@ class NetworkToolsApp(ctk.CTk):
             text_color=COLORS["on_accent"],
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             corner_radius=10,
-            command=dlg.destroy,
+            command=send_telegram,
         ).pack(side="right", pady=6)
 
         def fade_in(step: int = 0) -> None:
@@ -4900,18 +5014,34 @@ class NetworkToolsApp(ctk.CTk):
         self.set_runner_stop(runner.stop)
         runner.start()
 
-    def _ensure_admin_for(self, tool_key: str) -> bool:
-        """Minta UAC / restart elevated untuk tool yang butuh admin. Return True jika boleh lanjut."""
+    def _ensure_admin_for(
+        self,
+        tool_key: str,
+        *,
+        resume_action: str = "fix",
+        resume_payload: str = "",
+    ) -> bool:
+        """Minta UAC / restart elevated. resume_action disimpan agar setelah UAC aksi yang benar dijalankan."""
         if tool_key not in ADMIN_TOOLS:
             return True
         if is_admin():
             return True
+        try:
+            save_prefs(
+                pending_elevate_tool=tool_key,
+                pending_elevate_action=resume_action or "fix",
+                pending_elevate_payload=resume_payload or "",
+            )
+        except Exception:
+            pass
         if self.console:
             self.console.append("Fitur ini membutuhkan Administrator. Meminta izin UAC...")
         ok = relaunch_as_admin(extra_args=["--elevate-tool", tool_key])
         if ok:
             if self.console:
-                self.console.append("Menunggu konfirmasi UAC — aplikasi akan dibuka ulang sebagai Administrator.")
+                self.console.append(
+                    "Menunggu konfirmasi UAC — aplikasi akan dibuka ulang sebagai Administrator."
+                )
             self.after(400, self.destroy)
             return False
         messagebox.showerror(

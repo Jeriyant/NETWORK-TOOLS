@@ -112,6 +112,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "id": "Memperbaiki jaringan…",
         "en": "Fixing network…",
     },
+    "network.enable": {"id": "Enable", "en": "Enable"},
+    "network.disable": {"id": "Disable", "en": "Disable"},
+    "network.properties": {"id": "Properti", "en": "Properties"},
     "tool.printer.title": {"id": "Printer", "en": "Printer"},
     "tool.printer.desc": {
         "id": "Lihat driver terpasang & perbaiki spooler",
@@ -153,6 +156,14 @@ _STRINGS: dict[str, dict[str, str]] = {
         "id": "Pilih driver terlebih dahulu.",
         "en": "Select a driver first.",
     },
+    "printer.uninstalling": {
+        "id": "Menguninstall driver printer…",
+        "en": "Uninstalling printer driver…",
+    },
+    "printer.reinstalling": {
+        "id": "Mereinstall driver printer…",
+        "en": "Reinstalling printer driver…",
+    },
     "tool.fixrdp.title": {"id": "RDP", "en": "RDP"},
     "tool.fixrdp.desc": {
         "id": "Status RDP Server-App + Fix RDP/cache",
@@ -190,8 +201,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "scp.saved_ok": {"id": "Parameter koneksi disimpan.", "en": "Connection parameters saved."},
     "scp.cleared_ok": {"id": "Parameter tersimpan dihapus.", "en": "Saved parameters cleared."},
     "scp.drop_hint": {
-        "id": "Drop file Windows ke explorer = upload · seret file remote = unduh ke folder",
-        "en": "Drop Windows files to upload · drag remote file to download to a folder",
+        "id": "Drop file Windows = upload · seret file remote = download ke Explorer",
+        "en": "Drop Windows files to upload · drag remote file to download to Explorer",
     },
     "scp.mode_ssh": {
         "id": "Mode SSH — perintah remote (tetap dual: explorer + terminal).",
@@ -274,12 +285,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Uninstall “{name}”?",
     },
     "apps.confirm_clean": {
-        "id": "Uninstall bersih “{name}”?\nUninstaller + hapus sisa folder instalasi.",
+        "id": "Uninstall “{name}” secara bersih?\nUninstaller + hapus sisa folder instalasi.",
         "en": "Clean uninstall “{name}”?\nRuns uninstaller and removes leftover install folder.",
-    },
-    "apps.confirm_reinstall": {
-        "id": "Reinstall “{name}”?\nAkan mencoba winget / installer.",
-        "en": "Reinstall “{name}”?\nWill try winget / installer.",
     },
     "apps.select": {
         "id": "Pilih aplikasi terlebih dahulu.",
@@ -391,14 +398,22 @@ _STRINGS: dict[str, dict[str, str]] = {
     # Anydesk dialog
     "anydesk.dialog_title": {"id": "AnyDesk ID siap", "en": "AnyDesk ID ready"},
     "anydesk.dialog_sub": {
-        "id": "Telegram dibuka — blok & salin info di bawah, lalu tempel:",
-        "en": "Telegram opened — select & copy the info below, then paste:",
+        "id": "ID sudah disalin. Tekan Kirim untuk membuka Telegram.",
+        "en": "ID copied. Press Send to open Telegram.",
     },
     "anydesk.id_label": {"id": "ID Anydesk", "en": "AnyDesk ID"},
     "anydesk.local_id_label": {"id": "ID Lokal", "en": "Local ID"},
     "anydesk.local_ip_label": {"id": "Alamat IP Lokal", "en": "Local IP Address"},
     "anydesk.copy_all": {"id": "Salin semua", "en": "Copy all"},
     "anydesk.copied": {"id": "Tersalin ke clipboard", "en": "Copied to clipboard"},
+    "anydesk.telegram_opened": {
+        "id": "Telegram dibuka — tempel dengan Ctrl+V",
+        "en": "Telegram opened — paste with Ctrl+V",
+    },
+    "anydesk.telegram_missing": {
+        "id": "Telegram tidak ditemukan. ID sudah di clipboard.",
+        "en": "Telegram not found. ID is on the clipboard.",
+    },
     # Done notifications
     "done.title": {"id": "Proses selesai", "en": "Process complete"},
     "done.refresh": {
