@@ -239,13 +239,22 @@ def copy_text_powershell(text: str) -> bool:
         return False
 
 
-def open_telegram(telegram_exe: str = "") -> bool:
-    """Launch Telegram Desktop if installed."""
+def open_telegram(telegram_exe: str = "", *, background: bool = False) -> bool:
+    """Launch Telegram Desktop if installed.
+
+    background=True → buka tanpa mencuri fokus (minimized / no-activate).
+    """
     telegram = _find_telegram(telegram_exe)
     if not telegram:
         return False
     try:
-        subprocess.Popen([telegram], shell=False)
+        if background and os.name == "nt":
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = 7  # SW_SHOWMINNOACTIVE
+            subprocess.Popen([telegram], shell=False, startupinfo=si)
+        else:
+            subprocess.Popen([telegram], shell=False)
         return True
     except Exception:
         return False

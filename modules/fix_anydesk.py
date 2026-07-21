@@ -176,32 +176,32 @@ class AnydeskRunner:
 
             self.on_line(f"Menemukan: {exe}")
 
-            self.on_line("Menutup AnyDesk yang sedang berjalan...")
-            closed, msg = close_all_anydesk()
-            self.on_line(msg)
-            if closed:
-                # Jeda singkat agar handle/file lepas sebelum buka ulang
-                time.sleep(1.0)
-
-            self.on_line("Membuka AnyDesk baru...")
-            try:
-                subprocess.Popen([str(exe)], shell=False)
-            except Exception as exc:
-                self.on_line(f"Gagal membuka AnyDesk: {exc}")
-                return
-
-            # Tunggu sebentar agar ID / service siap
-            time.sleep(2.0)
-
+            # Ambil ID dulu tanpa buka UI jika memungkinkan
             self.on_line("Membaca AnyDesk ID...")
-            anydesk_id = get_anydesk_id_cli(exe)
-            if not anydesk_id:
-                anydesk_id = read_anydesk_id_from_files()
+            anydesk_id = get_anydesk_id_cli(exe) or read_anydesk_id_from_files()
 
             if not anydesk_id:
-                # Coba lagi setelah jeda (ID kadang belum tertulis)
-                time.sleep(2.0)
+                self.on_line("Menutup AnyDesk yang sedang berjalan...")
+                closed, msg = close_all_anydesk()
+                self.on_line(msg)
+                if closed:
+                    time.sleep(1.0)
+
+                self.on_line("Menjalankan AnyDesk di latar (minimized)…")
+                try:
+                    si = subprocess.STARTUPINFO()
+                    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    si.wShowWindow = 6  # SW_MINIMIZE
+                    subprocess.Popen([str(exe)], shell=False, startupinfo=si)
+                except Exception as exc:
+                    self.on_line(f"Gagal membuka AnyDesk: {exc}")
+                    return
+
+                time.sleep(2.5)
                 anydesk_id = get_anydesk_id_cli(exe) or read_anydesk_id_from_files()
+                if not anydesk_id:
+                    time.sleep(2.0)
+                    anydesk_id = get_anydesk_id_cli(exe) or read_anydesk_id_from_files()
 
             if not anydesk_id:
                 self.on_line("AnyDesk ID belum tersedia.")
@@ -223,9 +223,9 @@ class AnydeskRunner:
             else:
                 self.on_line("Gagal menyalin ke clipboard.")
 
-            self.on_line("Membuka Telegram...")
-            if open_telegram():
-                self.on_line("Telegram dibuka — tempel ID dengan Ctrl+V atau Paste.")
+            self.on_line("Membuka Telegram di latar belakang...")
+            if open_telegram(background=True):
+                self.on_line("Telegram dibuka (minimized) — tempel ID dengan Ctrl+V.")
             else:
                 self.on_line("Telegram tidak ditemukan. ID sudah di clipboard.")
 

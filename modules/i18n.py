@@ -90,10 +90,27 @@ _STRINGS: dict[str, dict[str, str]] = {
         "id": "Status Firewall, Defender & Windows Update",
         "en": "Firewall, Defender & Windows Update status",
     },
-    "tool.refresh.title": {"id": "Refresh Network", "en": "Refresh Network"},
+    "tool.refresh.title": {"id": "Network", "en": "Network"},
     "tool.refresh.desc": {
-        "id": "Restart adapter & renew IP DHCP (Admin)",
-        "en": "Restart adapter & renew DHCP IP (Admin)",
+        "id": "Adapter jaringan & Fix Network (Admin)",
+        "en": "Network adapters & Fix Network (Admin)",
+    },
+    "network.loading": {
+        "id": "Memuat adapter jaringan…",
+        "en": "Loading network adapters…",
+    },
+    "network.empty": {
+        "id": "Tidak ada adapter terdeteksi.",
+        "en": "No adapters detected.",
+    },
+    "network.count": {
+        "id": "{n} adapter jaringan",
+        "en": "{n} network adapters",
+    },
+    "network.fix": {"id": "Fix Network", "en": "Fix Network"},
+    "network.fixing": {
+        "id": "Memperbaiki jaringan…",
+        "en": "Fixing network…",
     },
     "tool.printer.title": {"id": "Printer", "en": "Printer"},
     "tool.printer.desc": {
@@ -159,8 +176,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "scp.saved_ok": {"id": "Parameter koneksi disimpan.", "en": "Connection parameters saved."},
     "scp.cleared_ok": {"id": "Parameter tersimpan dihapus.", "en": "Saved parameters cleared."},
     "scp.drop_hint": {
-        "id": "Drop file Windows → upload  ·  seret file remote → Windows (download)",
-        "en": "Drop Windows files → upload  ·  drag remote file → Windows (download)",
+        "id": "Drop file Windows ke explorer = upload · seret file remote = unduh ke folder",
+        "en": "Drop Windows files to upload · drag remote file to download to a folder",
     },
     "scp.mode_ssh": {
         "id": "Mode SSH — perintah remote (tetap dual: explorer + terminal).",
@@ -351,8 +368,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     # Done notifications
     "done.title": {"id": "Proses selesai", "en": "Process complete"},
     "done.refresh": {
-        "id": "Refresh Network sudah selesai.",
-        "en": "Refresh Network has finished.",
+        "id": "Fix Network sudah selesai.",
+        "en": "Fix Network has finished.",
     },
     "done.printer": {
         "id": "Fix Printer sudah selesai.",

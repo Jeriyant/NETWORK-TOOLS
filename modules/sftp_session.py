@@ -188,12 +188,14 @@ class SftpSession:
             )
 
         attempts: list[dict[str, Any]] = [
-            {"label": "default", "disabled_algorithms": None, "fake_openssh": True, "want_sftp": True},
+            # Jangan buka SFTP — sering EOF / Socket closed di server custom.
+            # Explorer pakai shell listing; transfer pakai SCP.
+            {"label": "default", "disabled_algorithms": None, "fake_openssh": True, "want_sftp": False},
             {
                 "label": "legacy-rsa",
                 "disabled_algorithms": {"pubkeys": ["rsa-sha2-256", "rsa-sha2-512"]},
                 "fake_openssh": True,
-                "want_sftp": True,
+                "want_sftp": False,
             },
             {
                 "label": "legacy-kex",
@@ -208,18 +210,16 @@ class SftpSession:
                     ],
                 },
                 "fake_openssh": True,
-                "want_sftp": True,
+                "want_sftp": False,
             },
-            {"label": "paramiko-banner", "disabled_algorithms": None, "fake_openssh": False, "want_sftp": True},
+            {"label": "paramiko-banner", "disabled_algorithms": None, "fake_openssh": False, "want_sftp": False},
             {
                 "label": "sshclient",
                 "use_sshclient": True,
                 "disabled_algorithms": {"pubkeys": ["rsa-sha2-256", "rsa-sha2-512"]},
                 "fake_openssh": True,
-                "want_sftp": True,
+                "want_sftp": False,
             },
-            # Terakhir: SSH saja jika SFTP memutus koneksi (EOF)
-            {"label": "ssh-only", "disabled_algorithms": None, "fake_openssh": True, "want_sftp": False},
         ]
 
         last_exc: BaseException | None = None

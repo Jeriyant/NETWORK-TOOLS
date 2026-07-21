@@ -42,6 +42,39 @@ def _run_cmd(args: list[str]) -> tuple[int, str]:
     return completed.returncode, out.strip()
 
 
+def list_net_adapters() -> list[dict[str, str]]:
+    """Daftar adapter mirip ncpa.cpl: name, status, mac, speed."""
+    code, out = _run_ps(
+        "Get-NetAdapter | Select-Object Name, Status, MacAddress, LinkSpeed, "
+        "InterfaceDescription | ConvertTo-Json -Compress"
+    )
+    if code != 0 or not out.strip():
+        return []
+    import json
+
+    try:
+        data = json.loads(out)
+    except Exception:
+        return []
+    if isinstance(data, dict):
+        data = [data]
+    rows: list[dict[str, str]] = []
+    for item in data or []:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            {
+                "name": str(item.get("Name") or ""),
+                "status": str(item.get("Status") or ""),
+                "mac": str(item.get("MacAddress") or ""),
+                "speed": str(item.get("LinkSpeed") or ""),
+                "desc": str(item.get("InterfaceDescription") or ""),
+            }
+        )
+    rows.sort(key=lambda r: (0 if r["status"].lower() == "up" else 1, r["name"].lower()))
+    return rows
+
+
 class RefreshNetworkRunner:
     def __init__(
         self,

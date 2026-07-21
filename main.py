@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import random
 import re
+import threading
 import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox
@@ -34,7 +35,7 @@ from modules.ip_scanner import IpScannerRunner
 from modules.ping_runner import PingRunner
 from modules.multi_ping import MultiHostPingRunner
 from modules.prefs import load_prefs, save_prefs
-from modules.refresh_network import RefreshNetworkRunner
+from modules.refresh_network import RefreshNetworkRunner, list_net_adapters
 from modules.security_check import SecurityCheckRunner, format_security_text
 from modules.settings import (
     DEFAULT_LANG,
@@ -66,7 +67,7 @@ from modules.trace_topology import TracerouteTopologyRunner
 # Tools that require Administrator (UAC)
 ADMIN_TOOLS = frozenset({"refresh", "printer", "fixrdp"})
 # Langsung jalan saat menu dibuka (tanpa tombol Jalankan)
-AUTO_RUN_TOOLS = frozenset({"refresh", "anydesk"})
+AUTO_RUN_TOOLS = frozenset({"anydesk"})
 
 # Active palette (updated when theme changes)
 COLORS: dict[str, str] = dict(THEMES["light"])
@@ -140,7 +141,7 @@ SEND_TOOLS = {"ping", "traceroute", "dns", "ipscan", "speedtest", "apps", "secur
 TEXT_SEND_TOOLS = frozenset({"apps", "ipscan"})
 # Kirim/Kembali digabung di baris kontrol (bukan footer)
 INLINE_ACTION_TOOLS = frozenset(
-    {"ping", "traceroute", "ipscan", "apps", "security", "printer", "scp", "fixrdp"}
+    {"ping", "traceroute", "ipscan", "apps", "security", "printer", "scp", "fixrdp", "refresh"}
 )
 
 
@@ -509,6 +510,8 @@ class NetworkToolsApp(ctk.CTk):
             self._elevate_auto_fix_printer = True
         elif key == "fixrdp":
             self._elevate_auto_fix_rdp = True
+        elif key == "refresh":
+            self._elevate_auto_fix_refresh = True
         self.open_tool(key)
         # AUTO_RUN_TOOLS sudah dijalankan dari open_tool
 
@@ -1616,6 +1619,12 @@ class NetworkToolsApp(ctk.CTk):
             self._open_rdp_status_view(auto_fix=auto_fix)
             return
 
+        if key == "refresh":
+            auto_fix = bool(getattr(self, "_elevate_auto_fix_refresh", False))
+            self._elevate_auto_fix_refresh = False
+            self._open_network_view(auto_fix=auto_fix)
+            return
+
         top = ctk.CTkFrame(self._header, fg_color="transparent")
         top.pack(fill="x")
         ctk.CTkLabel(
@@ -1669,7 +1678,6 @@ class NetworkToolsApp(ctk.CTk):
         if key in AUTO_RUN_TOOLS:
             # Langsung jalan setelah UI siap (tanpa tombol Jalankan)
             starters = {
-                "refresh": self._start_refresh,
                 "anydesk": self._start_anydesk,
             }
             fn = starters.get(key)
@@ -2103,6 +2111,200 @@ class NetworkToolsApp(ctk.CTk):
         btn_refresh.configure(command=load)
         self.after(80, load)
 
+    def _open_network_view(self, auto_fix: bool = False) -> None:
+        """Adapter cards (ncpa.cpl-style) + Fix Network."""
+        self.console = None
+
+        top = ctk.CTkFrame(self._header, fg_color="transparent")
+        top.pack(fill="x")
+        ctk.CTkLabel(
+            top,
+            text=t("tool.refresh.title"),
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=24),
+            text_color=COLORS["text"],
+        ).pack(side="left")
+        self._build_sysinfo_bar(self._sysinfo_strip)
+
+        toolbar = ctk.CTkFrame(self._content, fg_color="transparent")
+        toolbar.pack(fill="x", pady=(0, 8))
+        status_lbl = ctk.CTkLabel(
+            toolbar,
+            text=t("network.loading"),
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color=COLORS["muted"],
+            anchor="w",
+        )
+        status_lbl.pack(side="left", fill="x", expand=True)
+
+        ctk.CTkButton(
+            toolbar,
+            text=t("app.back"),
+            width=100,
+            height=32,
+            fg_color=COLORS["danger"],
+            hover_color=COLORS["danger_hover"],
+            command=self._cancel_to_dashboard,
+        ).pack(side="right", padx=(8, 0))
+
+        ctk.CTkButton(
+            toolbar,
+            text=t("app.send"),
+            width=100,
+            height=32,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+            command=self._send_screenshot,
+        ).pack(side="right", padx=(8, 0))
+
+        btn_reload = ctk.CTkButton(
+            toolbar,
+            text=t("app.refresh"),
+            width=100,
+            height=32,
+            fg_color=COLORS.get("warn", "#E6B422"),
+            hover_color=COLORS.get("warn_hover", "#C99A12"),
+            text_color=COLORS.get("on_warn", "#1A1400"),
+        )
+        btn_reload.pack(side="right", padx=(8, 0))
+
+        btn_fix = ctk.CTkButton(
+            toolbar,
+            text=t("network.fix"),
+            width=130,
+            height=32,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+        )
+        btn_fix.pack(side="right", padx=(8, 0))
+
+        grid = ctk.CTkScrollableFrame(self._content, fg_color="transparent")
+        grid.pack(fill="both", expand=True)
+        cols = 3
+        for i in range(cols):
+            grid.grid_columnconfigure(i, weight=1, uniform="net_cards")
+
+        log_host = ctk.CTkFrame(
+            self._content, fg_color=COLORS["console_bg"], height=140, corner_radius=8
+        )
+        log_host.pack(fill="x", pady=(8, 0))
+        log_host.pack_propagate(False)
+        self.console = ConsoleView(log_host)
+        self.console.pack(fill="both", expand=True, padx=2, pady=2)
+
+        card_widgets: list[ctk.CTkFrame] = []
+
+        def _status_color(st: str) -> str:
+            low = (st or "").lower()
+            if low == "up":
+                return COLORS.get("ok", "#12B76A")
+            if low in ("disconnected", "disabled", "down", "not present"):
+                return COLORS.get("danger", "#C42B1C")
+            return COLORS.get("warn", "#E6B422")
+
+        def _fill(rows: list[dict[str, str]]) -> None:
+            for w in card_widgets:
+                try:
+                    w.destroy()
+                except Exception:
+                    pass
+            card_widgets.clear()
+            if not rows:
+                status_lbl.configure(text=t("network.empty"))
+                return
+            status_lbl.configure(text=t("network.count", n=len(rows)))
+            for idx, row in enumerate(rows):
+                r, c = divmod(idx, cols)
+                st = row.get("status") or "—"
+                card = ctk.CTkFrame(
+                    grid,
+                    fg_color=COLORS["panel"],
+                    corner_radius=12,
+                    border_width=1,
+                    border_color=COLORS["border"],
+                )
+                card.grid(row=r, column=c, sticky="nsew", padx=6, pady=6)
+                card_widgets.append(card)
+
+                head = ctk.CTkFrame(card, fg_color="transparent")
+                head.pack(fill="x", padx=12, pady=(12, 4))
+                ctk.CTkLabel(
+                    head,
+                    text="●",
+                    font=ctk.CTkFont(size=14),
+                    text_color=_status_color(st),
+                    width=18,
+                ).pack(side="left")
+                ctk.CTkLabel(
+                    head,
+                    text=row.get("name") or "—",
+                    font=ctk.CTkFont(family="Segoe UI Semibold", size=13),
+                    text_color=COLORS["text"],
+                    anchor="w",
+                ).pack(side="left", fill="x", expand=True)
+
+                ctk.CTkLabel(
+                    card,
+                    text=row.get("desc") or "—",
+                    font=ctk.CTkFont(family="Segoe UI", size=10),
+                    text_color=COLORS["muted"],
+                    anchor="w",
+                    wraplength=220,
+                    justify="left",
+                ).pack(fill="x", padx=12, pady=(0, 6))
+
+                meta = ctk.CTkFrame(card, fg_color="transparent")
+                meta.pack(fill="x", padx=12, pady=(0, 12))
+                ctk.CTkLabel(
+                    meta,
+                    text=f"{st} · {row.get('speed') or '—'}",
+                    font=ctk.CTkFont(family="Segoe UI", size=11),
+                    text_color=_status_color(st),
+                    anchor="w",
+                ).pack(fill="x")
+                ctk.CTkLabel(
+                    meta,
+                    text=row.get("mac") or "—",
+                    font=ctk.CTkFont(family="Consolas", size=10),
+                    text_color=COLORS["muted"],
+                    anchor="w",
+                ).pack(fill="x", pady=(2, 0))
+
+        def load() -> None:
+            status_lbl.configure(text=t("network.loading"))
+
+            def worker() -> None:
+                rows = list_net_adapters()
+                self.after(0, lambda: _fill(rows))
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        def run_fix() -> None:
+            if not self._ensure_admin_for("refresh"):
+                return
+            self._stop_runner()
+            if self.console:
+                self.console.clear()
+            status_lbl.configure(text=t("network.fixing"))
+            RefreshNetworkRunner(
+                NETWORK_ADAPTER,
+                on_line=self.log,
+                on_done=lambda: self.after(
+                    0,
+                    lambda: (
+                        self._notify_tool_done("done.refresh"),
+                        self.after(400, load),
+                    ),
+                ),
+            ).start()
+
+        btn_reload.configure(command=load)
+        btn_fix.configure(command=run_fix)
+        self.after(80, load)
+        if auto_fix:
+            self.after(250, run_fix)
+
     def _open_printer_view(self, auto_fix: bool = False) -> None:
         """Daftar driver printer + tombol Fix Printer / Refresh / Kembali."""
         from tkinter import ttk
@@ -2132,7 +2334,7 @@ class NetworkToolsApp(ctk.CTk):
         )
         status_lbl.pack(side="left", fill="x", expand=True)
 
-        # Kanan → kiri pack: Kembali, Refresh, Fix  =>  Fix | Refresh | Kembali
+        # Kanan → kiri pack: Kembali, Kirim, Refresh, Fix  =>  Fix | Refresh | Kirim | Kembali
         ctk.CTkButton(
             toolbar,
             text=t("app.back"),
@@ -2141,6 +2343,17 @@ class NetworkToolsApp(ctk.CTk):
             fg_color=COLORS["danger"],
             hover_color=COLORS["danger_hover"],
             command=self._cancel_to_dashboard,
+        ).pack(side="right", padx=(8, 0))
+
+        ctk.CTkButton(
+            toolbar,
+            text=t("app.send"),
+            width=100,
+            height=32,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+            command=self._send_screenshot,
         ).pack(side="right", padx=(8, 0))
 
         btn_refresh = ctk.CTkButton(
@@ -2336,7 +2549,7 @@ class NetworkToolsApp(ctk.CTk):
         )
         status_lbl.pack(side="left", fill="x", expand=True)
 
-        # Kanan → kiri: Kembali, Refresh, Fix RDP
+        # Kanan → kiri: Kembali, Kirim, Refresh, Fix RDP
         ctk.CTkButton(
             toolbar,
             text=t("app.back"),
@@ -2345,6 +2558,17 @@ class NetworkToolsApp(ctk.CTk):
             fg_color=COLORS["danger"],
             hover_color=COLORS["danger_hover"],
             command=self._cancel_to_dashboard,
+        ).pack(side="right", padx=(8, 0))
+
+        ctk.CTkButton(
+            toolbar,
+            text=t("app.send"),
+            width=100,
+            height=32,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["on_accent"],
+            command=self._send_screenshot,
         ).pack(side="right", padx=(8, 0))
 
         btn_refresh = ctk.CTkButton(
@@ -4492,6 +4716,17 @@ class NetworkToolsApp(ctk.CTk):
             self.console.clear()
 
         def _done(anydesk_id: str | None) -> None:
+            # Jaga jendela app di depan (AnyDesk/Telegram di latar)
+            def _keep_front() -> None:
+                try:
+                    self.lift()
+                    self.focus_force()
+                    self.attributes("-topmost", True)
+                    self.after(1200, lambda: self.attributes("-topmost", False))
+                except Exception:
+                    pass
+
+            self.after(0, _keep_front)
             if anydesk_id:
                 from modules.system_info import hostname, primary_ipv4
 
@@ -4502,7 +4737,7 @@ class NetworkToolsApp(ctk.CTk):
                 def show() -> None:
                     self._show_anydesk_info_dialog(aid, lid, lip)
 
-                self.after(0, show)
+                self.after(80, show)
 
         self.set_runner_stop(lambda: None)
         AnydeskRunner(on_line=self.log, on_done=_done).start()
