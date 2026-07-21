@@ -9,6 +9,7 @@ import re
 import threading
 import tkinter as tk
 from datetime import datetime
+from pathlib import Path
 from tkinter import messagebox
 from typing import Any, Callable
 
@@ -2660,41 +2661,26 @@ class NetworkToolsApp(ctk.CTk):
                 text_color=COLORS["accent"],
                 anchor="w",
             )
+            tip.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
-            def _copy_all() -> None:
-                text = "\n".join(f"{k}: {v}" for k, v in rows)
-                try:
-                    self.clipboard_clear()
-                    self.clipboard_append(text)
-                    tip.configure(text=t("network.info.copied"))
-                except Exception:
-                    tip.configure(text="Copy gagal.")
+            def _send_status_shot() -> None:
+                self._send_toplevel_screenshot(
+                    dlg,
+                    tip_lbl=tip,
+                    restore_topmost=False,
+                )
 
-            # Salin semua biru → Tutup merah
             ctk.CTkButton(
                 footer,
-                text=t("network.info.copy"),
-                width=130,
+                text=t("app.send"),
+                width=150,
                 height=40,
                 fg_color=COLORS["accent"],
                 hover_color=COLORS["accent_dim"],
                 text_color=COLORS["on_accent"],
                 font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
                 corner_radius=10,
-                command=_copy_all,
-            ).pack(side="left", pady=6)
-            tip.pack(side="left", fill="x", expand=True, padx=(10, 8))
-            ctk.CTkButton(
-                footer,
-                text=t("network.info.close"),
-                width=110,
-                height=40,
-                fg_color=COLORS["danger"],
-                hover_color=COLORS["danger_hover"],
-                text_color="#FFFFFF",
-                font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
-                corner_radius=10,
-                command=dlg.destroy,
+                command=_send_status_shot,
             ).pack(side="right", pady=6)
 
             dlg.after(80, dlg.lift)
@@ -4714,13 +4700,90 @@ class NetworkToolsApp(ctk.CTk):
             f"Alamat IP Lokal\n{local_ip}"
         )
 
+    def _capture_toplevel_png(self, win: Any) -> Path | None:
+        """Screenshot jendela dialog (CTkToplevel / Tk)."""
+        try:
+            win.update_idletasks()
+            win.update()
+            win.lift()
+            left = int(win.winfo_rootx())
+            top = int(win.winfo_rooty())
+            width = max(1, int(win.winfo_width()))
+            height = max(1, int(win.winfo_height()))
+            return capture_window_region(left, top, width, height)
+        except Exception:
+            return None
+
+    def _send_toplevel_screenshot(
+        self,
+        dlg: Any,
+        tip_lbl: Any | None = None,
+        *,
+        restore_topmost: bool = False,
+    ) -> None:
+        """Ambil screenshot dialog → clipboard → otomasi Telegram (thread)."""
+        path = self._capture_toplevel_png(dlg)
+        if path is None:
+            if tip_lbl is not None:
+                try:
+                    tip_lbl.configure(text="Gagal mengambil screenshot.")
+                except Exception:
+                    pass
+            return
+
+        # Lepas topmost agar Telegram bisa difokus
+        try:
+            dlg.attributes("-topmost", False)
+        except Exception:
+            pass
+        try:
+            self._set_anydesk_topmost(False)
+        except Exception:
+            pass
+        try:
+            self.attributes("-topmost", False)
+            self.lower()
+        except Exception:
+            pass
+
+        if tip_lbl is not None:
+            try:
+                tip_lbl.configure(text=t("anydesk.telegram_sending"))
+            except Exception:
+                pass
+
+        def _run() -> None:
+            ok, tips = send_via_telegram(path, root=self)
+            msg = (tips[-1] if tips else "") or (
+                t("anydesk.telegram_opened") if ok else t("anydesk.telegram_missing")
+            )
+
+            def _ui() -> None:
+                if tip_lbl is not None:
+                    try:
+                        if tip_lbl.winfo_exists():
+                            tip_lbl.configure(text=msg)
+                    except Exception:
+                        pass
+                if restore_topmost:
+                    try:
+                        self._set_anydesk_topmost(True)
+                        dlg.attributes("-topmost", True)
+                        dlg.lift()
+                    except Exception:
+                        pass
+
+            self.after(0, _ui)
+
+        threading.Thread(target=_run, daemon=True).start()
+
     def _show_anydesk_info_dialog(
         self,
         anydesk_id: str,
         local_id: str,
         local_ip: str,
     ) -> None:
-        """Dialog besar: ID Anydesk, ID Lokal, IP — bisa diblok & disalin."""
+        """Dialog: ID Anydesk / lokal / IP — tombol Kirim = screenshot dialog ke Telegram."""
         try:
             import winsound
 
@@ -4728,11 +4791,11 @@ class NetworkToolsApp(ctk.CTk):
         except Exception:
             pass
 
-        dlg_w, dlg_h = 540, 520
+        dlg_w, dlg_h = 540, 480
         dlg = ctk.CTkToplevel(self)
         dlg.title(t("send.dialog_title"))
         dlg.geometry(f"{dlg_w}x{dlg_h}")
-        dlg.minsize(dlg_w, 480)
+        dlg.minsize(dlg_w, 440)
         dlg.resizable(False, False)
         dlg.configure(fg_color=COLORS["bg"])
         dlg.transient(self)
@@ -4787,7 +4850,7 @@ class NetworkToolsApp(ctk.CTk):
         ]
         entries: list[ctk.CTkEntry] = []
 
-        copied_lbl = ctk.CTkLabel(
+        tip_lbl = ctk.CTkLabel(
             body,
             text="",
             font=ctk.CTkFont(family="Segoe UI", size=12),
@@ -4798,17 +4861,7 @@ class NetworkToolsApp(ctk.CTk):
             from modules.telegram_share import copy_text_to_clipboard
 
             if copy_text_to_clipboard(value):
-                copied_lbl.configure(text=tip or t("anydesk.copied"))
-
-        def copy_all() -> None:
-            from modules.telegram_share import copy_text_to_clipboard
-
-            block = self._anydesk_info_block(anydesk_id, local_id, local_ip)
-            if copy_text_to_clipboard(block):
-                copied_lbl.configure(text=t("anydesk.copied"))
-            if entries:
-                entries[0].focus_set()
-                entries[0].select_range(0, "end")
+                tip_lbl.configure(text=tip or t("anydesk.copied"))
 
         for label, value in fields:
             ctk.CTkLabel(
@@ -4845,10 +4898,6 @@ class NetworkToolsApp(ctk.CTk):
                     v, tip=t("anydesk.copied_one", label=lb)
                 ),
             )
-            ctx.add_command(
-                label=t("anydesk.copy_all"),
-                command=copy_all,
-            )
 
             def _popup(event: Any, menu: tk.Menu = ctx) -> str:
                 try:
@@ -4864,56 +4913,19 @@ class NetworkToolsApp(ctk.CTk):
                 pass
             entries.append(entry)
 
-        copied_lbl.pack(anchor="w", padx=14, pady=(0, 4))
-
-        ctk.CTkButton(
-            footer,
-            text=t("anydesk.copy_all"),
-            width=130,
-            height=40,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_dim"],
-            text_color=COLORS["on_accent"],
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
-            corner_radius=10,
-            command=copy_all,
-        ).pack(side="left", pady=6)
+        tip_lbl.pack(anchor="w", padx=14, pady=(0, 4))
 
         def send_telegram() -> None:
-            from modules.telegram_share import (
-                copy_text_to_clipboard,
-                paste_and_send_to_telegram_group,
+            self._send_toplevel_screenshot(
+                dlg,
+                tip_lbl=tip_lbl,
+                restore_topmost=True,
             )
-
-            block = self._anydesk_info_block(anydesk_id, local_id, local_ip)
-            copy_text_to_clipboard(block, root=self)
-
-            def _run() -> None:
-                ok, msg = paste_and_send_to_telegram_group(root=self)
-                tip = (
-                    t("anydesk.telegram_opened")
-                    if ok
-                    else t("anydesk.telegram_missing")
-                )
-                if ok:
-                    tip = f"{tip} — {msg}"
-
-                def _ui() -> None:
-                    copied_lbl.configure(text=tip)
-                    try:
-                        self._set_anydesk_topmost(True)
-                    except Exception:
-                        pass
-
-                self.after(0, _ui)
-
-            threading.Thread(target=_run, daemon=True).start()
-            copied_lbl.configure(text=t("anydesk.telegram_sending"))
 
         ctk.CTkButton(
             footer,
             text=t("app.send"),
-            width=150,
+            width=160,
             height=40,
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_dim"],

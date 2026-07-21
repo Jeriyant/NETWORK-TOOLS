@@ -415,8 +415,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     # Anydesk dialog
     "anydesk.dialog_title": {"id": "AnyDesk ID siap", "en": "AnyDesk ID ready"},
     "anydesk.dialog_sub": {
-        "id": "ID sudah disalin. Tekan Kirim untuk membuka Telegram.",
-        "en": "ID copied. Press Send to open Telegram.",
+        "id": "Tekan Kirim untuk mengirim screenshot notifikasi ke Telegram.",
+        "en": "Press Send to share a screenshot of this notification to Telegram.",
     },
     "anydesk.id_label": {"id": "ID Anydesk", "en": "AnyDesk ID"},
     "anydesk.local_id_label": {"id": "ID Lokal", "en": "Local ID"},

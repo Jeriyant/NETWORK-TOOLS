@@ -412,35 +412,31 @@ def _release_our_focus(root: Any | None) -> None:
 
 
 def _run_vbs_sendkeys(group_name: str, telegram_pid: int) -> tuple[bool, str]:
-    """Jalankan otomasi via WScript.Shell SendKeys (paling dekat AutoHotkey)."""
+    """Jalankan otomasi via WScript.Shell SendKeys (cepat, ala AutoHotkey)."""
     import time
 
     safe = _sendkeys_escape(group_name)
-    # PID AppActivate paling andal; fallback judul
     vbs = f"""Option Explicit
 Dim sh, ok, i
 Set sh = CreateObject("WScript.Shell")
 ok = False
-For i = 1 To 8
+For i = 1 To 4
   ok = sh.AppActivate({int(telegram_pid)})
   If ok Then Exit For
   ok = sh.AppActivate("Telegram")
   If ok Then Exit For
-  WScript.Sleep 400
+  WScript.Sleep 120
 Next
-WScript.Sleep 900
-' Quick search / switcher
+WScript.Sleep 200
 sh.SendKeys "^k"
-WScript.Sleep 700
+WScript.Sleep 220
 sh.SendKeys "{safe}"
-WScript.Sleep 900
+WScript.Sleep 280
 sh.SendKeys "{{ENTER}}"
-WScript.Sleep 1200
-' Pastikan fokus kotak pesan lalu paste + kirim
+WScript.Sleep 350
 sh.SendKeys "^v"
-WScript.Sleep 500
+WScript.Sleep 180
 sh.SendKeys "{{ENTER}}"
-WScript.Sleep 300
 """
     path = Path(tempfile.gettempdir()) / f"network_tools_tg_send_{os.getpid()}.vbs"
     try:
@@ -451,12 +447,11 @@ WScript.Sleep 300
             capture_output=True,
             text=True,
             creationflags=creation,
-            timeout=60,
+            timeout=30,
         )
-        time.sleep(0.3)
         if completed.returncode != 0:
             return False, f"SendKeys gagal (exit {completed.returncode})."
-        return True, f'Grup "{group_name}" dibuka; ditempel & dikirim.'
+        return True, f'Grup "{group_name}" — screenshot dikirim.'
     except Exception as exc:
         return False, str(exc)
     finally:
@@ -470,14 +465,11 @@ def paste_and_send_to_telegram_group(
     group_name: str = "",
     telegram_exe: str = "",
     *,
-    settle_sec: float = 1.5,
+    settle_sec: float = 0.45,
     root: Any | None = None,
 ) -> tuple[bool, str]:
     """
-    Seperti AutoHotkey:
-    1. Buka/aktifkan Telegram.exe
-    2. Ctrl+K → cari grup → Enter
-    3. Ctrl+V → Enter (kirim)
+    Cepat: aktifkan Telegram → Ctrl+K grup → Ctrl+V → Enter.
     """
     import time
 
@@ -487,29 +479,31 @@ def paste_and_send_to_telegram_group(
     name = (group_name or _telegram_group_name()).strip() or "Monitoring jaringan"
     _release_our_focus(root)
 
+    pids = _telegram_pids()
     opened = open_telegram(telegram_exe, background=False)
-    if not opened and not _telegram_pids():
+    if not opened and not pids:
         return False, "Telegram Desktop tidak ditemukan."
 
-    time.sleep(max(1.0, settle_sec))
-    pids = _telegram_pids()
-    for _ in range(25):
-        if pids:
-            break
-        time.sleep(0.3)
-        pids = _telegram_pids()
+    if not pids:
+        for _ in range(20):
+            time.sleep(0.15)
+            pids = _telegram_pids()
+            if pids:
+                break
+        time.sleep(max(0.25, settle_sec))
+    else:
+        time.sleep(max(0.2, settle_sec * 0.5))
+
     if not pids:
         return False, "Proses Telegram.exe tidak ditemukan."
 
     hwnd = _find_telegram_hwnd()
     if hwnd:
         _activate_hwnd(hwnd)
-        time.sleep(0.5)
+        time.sleep(0.15)
     _release_our_focus(root)
-    time.sleep(0.3)
 
-    ok, msg = _run_vbs_sendkeys(name, pids[0])
-    return ok, msg
+    return _run_vbs_sendkeys(name, pids[0])
 
 
 def send_via_telegram(
