@@ -262,40 +262,6 @@ def open_telegram(telegram_exe: str = "", *, background: bool = False) -> bool:
 
 # --- UI automation ala AutoHotkey (Windows / WScript.Shell SendKeys) ---
 
-_PASSCODE_HINTS = (
-    "local passcode",
-    "passcode",
-    "enter a passcode",
-    "enter your passcode",
-    "kode sandi",
-    "kode lokal",
-    "masukkan kode",
-    "unlock telegram",
-)
-_LOGIN_HINTS = (
-    "log in by phone",
-    "log in to telegram",
-    "qr code",
-    "scan qr",
-    "your phone number",
-    "phone number",
-    "nomor telepon",
-    "start messaging",
-    "masuk dengan",
-    "kode qr",
-)
-_READY_HINTS = (
-    "saved messages",
-    "archived chats",
-    "search",
-    "chats",
-    "new message",
-    "pesan tersimpan",
-    "obrolan",
-    "cari",
-)
-
-
 def _telegram_group_name() -> str:
     try:
         from modules.settings import TELEGRAM_GROUP
@@ -330,170 +296,6 @@ def _telegram_pids() -> list[int]:
     except Exception:
         pass
     return pids
-
-
-def _close_telegram() -> None:
-    """Tutup semua proses Telegram.exe (agar chat terbuka tidak mengganggu otomasi)."""
-    import time
-
-    creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    try:
-        subprocess.run(
-            ["taskkill", "/F", "/IM", "Telegram.exe", "/T"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            creationflags=creation,
-            timeout=20,
-        )
-    except Exception:
-        pass
-    for _ in range(25):
-        if not _telegram_pids():
-            break
-        time.sleep(0.12)
-    time.sleep(0.25)
-
-
-def _tdata_suggests_session() -> bool:
-    """True jika folder tdata mengisyaratkan sudah pernah login."""
-    appdata = os.environ.get("APPDATA", "")
-    if not appdata:
-        return False
-    tdata = Path(appdata) / "Telegram Desktop" / "tdata"
-    if not tdata.is_dir():
-        return False
-    try:
-        if (tdata / "key_datas").is_file():
-            return True
-        for child in tdata.iterdir():
-            name = child.name.lower()
-            if child.is_dir() and len(name) >= 16 and name.isalnum():
-                return True
-            if name.startswith("map") or name == "settingss":
-                return True
-    except Exception:
-        return False
-    return False
-
-
-def _collect_telegram_ui_text(max_chars: int = 8000) -> str:
-    """Ambil teks UI jendela Telegram via UI Automation (untuk cek login/passcode)."""
-    creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    ps = r"""
-$ErrorActionPreference = 'SilentlyContinue'
-Add-Type -AssemblyName UIAutomationClient | Out-Null
-Add-Type -AssemblyName UIAutomationTypes | Out-Null
-$pids = @(Get-Process -Name 'Telegram' | Select-Object -ExpandProperty Id)
-if (-not $pids) { '' ; exit 0 }
-$root = [System.Windows.Automation.AutomationElement]::RootElement
-$cond = New-Object System.Windows.Automation.PropertyCondition(
-  [System.Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$pids[0])
-$wins = @($root.FindAll([System.Windows.Automation.TreeScope]::Children, $cond))
-$bag = New-Object System.Collections.Generic.List[string]
-function Walk([System.Windows.Automation.AutomationElement]$el, [int]$depth) {
-  if ($null -eq $el -or $depth -gt 10 -or $bag.Count -gt 400) { return }
-  try {
-    $n = [string]$el.Current.Name
-    if ($n -and $n.Trim().Length -gt 0) { [void]$bag.Add($n.Trim()) }
-  } catch {}
-  try {
-    $kids = $el.FindAll([System.Windows.Automation.TreeScope]::Children,
-      [System.Windows.Automation.Condition]::TrueCondition)
-    foreach ($k in $kids) { Walk $k ($depth + 1) }
-  } catch {}
-}
-foreach ($w in $wins) { Walk $w 0 }
-($bag | Select-Object -Unique) -join "`n"
-"""
-    try:
-        completed = subprocess.run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                ps,
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            creationflags=creation,
-            timeout=6,
-        )
-        text = (completed.stdout or "").strip()
-        if len(text) > max_chars:
-            return text[:max_chars]
-        return text
-    except Exception:
-        return ""
-
-
-def _probe_telegram_gate() -> tuple[str, str]:
-    """
-    Cek siap kirim.
-    Return (state, message) state: ok | passcode | login | unknown
-    """
-    blob = _collect_telegram_ui_text().lower()
-    titles = ""
-    hwnd = _find_telegram_hwnd()
-    if hwnd:
-        try:
-            import ctypes
-
-            user32 = ctypes.windll.user32
-            length = user32.GetWindowTextLengthW(hwnd)
-            buf = ctypes.create_unicode_buffer(length + 1)
-            user32.GetWindowTextW(hwnd, buf, length + 1)
-            titles = (buf.value or "").lower()
-        except Exception:
-            titles = ""
-    combined = f"{blob}\n{titles}"
-
-    if any(h in combined for h in _PASSCODE_HINTS):
-        return (
-            "passcode",
-            "Telegram terkunci Local Passcode. Buka kunci dulu, lalu Kirim lagi.",
-        )
-    if any(h in combined for h in _LOGIN_HINTS):
-        return (
-            "login",
-            "Telegram belum login. Login dulu di Telegram Desktop, lalu Kirim lagi.",
-        )
-    if any(h in combined for h in _READY_HINTS):
-        return "ok", "Telegram siap."
-    if _tdata_suggests_session():
-        # Session ada, UI tidak menunjukkan passcode/login → anggap OK
-        return "ok", "Telegram siap (sesi terdeteksi)."
-    if combined.strip():
-        return "unknown", "Status Telegram tidak jelas — lanjut mencoba kirim."
-    return (
-        "login",
-        "Telegram belum login atau belum siap. Buka & login Telegram, lalu coba lagi.",
-    )
-
-
-def _restart_telegram(telegram_exe: str = "") -> tuple[bool, str]:
-    """Tutup Telegram sepenuhnya, lalu buka lagi (hindari gagal jika grup sudah terbuka)."""
-    import time
-
-    _close_telegram()
-    if not open_telegram(telegram_exe, background=False):
-        return False, "Telegram Desktop tidak ditemukan."
-    pids: list[int] = []
-    for _ in range(30):
-        time.sleep(0.15)
-        pids = _telegram_pids()
-        if pids and _find_telegram_hwnd():
-            break
-    if not pids:
-        return False, "Telegram gagal dibuka ulang."
-    # Biarkan UI settle sebentar setelah cold start
-    time.sleep(0.55)
-    return True, "Telegram dibuka ulang."
 
 
 def _find_telegram_hwnd() -> int:
@@ -609,33 +411,84 @@ def _release_our_focus(root: Any | None) -> None:
         pass
 
 
-def _run_vbs_sendkeys(group_name: str, telegram_pid: int) -> tuple[bool, str]:
-    """Jalankan otomasi via WScript.Shell SendKeys (cepat, ala AutoHotkey)."""
-    import time
+def _window_title(hwnd: int) -> str:
+    if not hwnd or os.name != "nt":
+        return ""
+    import ctypes
 
+    user32 = ctypes.windll.user32
+    length = user32.GetWindowTextLengthW(hwnd)
+    if length <= 0:
+        return ""
+    buf = ctypes.create_unicode_buffer(length + 1)
+    user32.GetWindowTextW(hwnd, buf, length + 1)
+    return (buf.value or "").strip()
+
+
+def _is_group_already_open(hwnd: int, group_name: str) -> bool:
+    """True jika judul jendela Telegram sudah menampilkan nama grup (chat aktif)."""
+    title = _window_title(hwnd).lower()
+    name = (group_name or "").strip().lower()
+    if not title or not name:
+        return False
+    # Judul biasanya nama chat, kadang "Nama — Telegram" / "(1) Nama"
+    return name in title
+
+
+def _run_vbs_sendkeys(
+    group_name: str,
+    telegram_pid: int,
+    *,
+    skip_search: bool = False,
+) -> tuple[bool, str]:
+    """Jalankan otomasi via WScript.Shell SendKeys (cepat, ala AutoHotkey)."""
     safe = _sendkeys_escape(group_name)
-    vbs = f"""Option Explicit
-Dim sh, ok, i
-Set sh = CreateObject("WScript.Shell")
-ok = False
-For i = 1 To 4
-  ok = sh.AppActivate({int(telegram_pid)})
-  If ok Then Exit For
-  ok = sh.AppActivate("Telegram")
-  If ok Then Exit For
-  WScript.Sleep 120
-Next
-WScript.Sleep 200
-sh.SendKeys "^k"
-WScript.Sleep 220
-sh.SendKeys "{safe}"
-WScript.Sleep 280
-sh.SendKeys "{{ENTER}}"
-WScript.Sleep 350
-sh.SendKeys "^v"
-WScript.Sleep 180
-sh.SendKeys "{{ENTER}}"
-"""
+    vbs_title = (group_name or "Telegram").replace('"', '""')
+    # Jika grup sudah terbuka: jangan Ctrl+K (itu jadi search dalam chat → gagal)
+    if skip_search:
+        body = (
+            'sh.SendKeys "{ESC}"\n'
+            "WScript.Sleep 80\n"
+            'sh.SendKeys "{ESC}"\n'
+            "WScript.Sleep 100\n"
+            'sh.SendKeys "^v"\n'
+            "WScript.Sleep 180\n"
+            'sh.SendKeys "{ENTER}"\n'
+        )
+    else:
+        body = (
+            'sh.SendKeys "{ESC}"\n'
+            "WScript.Sleep 80\n"
+            'sh.SendKeys "{ESC}"\n'
+            "WScript.Sleep 100\n"
+            'sh.SendKeys "^k"\n'
+            "WScript.Sleep 220\n"
+            f'sh.SendKeys "{safe}"\n'
+            "WScript.Sleep 280\n"
+            'sh.SendKeys "{ENTER}"\n'
+            "WScript.Sleep 350\n"
+            'sh.SendKeys "^v"\n'
+            "WScript.Sleep 180\n"
+            'sh.SendKeys "{ENTER}"\n'
+        )
+
+    vbs = (
+        "Option Explicit\n"
+        "Dim sh, ok, i\n"
+        'Set sh = CreateObject("WScript.Shell")\n'
+        "ok = False\n"
+        "For i = 1 To 5\n"
+        f"  ok = sh.AppActivate({int(telegram_pid)})\n"
+        "  If ok Then Exit For\n"
+        f'  ok = sh.AppActivate("{vbs_title}")\n'
+        "  If ok Then Exit For\n"
+        '  ok = sh.AppActivate("Telegram")\n'
+        "  If ok Then Exit For\n"
+        "  WScript.Sleep 100\n"
+        "Next\n"
+        "WScript.Sleep 150\n"
+        f"{body}"
+    )
     path = Path(tempfile.gettempdir()) / f"network_tools_tg_send_{os.getpid()}.vbs"
     try:
         path.write_text(vbs, encoding="utf-8")
@@ -649,7 +502,8 @@ sh.SendKeys "{{ENTER}}"
         )
         if completed.returncode != 0:
             return False, f"SendKeys gagal (exit {completed.returncode})."
-        return True, f'Grup "{group_name}" — screenshot dikirim.'
+        mode = "chat aktif" if skip_search else "cari grup"
+        return True, f'Grup "{group_name}" ({mode}) — screenshot dikirim.'
     except Exception as exc:
         return False, str(exc)
     finally:
@@ -663,15 +517,12 @@ def paste_and_send_to_telegram_group(
     group_name: str = "",
     telegram_exe: str = "",
     *,
-    settle_sec: float = 0.35,
+    settle_sec: float = 0.45,
     root: Any | None = None,
 ) -> tuple[bool, str]:
     """
-    Alur:
-    1. Tutup Telegram.exe
-    2. Buka lagi
-    3. Cek sudah login & tanpa local passcode
-    4. Ctrl+K grup → Ctrl+V → Enter
+    Aktifkan Telegram → (jika perlu) buka grup → Ctrl+V → Enter.
+    Jika grup sudah terbuka, lewati Ctrl+K agar tidak gagal (search dalam chat).
     """
     import time
 
@@ -681,38 +532,32 @@ def paste_and_send_to_telegram_group(
     name = (group_name or _telegram_group_name()).strip() or "Monitoring jaringan"
     _release_our_focus(root)
 
-    ok_restart, restart_msg = _restart_telegram(telegram_exe)
-    if not ok_restart:
-        return False, restart_msg
-
     pids = _telegram_pids()
+    opened = open_telegram(telegram_exe, background=False)
+    if not opened and not pids:
+        return False, "Telegram Desktop tidak ditemukan."
+
     if not pids:
-        return False, "Proses Telegram.exe tidak ditemukan setelah dibuka ulang."
+        for _ in range(20):
+            time.sleep(0.15)
+            pids = _telegram_pids()
+            if pids:
+                break
+        time.sleep(max(0.25, settle_sec))
+    else:
+        time.sleep(max(0.2, settle_sec * 0.5))
+
+    if not pids:
+        return False, "Proses Telegram.exe tidak ditemukan."
 
     hwnd = _find_telegram_hwnd()
     if hwnd:
         _activate_hwnd(hwnd)
-        time.sleep(0.2)
+        time.sleep(0.12)
     _release_our_focus(root)
 
-    state, gate_msg = _probe_telegram_gate()
-    if state == "passcode":
-        return False, gate_msg
-    if state == "login":
-        return False, gate_msg
-
-    time.sleep(max(0.15, settle_sec))
-    pids = _telegram_pids() or pids
-    hwnd = _find_telegram_hwnd()
-    if hwnd:
-        _activate_hwnd(hwnd)
-        time.sleep(0.1)
-    _release_our_focus(root)
-
-    ok, msg = _run_vbs_sendkeys(name, pids[0])
-    if ok:
-        return True, f"{restart_msg} {gate_msg} {msg}".strip()
-    return False, msg
+    already = bool(hwnd and _is_group_already_open(hwnd, name))
+    return _run_vbs_sendkeys(name, pids[0], skip_search=already)
 
 
 def send_via_telegram(
