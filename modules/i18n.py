@@ -15,8 +15,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "app.title": {"id": "Network Tools  v{version}", "en": "Network Tools  v{version}"},
     "app.brand": {"id": "NETWORK TOOLS", "en": "NETWORK TOOLS"},
     "app.tagline": {
-        "id": "Utilitas IT — ping, topologi, scan, keamanan & perbaikan cepat",
-        "en": "IT utilities — ping, topology, scan, security & quick fixes",
+        "id": "Untilitas IT - Tools Professional IT Networking CUSJ",
+        "en": "Untilitas IT - Tools Professional IT Networking CUSJ",
     },
     "app.open": {"id": "Buka", "en": "Open"},
     "app.back": {"id": "Kembali", "en": "Back"},
@@ -57,43 +57,43 @@ _STRINGS: dict[str, dict[str, str]] = {
     # Tools
     "tool.ping.title": {"id": "Ping", "en": "Ping"},
     "tool.ping.desc": {
-        "id": "Kartu status live ping ke semua host",
-        "en": "Live ping status cards for all hosts",
+        "id": "Ping live ke semua host — kartu status online/RTO",
+        "en": "Live ping to all hosts — online/RTO status cards",
     },
     "tool.traceroute.title": {"id": "Traceroute", "en": "Traceroute"},
     "tool.traceroute.desc": {
-        "id": "Jalur ke 8.8.8.8 + gambar topologi",
-        "en": "Path to 8.8.8.8 with topology map",
+        "id": "Traceroute ke 8.8.8.8 + peta topologi jalur",
+        "en": "Traceroute to 8.8.8.8 with path topology map",
     },
     "tool.speedtest.title": {"id": "Speedtest", "en": "Speedtest"},
     "tool.speedtest.desc": {
-        "id": "Uji kecepatan internet di browser bawaan",
-        "en": "Internet speed test in the built-in browser",
+        "id": "Uji kecepatan unduh/unggah internet",
+        "en": "Test download/upload internet speed",
     },
     "tool.dns.title": {"id": "DNS Test", "en": "DNS Test"},
     "tool.dns.desc": {
-        "id": "Cek kebocoran DNS di browser bawaan",
-        "en": "DNS leak check in the built-in browser",
+        "id": "Cek kebocoran DNS (DNS leak test)",
+        "en": "Check for DNS leaks",
     },
     "tool.ipscan.title": {"id": "IP Scanner", "en": "IP Scanner"},
     "tool.ipscan.desc": {
-        "id": "Temukan host hidup di subnet PC ini",
-        "en": "Find live hosts on this PC’s subnet",
+        "id": "Scan host hidup di subnet lokal",
+        "en": "Scan live hosts on the local subnet",
     },
     "tool.apps.title": {"id": "Daftar Aplikasi", "en": "Installed Apps"},
     "tool.apps.desc": {
-        "id": "Daftar aplikasi yang terpasang di Windows",
-        "en": "List applications installed on Windows",
+        "id": "Lihat & uninstall aplikasi Windows",
+        "en": "View & uninstall Windows applications",
     },
     "tool.security.title": {"id": "Cek Keamanan", "en": "Security Check"},
     "tool.security.desc": {
-        "id": "Status Firewall, Defender & Windows Update",
-        "en": "Firewall, Defender & Windows Update status",
+        "id": "Status Firewall, Defender & Update",
+        "en": "Firewall, Defender & Update status",
     },
     "tool.refresh.title": {"id": "Network", "en": "Network"},
     "tool.refresh.desc": {
-        "id": "Adapter jaringan & Fix Network (Admin)",
-        "en": "Network adapters & Fix Network (Admin)",
+        "id": "Info adapter, enable/disable & Fix Network",
+        "en": "Adapter info, enable/disable & Fix Network",
     },
     "network.loading": {
         "id": "Memuat adapter jaringan…",
@@ -130,8 +130,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "network.info.close": {"id": "Tutup", "en": "Close"},
     "tool.printer.title": {"id": "Printer", "en": "Printer"},
     "tool.printer.desc": {
-        "id": "Lihat driver terpasang & perbaiki spooler",
-        "en": "View installed drivers & fix the spooler",
+        "id": "Daftar driver + clear spooler (Fix Printer)",
+        "en": "Driver list + clear spooler (Fix Printer)",
     },
     "printer.loading": {
         "id": "Memuat driver printer…",
@@ -152,12 +152,12 @@ _STRINGS: dict[str, dict[str, str]] = {
     "printer.col.env": {"id": "ENVIRONMENT", "en": "ENVIRONMENT"},
     "printer.col.ver": {"id": "VERSI", "en": "VERSION"},
     "printer.fixing": {
-        "id": "Fix Printer: spooler → backup → uninstall → install…",
-        "en": "Fix Printer: spooler → backup → uninstall → install…",
+        "id": "Membersihkan spooler printer…",
+        "en": "Clearing printer spooler…",
     },
     "printer.fix_need_select": {
-        "id": "Pilih driver printer di daftar terlebih dahulu, lalu klik Fix Printer.",
-        "en": "Select a printer driver in the list first, then click Fix Printer.",
+        "id": "Pilih driver printer di daftar terlebih dahulu.",
+        "en": "Select a printer driver in the list first.",
     },
     "printer.uninstall": {"id": "Uninstall", "en": "Uninstall"},
     "printer.reinstall": {"id": "Reinstall", "en": "Reinstall"},
@@ -183,8 +183,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     },
     "tool.fixrdp.title": {"id": "RDP", "en": "RDP"},
     "tool.fixrdp.desc": {
-        "id": "Status RDP Server-App + Fix RDP/cache",
-        "en": "RDP status for Server-App + Fix RDP/cache",
+        "id": "Cek status RDP Server-App + Fix RDP/cache",
+        "en": "Check Server-App RDP status + Fix RDP/cache",
     },
     "rdp.checking": {
         "id": "Memeriksa status RDP (port 3389)…",
@@ -206,8 +206,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     },
     "tool.scp.title": {"id": "SSH", "en": "SSH"},
     "tool.scp.desc": {
-        "id": "SSH — explorer file kiri + terminal interaktif kanan",
-        "en": "SSH — left file explorer + right interactive terminal",
+        "id": "SSH: explorer file + terminal (nano/upload/download)",
+        "en": "SSH: file explorer + terminal (nano/upload/download)",
     },
     "scp.protocol": {"id": "Protokol", "en": "Protocol"},
     "scp.proto.ssh": {"id": "SSH", "en": "SSH"},
@@ -279,8 +279,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     },
     "tool.anydesk.title": {"id": "Anydesk", "en": "Anydesk"},
     "tool.anydesk.desc": {
-        "id": "Restart AnyDesk, salin ID, buka Telegram",
-        "en": "Restart AnyDesk, copy ID, open Telegram",
+        "id": "Tutup paksa, tray, ambil ID, lalu Kirim",
+        "en": "Force-close, tray, get ID, then Send",
     },
     # Apps list
     "apps.loading": {"id": "Memuat daftar aplikasi…", "en": "Loading application list…"},
@@ -438,8 +438,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Fix Network has finished.",
     },
     "done.printer": {
-        "id": "Fix Printer sudah selesai.",
-        "en": "Fix Printer has finished.",
+        "id": "Clear spooler printer sudah selesai.",
+        "en": "Printer spooler clear has finished.",
     },
     "done.fixrdp": {
         "id": "Fix RDP + Clear Cache sudah selesai.",

@@ -1708,7 +1708,7 @@ class NetworkToolsApp(ctk.CTk):
         if key == "anydesk":
             controls = ctk.CTkFrame(self._content, fg_color="transparent")
             controls.pack(fill="x", pady=(0, 8))
-            self._pack_inline_actions(controls, side="right", height=36)
+            self._pack_inline_send_back(controls, side="right", height=36)
         elif key not in AUTO_RUN_TOOLS:
             controls = ctk.CTkFrame(self._content, fg_color="transparent")
             controls.pack(fill="x", pady=(0, 8))
@@ -2502,7 +2502,45 @@ class NetworkToolsApp(ctk.CTk):
                         except Exception:
                             pass
 
+                def _bind_adapter_hover(
+                    card_w: Any, base_bg: str, base_border: str, *, dimmed: bool
+                ) -> None:
+                    if dimmed:
+                        hover_bg = COLORS.get("muted", base_bg)
+                        hover_border = COLORS.get("danger", base_border)
+                    else:
+                        hover_bg = COLORS.get("tile_hover", COLORS["border"])
+                        hover_border = COLORS["accent"]
+
+                    def on_enter(_e: Any = None, c=card_w, bg=hover_bg, bd=hover_border) -> None:
+                        try:
+                            c.configure(fg_color=bg, border_color=bd)
+                        except Exception:
+                            pass
+
+                    def on_leave(_e: Any = None, c=card_w, bg=base_bg, bd=base_border) -> None:
+                        try:
+                            c.configure(fg_color=bg, border_color=bd)
+                        except Exception:
+                            pass
+
+                    card_w.bind("<Enter>", on_enter)
+                    card_w.bind("<Leave>", on_leave)
+                    for child in card_w.winfo_children():
+                        try:
+                            child.bind("<Enter>", on_enter)
+                            child.bind("<Leave>", on_leave)
+                            for gchild in child.winfo_children():
+                                try:
+                                    gchild.bind("<Enter>", on_enter)
+                                    gchild.bind("<Leave>", on_leave)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+
                 _bind_adapter_menu(card, row)
+                _bind_adapter_hover(card, card_bg, border_col, dimmed=disabled)
 
         def _show_adapter_status(adapter: dict[str, str]) -> None:
             name = adapter.get("name") or "—"
@@ -2623,15 +2661,15 @@ class NetworkToolsApp(ctk.CTk):
                 except Exception:
                     tip.configure(text="Copy gagal.")
 
-            # Salin semua (box style notifikasi AnyDesk) → Tutup merah
+            # Salin semua biru → Tutup merah
             ctk.CTkButton(
                 footer,
                 text=t("network.info.copy"),
                 width=130,
                 height=40,
-                fg_color=COLORS["tile"],
-                hover_color=COLORS["tile_hover"],
-                text_color=COLORS["text"],
+                fg_color=COLORS["accent"],
+                hover_color=COLORS["accent_dim"],
+                text_color=COLORS["on_accent"],
                 font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
                 corner_radius=10,
                 command=_copy_all,
@@ -2937,20 +2975,7 @@ class NetworkToolsApp(ctk.CTk):
             PrinterDriversRunner(on_drivers=on_drivers, on_error=on_error).start()
 
         def run_fix() -> None:
-            drv = _selected_driver()
-            if drv is None:
-                messagebox.showinfo(
-                    t("tool.printer.title"),
-                    t("printer.fix_need_select"),
-                    parent=self,
-                )
-                return
-            import json as _json
-
-            payload = _json.dumps(drv, ensure_ascii=False)
-            if not self._ensure_admin_for(
-                "printer", resume_action="fix", resume_payload=payload
-            ):
+            if not self._ensure_admin_for("printer", resume_action="fix"):
                 return
             self._stop_runner()
             if self.console:
@@ -2964,7 +2989,6 @@ class NetworkToolsApp(ctk.CTk):
             FixPrinterRunner(
                 on_line=self.log,
                 on_done=lambda: self.after(0, after_fix),
-                driver=drv,
             ).start()
 
         def _selected_driver() -> dict[str, str] | None:
@@ -3057,44 +3081,35 @@ class NetworkToolsApp(ctk.CTk):
             except Exception:
                 drv = {}
             self.after(350, load)
-            if isinstance(drv, dict) and drv.get("name"):
-                if act == "fix":
+            if act == "fix":
 
-                    def resume_fix(d=drv) -> None:
-                        if self.console:
-                            self.console.clear()
-                        status_lbl.configure(text=t("printer.fixing"))
+                def resume_fix() -> None:
+                    if self.console:
+                        self.console.clear()
+                    status_lbl.configure(text=t("printer.fixing"))
 
-                        def after_fix() -> None:
-                            self._notify_tool_done("done.printer")
-                            self.after(200, load)
+                    def after_fix() -> None:
+                        self._notify_tool_done("done.printer")
+                        self.after(200, load)
 
-                        FixPrinterRunner(
-                            on_line=self.log,
-                            on_done=lambda: self.after(0, after_fix),
-                            driver=d,
-                        ).start()
+                    FixPrinterRunner(
+                        on_line=self.log,
+                        on_done=lambda: self.after(0, after_fix),
+                    ).start()
 
-                    self.after(900, resume_fix)
-                else:
-                    action = "uninstall" if act == "uninstall_driver" else "reinstall"
-                    self.after(
-                        900,
-                        lambda a=action, d=drv: _run_driver_action(
-                            a, d, skip_confirm=True
-                        ),
-                    )
+                self.after(900, resume_fix)
+            elif isinstance(drv, dict) and drv.get("name"):
+                action = "uninstall" if act == "uninstall_driver" else "reinstall"
+                self.after(
+                    900,
+                    lambda a=action, d=drv: _run_driver_action(
+                        a, d, skip_confirm=True
+                    ),
+                )
         elif auto_fix:
-            # UAC dari Fix tanpa payload — minta pilih driver
+            # UAC dari Fix Printer — langsung clear spooler
             self.after(350, load)
-            self.after(
-                800,
-                lambda: messagebox.showinfo(
-                    t("tool.printer.title"),
-                    t("printer.fix_need_select"),
-                    parent=self,
-                ),
-            )
+            self.after(900, run_fix)
         else:
             self.after(80, load)
 
@@ -5164,8 +5179,8 @@ class NetworkToolsApp(ctk.CTk):
             ),
             "printer": (
                 "Menampilkan driver printer terpasang.\n"
-                "Fix Printer: clear spooler (net stop → hapus antrian → net start).\n"
-                "Meminta Run as Administrator (UAC)."
+                "Fix Printer: clear spooler saja (net stop → hapus antrian → net start).\n"
+                "Uninstall/Reinstall driver tetap di tombol terpisah (Admin)."
             ),
             "fixrdp": (
                 "Kartu status RDP Server-App1..App8 (port 3389).\n"
@@ -5177,8 +5192,8 @@ class NetworkToolsApp(ctk.CTk):
                 "Setelah Hubungkan, ketik langsung di terminal hitam."
             ),
             "anydesk": (
-                "Menjalankan otomatis: tutup AnyDesk lama, buka baru,\n"
-                "salin ID, lalu buka Telegram."
+                "Alur otomatis: tutup paksa AnyDesk → mode tray → baca ID → notifikasi.\n"
+                "Tombol Kirim membuka Telegram; Kembali ke dashboard."
             ),
         }
         for line in hints.get(key, "").split("\n"):

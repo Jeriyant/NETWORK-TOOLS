@@ -3,8 +3,8 @@
 # PE version info — membantu Windows / Defender mengenali aplikasi (bukan anonymous EXE).
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(2, 33, 0, 0),
-    prodvers=(2, 33, 0, 0),
+    filevers=(2, 34, 0, 0),
+    prodvers=(2, 34, 0, 0),
     mask=0x3F,
     flags=0x0,
     OS=0x40004,
@@ -20,12 +20,12 @@ VSVersionInfo(
           [
             StringStruct("CompanyName", "JERIYANT - BARAMCITY"),
             StringStruct("FileDescription", "Network Tools — IT networking utilities"),
-            StringStruct("FileVersion", "2.33.0"),
+            StringStruct("FileVersion", "2.34.0"),
             StringStruct("InternalName", "NetworkTools"),
             StringStruct("LegalCopyright", "Copyright © JERIYANT - BARAMCITY"),
             StringStruct("OriginalFilename", "NetworkTools.exe"),
             StringStruct("ProductName", "Network Tools"),
-            StringStruct("ProductVersion", "2.33.0"),
+            StringStruct("ProductVersion", "2.34.0"),
           ],
         )
       ]

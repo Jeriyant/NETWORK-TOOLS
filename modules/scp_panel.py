@@ -626,23 +626,33 @@ class ScpPanel:
         """Tulis ke terminal; fullscreen (nano/vim) pakai pyte screen."""
         try:
             self.term.configure(state="normal")
-            enter_fs = (
-                "\x1b[?1049h" in text
-                or "\x1b[?47h" in text
-                or "\x1b[?1047h" in text
-                or "\x1b[2J" in text
-            )
             leave_fs = (
                 "\x1b[?1049l" in text
                 or "\x1b[?47l" in text
                 or "\x1b[?1047l" in text
             )
-            # Heuristik: banyak CUP → aplikasi fullscreen
-            if not self._term_fullscreen and text.count("\x1b[") >= 3 and (
-                "\x1b[" in text and ("H" in text or "f" in text)
+            enter_fs = (
+                "\x1b[?1049h" in text
+                or "\x1b[?47h" in text
+                or "\x1b[?1047h" in text
+            )
+            # Jangan anggap clear biasa (\x1b[2J dari `clear`) sebagai masuk nano
+            # kecuali ada alternate-screen / nano header
+            if (
+                not self._term_fullscreen
+                and not enter_fs
+                and ("GNU nano" in text or "\x1b[?1049h" in text)
             ):
-                if "nano" in text.lower() or "GNU nano" in text or enter_fs:
-                    enter_fs = True
+                enter_fs = True
+
+            if leave_fs:
+                self._exit_fullscreen_term()
+                # Sisa teks setelah keluar nano (biasanya kosong) — lanjut mode biasa
+                text = (
+                    text.replace("\x1b[?1049l", "")
+                    .replace("\x1b[?47l", "")
+                    .replace("\x1b[?1047l", "")
+                )
 
             if enter_fs and not self._term_fullscreen:
                 self._term_fullscreen = True
@@ -654,22 +664,22 @@ class ScpPanel:
                     self.session.resize_shell(cols, rows)
                 except Exception:
                     pass
-            if leave_fs:
-                self._term_fullscreen = False
-                self._ansi.clear()
 
             if self._term_fullscreen:
                 self._ansi.feed(text)
                 screen = self._ansi.render()
                 self.term.delete("1.0", "end")
                 self.term.insert("1.0", screen)
-                # Jangan auto-scroll ke bawah saat nano — biarkan top terlihat
                 try:
                     self.term.see("1.0")
                 except Exception:
                     pass
                 self._term_mark = self.term.index("end-1c")
             else:
+                # `clear` / CSI clear → kosongkan UI (bukan mode nano)
+                if "\x1b[2J" in text or "\x1bc" in text or "\x1b[3J" in text:
+                    self.term.delete("1.0", "end")
+                    self._ansi.clear()
                 plain = strip_plain(text)
                 plain = plain.replace("\r\n", "\n").replace("\r", "\n")
                 for ch in plain:
@@ -692,15 +702,44 @@ class ScpPanel:
         except Exception:
             pass
 
+    def _exit_fullscreen_term(self) -> None:
+        """Keluar mode nano/vim — reset buffer agar `clear` & prompt bersih."""
+        self._term_fullscreen = False
+        try:
+            self._ansi.clear()
+        except Exception:
+            pass
+        try:
+            self.term.configure(state="normal")
+            self.term.delete("1.0", "end")
+            self._term_mark = "1.0"
+        except Exception:
+            pass
+
     def _term_clear_ui(self) -> None:
         was = str(self.term.cget("state"))
+        self._exit_fullscreen_term()
         self.term.configure(state="normal")
         self.term.delete("1.0", "end")
         self._term_mark = "1.0"
-        self._term_fullscreen = False
-        self._ansi.clear()
         if was == "disabled" or not self.session.connected:
             self.term.configure(state="disabled")
+
+    def _on_term_clear(self, _event: Any = None) -> str:
+        """Ctrl+L / clear UI — keluar nano buffer lalu kirim clear ke shell."""
+        self._exit_fullscreen_term()
+        self._term_clear_ui()
+        if self._shell_chan is not None:
+            try:
+                # RIS + clear screen sequence, lalu perintah clear
+                self._shell_chan.send("\x1bc")
+                self._shell_chan.send("clear\r")
+            except Exception:
+                try:
+                    self._shell_chan.send("\x0c")
+                except Exception:
+                    pass
+        return "break"
 
     def _on_term_right_click(self, event: Any) -> None:
         try:
@@ -732,18 +771,6 @@ class ScpPanel:
                 self.term.configure(state="disabled")
         except Exception:
             pass
-        return "break"
-
-    def _on_term_clear(self, _event: Any = None) -> str:
-        self._term_clear_ui()
-        if self._shell_chan is not None:
-            try:
-                self._shell_chan.send("clear\r")
-            except Exception:
-                try:
-                    self._shell_chan.send("\x0c")
-                except Exception:
-                    pass
         return "break"
 
     def _on_term_ctrl_c(self, _event: Any = None) -> str:
