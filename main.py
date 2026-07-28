@@ -109,18 +109,18 @@ TOOLS = TOOL_DEFS
 
 # Warna tile dashboard statis per tool (tiap menu memiliki warna unik yang konsisten)
 TOOL_TILE_COLORS: dict[str, tuple[str, str]] = {
-    "ping":       ("#38BDF8", "#0EA5E9"),  # sky
-    "traceroute": ("#22C55E", "#16A34A"),  # green
-    "speedtest":  ("#F97316", "#EA580C"),  # orange
-    "dns":        ("#A855F7", "#9333EA"),  # purple
-    "ipscan":     ("#14B8A6", "#0D9488"),  # teal
-    "apps":       ("#EC4899", "#DB2777"),  # pink
-    "security":   ("#6366F1", "#4F46E5"),  # indigo
-    "refresh":    ("#EF4444", "#DC2626"),  # red
-    "printer":    ("#D946EF", "#C026D3"),  # fuchsia / magenta
-    "fixrdp":     ("#EAB308", "#CA8A04"),  # yellow / amber
-    "scp":        ("#84CC16", "#65A30D"),  # lime
-    "anydesk":    ("#FB7185", "#F43F5E"),  # rose
+    "ping":       ("#EF4444", "#DC2626"),  # Merah
+    "traceroute": ("#EAB308", "#CA8A04"),  # Kuning
+    "speedtest":  ("#22C55E", "#16A34A"),  # Hijau
+    "dns":        ("#3B82F6", "#2563EB"),  # Biru
+    "ipscan":     ("#A855F7", "#9333EA"),  # Ungu
+    "apps":       ("#F97316", "#EA580C"),  # Orange
+    "security":   ("#EC4899", "#DB2777"),  # Pink
+    "refresh":    ("#B45309", "#92400E"),  # Cokelat
+    "printer":    ("#64748B", "#475569"),  # Abu-abu
+    "fixrdp":     ("#6366F1", "#4F46E5"),  # Nila
+    "scp":        ("#14B8A6", "#0D9488"),  # Toska
+    "anydesk":    ("#D4A373", "#B38252"),  # Krem
 }
 
 # Warna tile dashboard cadangan (jika ada tool baru)
@@ -283,27 +283,17 @@ class NetworkToolsApp(ctk.CTk):
         year = datetime.now().year
         foot_inner = ctk.CTkFrame(self._footer, fg_color="transparent")
         foot_inner.pack(expand=True, fill="both")
-        self._footer_anim_frames = [
-            ("✦  ·  ⟡", "⟡  ·  ✦"),
-            ("✧  ·  ✦", "✦  ·  ✧"),
-            ("⟡  ·  ✧", "✧  ·  ⟡"),
-            ("✦  ·  ⟡", "⟡  ·  ✦"),
-        ]
-        self._footer_anim_colors = [
-            "#38BDF8",  # Sky Blue
-            "#A855F7",  # Purple
-            "#14B8A6",  # Teal
-            "#F472B6",  # Soft Pink
-        ]
         self._footer_anim_i = 0
-        self._footer_left = ctk.CTkLabel(
-            foot_inner,
-            text=self._footer_anim_frames[0][0],
-            font=ctk.CTkFont(family="Segoe UI Symbol", size=12, weight="bold"),
-            text_color=self._footer_anim_colors[0],
-            width=90,
-        )
-        self._footer_left.pack(side="left", padx=(16, 8))
+        # Box animasi 3 lingkaran warna di kiri
+        left_box = ctk.CTkFrame(foot_inner, fg_color="transparent")
+        left_box.pack(side="left", padx=(16, 8))
+        self._lbl_left_r1 = ctk.CTkLabel(left_box, text="◜", font=ctk.CTkFont(family="Segoe UI Symbol", size=13, weight="bold"), text_color="#00D2FF", width=14)
+        self._lbl_left_r2 = ctk.CTkLabel(left_box, text="☉", font=ctk.CTkFont(family="Segoe UI Symbol", size=13, weight="bold"), text_color="#FF2BD6", width=14)
+        self._lbl_left_r3 = ctk.CTkLabel(left_box, text="•", font=ctk.CTkFont(family="Segoe UI Symbol", size=13, weight="bold"), text_color="#F59E0B", width=14)
+        self._lbl_left_r1.pack(side="left")
+        self._lbl_left_r2.pack(side="left", padx=2)
+        self._lbl_left_r3.pack(side="left")
+
         self._footer_label = ctk.CTkLabel(
             foot_inner,
             text=f"Copyright © {year} JERIYANT - BARAMCITY",
@@ -312,14 +302,17 @@ class NetworkToolsApp(ctk.CTk):
             justify="center",
         )
         self._footer_label.pack(side="left", expand=True)
-        self._footer_right = ctk.CTkLabel(
-            foot_inner,
-            text=self._footer_anim_frames[0][1],
-            font=ctk.CTkFont(family="Segoe UI Symbol", size=12, weight="bold"),
-            text_color=self._footer_anim_colors[0],
-            width=90,
-        )
-        self._footer_right.pack(side="right", padx=(8, 16))
+
+        # Box animasi 3 lingkaran warna di kanan
+        right_box = ctk.CTkFrame(foot_inner, fg_color="transparent")
+        right_box.pack(side="right", padx=(8, 16))
+        self._lbl_right_r3 = ctk.CTkLabel(right_box, text="•", font=ctk.CTkFont(family="Segoe UI Symbol", size=13, weight="bold"), text_color="#F59E0B", width=14)
+        self._lbl_right_r2 = ctk.CTkLabel(right_box, text="☉", font=ctk.CTkFont(family="Segoe UI Symbol", size=13, weight="bold"), text_color="#FF2BD6", width=14)
+        self._lbl_right_r1 = ctk.CTkLabel(right_box, text="◟", font=ctk.CTkFont(family="Segoe UI Symbol", size=13, weight="bold"), text_color="#00D2FF", width=14)
+        self._lbl_right_r3.pack(side="left")
+        self._lbl_right_r2.pack(side="left", padx=2)
+        self._lbl_right_r1.pack(side="left")
+
         self._footer_anim_job: str | None = None
         self.after(300, self._tick_footer_anim)
 
@@ -423,26 +416,31 @@ class NetworkToolsApp(ctk.CTk):
                 pass
 
     def _tick_footer_anim(self) -> None:
-        """Animasi dekoratif cyber/tech kiri & kanan copyright."""
+        """Animasi loading melingkar 3 lingkaran warna di kiri & kanan copyright."""
         try:
-            frames = getattr(self, "_footer_anim_frames", ())
-            colors = getattr(self, "_footer_anim_colors", ("#38BDF8", "#22C55E", "#F97316", "#A855F7"))
-            if not frames:
-                return
-            self._footer_anim_i = (getattr(self, "_footer_anim_i", 0) + 1) % len(frames)
-            frame = frames[self._footer_anim_i]
-            if isinstance(frame, (tuple, list)) and len(frame) == 2:
-                left_text, right_text = frame
-            else:
-                left_text = right_text = str(frame)
-            color = colors[self._footer_anim_i % len(colors)]
-            if hasattr(self, "_footer_left"):
-                self._footer_left.configure(text=left_text, text_color=color)
-            if hasattr(self, "_footer_right"):
-                self._footer_right.configure(text=right_text, text_color=color)
+            r1_frames = ["◜", "◝", "◞", "◟"]
+            r2_frames = ["☉", "◓", "◑", "◒"]
+            r3_frames = ["•", "●", "◈", "•"]
+
+            self._footer_anim_i = (getattr(self, "_footer_anim_i", 0) + 1) % 4
+            i = self._footer_anim_i
+
+            t1_left = r1_frames[i]
+            t1_right = r1_frames[(i + 2) % 4]
+            t2 = r2_frames[i]
+            t3 = r3_frames[i]
+
+            if hasattr(self, "_lbl_left_r1"):
+                self._lbl_left_r1.configure(text=t1_left)
+                self._lbl_left_r2.configure(text=t2)
+                self._lbl_left_r3.configure(text=t3)
+            if hasattr(self, "_lbl_right_r1"):
+                self._lbl_right_r1.configure(text=t1_right)
+                self._lbl_right_r2.configure(text=t2)
+                self._lbl_right_r3.configure(text=t3)
         except Exception:
             pass
-        self._footer_anim_job = self.after(350, self._tick_footer_anim)
+        self._footer_anim_job = self.after(180, self._tick_footer_anim)
 
     def _ensure_footer_visible(self) -> None:
         """Pastikan bar copyright selalu terpasang di bawah jendela."""
