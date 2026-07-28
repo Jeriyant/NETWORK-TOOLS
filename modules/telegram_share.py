@@ -579,23 +579,17 @@ def open_telegram_group_link(
 
 
 def _paste_and_send_keys(hwnd: int) -> None:
-    """Fokus chat → klik input → Ctrl+V → Send (tanpa ESC — ESC menutup chat!)."""
+    """Fokus chat → Ctrl+V → Send (tanpa klik koordinat mouse yang bisa memicu 'Choose File' di Telegram)."""
     import time
 
     if hwnd:
         _activate_hwnd(hwnd)
-        time.sleep(0.15)
-        _click_compose_area(hwnd)
-        time.sleep(0.12)
+        time.sleep(0.2)
     _send_ctrl_v()
-    # Gambar butuh waktu muncul di preview / caption
-    time.sleep(0.45)
-    if hwnd:
-        _click_telegram_send_button(hwnd)
-        time.sleep(0.15)
+    # Gambar/teks butuh waktu muncul di preview / caption Telegram
+    time.sleep(0.5)
     _send_enter_key()
-    time.sleep(0.12)
-    # Cadangan kedua Enter (beberapa build TG butuh Enter di caption)
+    time.sleep(0.15)
     _send_enter_key()
 
 
