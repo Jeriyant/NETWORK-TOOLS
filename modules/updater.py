@@ -116,9 +116,42 @@ def check_github_release(local_version: str) -> UpdateInfo | None:
     )
 
 
+def check_github_web_fallback(local_version: str) -> UpdateInfo | None:
+    """Fallback cek update via HTTP redirect URL jika API terbentur rate limit / 403."""
+    latest_web_url = f"{GITHUB_REPO_URL}/releases/latest"
+    req = urllib.request.Request(
+        latest_web_url,
+        headers={"User-Agent": USER_AGENT},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            final_url = resp.geturl()
+        tag = final_url.rstrip("/").split("/")[-1].strip()
+        if not tag or not is_newer(tag, local_version):
+            return None
+        clean_ver = tag.lstrip("vV")
+        download_url = f"{GITHUB_REPO_URL}/releases/download/{tag}/NetworkTools.exe"
+        return UpdateInfo(
+            version=clean_ver,
+            download_url=download_url,
+            changelog=f"Update versi {clean_ver} tersedia di GitHub Releases.",
+            mandatory=True,
+            html_url=final_url,
+            size=None,
+        )
+    except Exception:
+        return None
+
+
 def check_for_update(local_version: str) -> UpdateInfo | None:
     try:
-        return check_github_release(local_version)
+        res = check_github_release(local_version)
+        if res is not None:
+            return res
+    except Exception:
+        pass
+    try:
+        return check_github_web_fallback(local_version)
     except Exception:
         return None
 

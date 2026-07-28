@@ -695,7 +695,7 @@ class NetworkToolsApp(ctk.CTk):
                 if info is not None and not getattr(self, "_update_dialog_open", False):
                     self._prompt_update(info)
                 try:
-                    self._update_poll_job = self.after(60_000, self._run_update_check_once)
+                    self._update_poll_job = self.after(900_000, self._run_update_check_once)
                 except Exception:
                     pass
 
