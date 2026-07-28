@@ -117,7 +117,7 @@ TOOL_TILE_COLORS: dict[str, tuple[str, str]] = {
     "apps":       ("#EC4899", "#DB2777"),  # pink
     "security":   ("#6366F1", "#4F46E5"),  # indigo
     "refresh":    ("#EF4444", "#DC2626"),  # red
-    "printer":    ("#06B6D4", "#0891B2"),  # cyan
+    "printer":    ("#D946EF", "#C026D3"),  # fuchsia / magenta
     "fixrdp":     ("#EAB308", "#CA8A04"),  # yellow / amber
     "scp":        ("#84CC16", "#65A30D"),  # lime
     "anydesk":    ("#FB7185", "#F43F5E"),  # rose
@@ -284,20 +284,16 @@ class NetworkToolsApp(ctk.CTk):
         foot_inner = ctk.CTkFrame(self._footer, fg_color="transparent")
         foot_inner.pack(expand=True, fill="both")
         self._footer_anim_frames = [
-            ("⚡ ⟨ ◈ ⟩", "⟨ ◈ ⟩ ⚡"),
-            ("✦ ⟨ ⟡ ⟩", "⟨ ⟡ ⟩ ✦"),
-            ("📡 ⟨ 🌐 ⟩", "⟨ 🌐 ⟩ 📡"),
-            ("✧ ⟨ ✦ ⟩", "⟨ ✦ ⟩ ✧"),
-            ("⚡ ⟨ ❖ ⟩", "⟨ ❖ ⟩ ⚡"),
-            ("✶ ⟨ ⚡ ⟩", "⟨ ⚡ ⟩ ✶"),
+            ("◜ ☉ ◝", "◟ ☉ ◜"),
+            ("◝ ☉ ◞", "◞ ☉ ◟"),
+            ("◞ ☉ ◟", "◝ ☉ ◞"),
+            ("◟ ☉ ◜", "◜ ☉ ◝"),
         ]
         self._footer_anim_colors = [
+            "#00D2FF",  # Neon Cyan
+            "#FF2BD6",  # Neon Magenta
             "#38BDF8",  # Sky Blue
-            "#22C55E",  # Emerald Green
-            "#F97316",  # Vibrant Orange
-            "#A855F7",  # Purple
-            "#14B8A6",  # Teal
-            "#EC4899",  # Pink
+            "#EC4899",  # Hot Pink
         ]
         self._footer_anim_i = 0
         self._footer_left = ctk.CTkLabel(
@@ -446,7 +442,7 @@ class NetworkToolsApp(ctk.CTk):
                 self._footer_right.configure(text=right_text, text_color=color)
         except Exception:
             pass
-        self._footer_anim_job = self.after(300, self._tick_footer_anim)
+        self._footer_anim_job = self.after(180, self._tick_footer_anim)
 
     def _ensure_footer_visible(self) -> None:
         """Pastikan bar copyright selalu terpasang di bawah jendela."""
@@ -3472,29 +3468,18 @@ class NetworkToolsApp(ctk.CTk):
 
         ctk.CTkButton(
             toolbar,
-            text="← Kembali ke Daftar Ping",
-            height=30,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_dim"],
-            text_color=COLORS.get("on_accent", "#FFFFFF"),
-            command=self._open_ping_cards_view,
-        ).pack(side="right", padx=(8, 0))
-
-        ctk.CTkButton(
-            toolbar,
             text=t("app.back"),
             height=30,
             fg_color=COLORS["danger"],
             hover_color=COLORS["danger_hover"],
             text_color="#FFFFFF",
-            command=self._cancel_to_dashboard,
+            command=self._open_ping_cards_view,
         ).pack(side="right")
 
         self.console = ConsoleView(self._content)
         self.console.pack(fill="both", expand=True)
 
-        self.log(f"Pinging {disp_name} [{ip}] dengan 32 bytes data (Continuous ping -t):")
-        self.log("(Tekan 'Kembali ke Daftar Ping' atau 'Kembali' untuk menghentikan)")
+        self.log(f"Pinging {disp_name} [{ip}] dengan 32 bytes data:")
         self.log("")
 
         runner = PingRunner(ip, on_line=self.log)
