@@ -3470,10 +3470,22 @@ class NetworkToolsApp(ctk.CTk):
             toolbar,
             text=t("app.back"),
             height=30,
+            width=90,
             fg_color=COLORS["danger"],
             hover_color=COLORS["danger_hover"],
             text_color="#FFFFFF",
             command=self._open_ping_cards_view,
+        ).pack(side="right", padx=(8, 0))
+
+        ctk.CTkButton(
+            toolbar,
+            text=t("app.send"),
+            height=30,
+            width=90,
+            fg_color=COLORS.get("ok", "#12B76A"),
+            hover_color=COLORS.get("ok_dim", "#0E9F5A"),
+            text_color=COLORS.get("on_ok", "#FFFFFF"),
+            command=self._send_screenshot,
         ).pack(side="right")
 
         self.console = ConsoleView(self._content)
