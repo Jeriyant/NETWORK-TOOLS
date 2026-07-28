@@ -284,16 +284,16 @@ class NetworkToolsApp(ctk.CTk):
         foot_inner = ctk.CTkFrame(self._footer, fg_color="transparent")
         foot_inner.pack(expand=True, fill="both")
         self._footer_anim_frames = [
-            ("◜ ☉ ◝", "◟ ☉ ◜"),
-            ("◝ ☉ ◞", "◞ ☉ ◟"),
-            ("◞ ☉ ◟", "◝ ☉ ◞"),
-            ("◟ ☉ ◜", "◜ ☉ ◝"),
+            ("✦  ·  ⟡", "⟡  ·  ✦"),
+            ("✧  ·  ✦", "✦  ·  ✧"),
+            ("⟡  ·  ✧", "✧  ·  ⟡"),
+            ("✦  ·  ⟡", "⟡  ·  ✦"),
         ]
         self._footer_anim_colors = [
-            "#00D2FF",  # Neon Cyan
-            "#FF2BD6",  # Neon Magenta
             "#38BDF8",  # Sky Blue
-            "#EC4899",  # Hot Pink
+            "#A855F7",  # Purple
+            "#14B8A6",  # Teal
+            "#F472B6",  # Soft Pink
         ]
         self._footer_anim_i = 0
         self._footer_left = ctk.CTkLabel(
@@ -442,7 +442,7 @@ class NetworkToolsApp(ctk.CTk):
                 self._footer_right.configure(text=right_text, text_color=color)
         except Exception:
             pass
-        self._footer_anim_job = self.after(180, self._tick_footer_anim)
+        self._footer_anim_job = self.after(350, self._tick_footer_anim)
 
     def _ensure_footer_visible(self) -> None:
         """Pastikan bar copyright selalu terpasang di bawah jendela."""
@@ -1186,7 +1186,50 @@ class NetworkToolsApp(ctk.CTk):
             command=self._on_lang_dropdown,
         )
         lang_combo.set(lang_current if lang_current in lang_values else lang_values[0])
-        lang_combo.pack(side="right")
+        lang_combo.pack(side="right", padx=(8, 0))
+
+        update_btn = ctk.CTkButton(
+            actions,
+            text=t("app.check_update"),
+            width=120,
+            height=34,
+            fg_color=COLORS["tile"],
+            hover_color=COLORS["tile_hover"],
+            text_color=COLORS["text"],
+            command=self._on_click_manual_update_check,
+        )
+        update_btn.pack(side="right")
+
+    def _on_click_manual_update_check(self) -> None:
+        """Cek update manual dari tombol header."""
+        import threading
+        from modules.updater import check_for_update
+
+        def worker() -> None:
+            info = None
+            try:
+                info = check_for_update(APP_VERSION)
+            except Exception:
+                info = None
+
+            def done() -> None:
+                if info is not None:
+                    self._prompt_update(info)
+                else:
+                    try:
+                        messagebox.showinfo(
+                            "Check for Update",
+                            f"Aplikasi sudah versi terbaru (v{APP_VERSION}).\nTidak ada update baru saat ini."
+                        )
+                    except Exception:
+                        pass
+
+            try:
+                self.after(0, done)
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _build_sysinfo_bar(self, parent: ctk.CTkFrame) -> None:
         """Status strip compact; kolom mengikuti teks, tanpa celah expand di tengah."""

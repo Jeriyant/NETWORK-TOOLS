@@ -46,6 +46,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "theme.neon_magenta": {"id": "Tema: Neon Magenta", "en": "Theme: Neon Magenta"},
     "lang.id": {"id": "Bahasa: Indonesia", "en": "Language: Indonesian"},
     "lang.en": {"id": "Bahasa: English", "en": "Language: English"},
+    "app.check_update": {"id": "↻ Cek Update", "en": "↻ Check Update"},
     # Sysinfo
     "sys.host": {"id": "HOST", "en": "HOST"},
     "sys.ip": {"id": "IP", "en": "IP"},
