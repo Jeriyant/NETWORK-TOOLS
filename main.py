@@ -4,7 +4,6 @@ Network Tools — single-window desktop utility suite.
 
 from __future__ import annotations
 
-import random
 import re
 import threading
 import tkinter as tk
@@ -108,7 +107,23 @@ def tools_for_ui() -> list[tuple[str, str, str, str]]:
 # Backward-compatible alias — prefer tools_for_ui() for live language
 TOOLS = TOOL_DEFS
 
-# Warna tile dashboard terang — diacak tiap aplikasi dibuka
+# Warna tile dashboard statis per tool (tiap menu memiliki warna unik yang konsisten)
+TOOL_TILE_COLORS: dict[str, tuple[str, str]] = {
+    "ping":       ("#38BDF8", "#0EA5E9"),  # sky
+    "traceroute": ("#22C55E", "#16A34A"),  # green
+    "speedtest":  ("#F97316", "#EA580C"),  # orange
+    "dns":        ("#A855F7", "#9333EA"),  # purple
+    "ipscan":     ("#14B8A6", "#0D9488"),  # teal
+    "apps":       ("#EC4899", "#DB2777"),  # pink
+    "security":   ("#6366F1", "#4F46E5"),  # indigo
+    "refresh":    ("#EF4444", "#DC2626"),  # red
+    "printer":    ("#06B6D4", "#0891B2"),  # cyan
+    "fixrdp":     ("#EAB308", "#CA8A04"),  # yellow / amber
+    "scp":        ("#84CC16", "#65A30D"),  # lime
+    "anydesk":    ("#FB7185", "#F43F5E"),  # rose
+}
+
+# Warna tile dashboard cadangan (jika ada tool baru)
 DASH_TILE_PALETTE: list[tuple[str, str]] = [
     ("#38BDF8", "#0EA5E9"),  # sky
     ("#22C55E", "#16A34A"),  # green
@@ -253,7 +268,7 @@ class NetworkToolsApp(ctk.CTk):
         self._apps_list: list[dict[str, str]] = []
         self._security_items: list[Any] = []
         self._send_text_payload: str = ""
-        self._dash_palette_cycle = random.sample(DASH_TILE_PALETTE, k=len(DASH_TILE_PALETTE))
+        self._dash_palette_cycle = DASH_TILE_PALETTE
         self._hover_tile_id: int | None = None
         self._geom_save_job: str | None = None
         self._geom_lock = False
@@ -268,14 +283,29 @@ class NetworkToolsApp(ctk.CTk):
         year = datetime.now().year
         foot_inner = ctk.CTkFrame(self._footer, fg_color="transparent")
         foot_inner.pack(expand=True, fill="both")
-        self._footer_anim_frames = ("✦ · ✦", "✧ · ✧", "★ · ★", "✩ · ✩", "✧ · ✧")
+        self._footer_anim_frames = [
+            ("⚡ ⟨ ◈ ⟩", "⟨ ◈ ⟩ ⚡"),
+            ("✦ ⟨ ⟡ ⟩", "⟨ ⟡ ⟩ ✦"),
+            ("📡 ⟨ 🌐 ⟩", "⟨ 🌐 ⟩ 📡"),
+            ("✧ ⟨ ✦ ⟩", "⟨ ✦ ⟩ ✧"),
+            ("⚡ ⟨ ❖ ⟩", "⟨ ❖ ⟩ ⚡"),
+            ("✶ ⟨ ⚡ ⟩", "⟨ ⚡ ⟩ ✶"),
+        ]
+        self._footer_anim_colors = [
+            "#38BDF8",  # Sky Blue
+            "#22C55E",  # Emerald Green
+            "#F97316",  # Vibrant Orange
+            "#A855F7",  # Purple
+            "#14B8A6",  # Teal
+            "#EC4899",  # Pink
+        ]
         self._footer_anim_i = 0
         self._footer_left = ctk.CTkLabel(
             foot_inner,
-            text=self._footer_anim_frames[0],
-            font=ctk.CTkFont(family="Segoe UI Symbol", size=12),
-            text_color=COLORS["accent"],
-            width=72,
+            text=self._footer_anim_frames[0][0],
+            font=ctk.CTkFont(family="Segoe UI Symbol", size=12, weight="bold"),
+            text_color=self._footer_anim_colors[0],
+            width=90,
         )
         self._footer_left.pack(side="left", padx=(16, 8))
         self._footer_label = ctk.CTkLabel(
@@ -288,14 +318,14 @@ class NetworkToolsApp(ctk.CTk):
         self._footer_label.pack(side="left", expand=True)
         self._footer_right = ctk.CTkLabel(
             foot_inner,
-            text=self._footer_anim_frames[0],
-            font=ctk.CTkFont(family="Segoe UI Symbol", size=12),
-            text_color=COLORS["accent"],
-            width=72,
+            text=self._footer_anim_frames[0][1],
+            font=ctk.CTkFont(family="Segoe UI Symbol", size=12, weight="bold"),
+            text_color=self._footer_anim_colors[0],
+            width=90,
         )
         self._footer_right.pack(side="right", padx=(8, 16))
         self._footer_anim_job: str | None = None
-        self.after(400, self._tick_footer_anim)
+        self.after(300, self._tick_footer_anim)
 
         # Footer dulu (bawah), lalu konten expand — copyright tetap terlihat saat resize
         self._footer.pack(fill="x", side="bottom")
@@ -397,24 +427,26 @@ class NetworkToolsApp(ctk.CTk):
                 pass
 
     def _tick_footer_anim(self) -> None:
-        """Animasi dekoratif kiri/kanan copyright."""
+        """Animasi dekoratif cyber/tech kiri & kanan copyright."""
         try:
             frames = getattr(self, "_footer_anim_frames", ())
+            colors = getattr(self, "_footer_anim_colors", ("#38BDF8", "#22C55E", "#F97316", "#A855F7"))
             if not frames:
                 return
             self._footer_anim_i = (getattr(self, "_footer_anim_i", 0) + 1) % len(frames)
-            text = frames[self._footer_anim_i]
-            accent = COLORS.get("accent", "#2563EB")
-            muted = COLORS.get("muted", "#888888")
-            # Selang-seling warna agar terasa hidup
-            color = accent if self._footer_anim_i % 2 == 0 else muted
+            frame = frames[self._footer_anim_i]
+            if isinstance(frame, (tuple, list)) and len(frame) == 2:
+                left_text, right_text = frame
+            else:
+                left_text = right_text = str(frame)
+            color = colors[self._footer_anim_i % len(colors)]
             if hasattr(self, "_footer_left"):
-                self._footer_left.configure(text=text, text_color=color)
+                self._footer_left.configure(text=left_text, text_color=color)
             if hasattr(self, "_footer_right"):
-                self._footer_right.configure(text=text, text_color=color)
+                self._footer_right.configure(text=right_text, text_color=color)
         except Exception:
             pass
-        self._footer_anim_job = self.after(480, self._tick_footer_anim)
+        self._footer_anim_job = self.after(300, self._tick_footer_anim)
 
     def _ensure_footer_visible(self) -> None:
         """Pastikan bar copyright selalu terpasang di bawah jendela."""
@@ -1538,8 +1570,11 @@ class NetworkToolsApp(ctk.CTk):
 
         for idx, (key, title, icon, desc) in enumerate(tools):
             r, c = divmod(idx, cols)
-            palette = getattr(self, "_dash_palette_cycle", DASH_TILE_PALETTE)
-            tile_bg, tile_hover = palette[idx % len(palette)]
+            if key in TOOL_TILE_COLORS:
+                tile_bg, tile_hover = TOOL_TILE_COLORS[key]
+            else:
+                palette = getattr(self, "_dash_palette_cycle", DASH_TILE_PALETTE)
+                tile_bg, tile_hover = palette[idx % len(palette)]
             tile = ctk.CTkFrame(
                 grid,
                 fg_color=tile_bg,
@@ -3404,8 +3439,79 @@ class NetworkToolsApp(ctk.CTk):
             return "🖥"
         return "●"
 
+    def _open_single_ping_terminal_view(self, disp_name: str, ip: str) -> None:
+        """Continuous ping (ping -t) untuk satu host dalam tampilan terminal console."""
+        self._stop_runner()
+        self._clear_frame(self._header)
+        self._clear_frame(self._content)
+        self._clear_frame(self._action_bar)
+        try:
+            self._action_bar.pack_forget()
+        except Exception:
+            pass
+
+        top = ctk.CTkFrame(self._header, fg_color="transparent")
+        top.pack(fill="x")
+        ctk.CTkLabel(
+            top,
+            text=f"{t('tool.ping.title')} — {disp_name} [{ip}]",
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=20),
+            text_color=COLORS["text"],
+        ).pack(side="left")
+        self._build_sysinfo_bar(self._sysinfo_strip)
+
+        toolbar = ctk.CTkFrame(self._content, fg_color="transparent")
+        toolbar.pack(fill="x", pady=(0, 6))
+        ctk.CTkLabel(
+            toolbar,
+            text=f"Menjalankan continuous ping (ping -t {ip})…",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=COLORS["muted"],
+            anchor="w",
+        ).pack(side="left", fill="x", expand=True)
+
+        ctk.CTkButton(
+            toolbar,
+            text="← Kembali ke Daftar Ping",
+            height=30,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS.get("on_accent", "#FFFFFF"),
+            command=self._open_ping_cards_view,
+        ).pack(side="right", padx=(8, 0))
+
+        ctk.CTkButton(
+            toolbar,
+            text=t("app.back"),
+            height=30,
+            fg_color=COLORS["danger"],
+            hover_color=COLORS["danger_hover"],
+            text_color="#FFFFFF",
+            command=self._cancel_to_dashboard,
+        ).pack(side="right")
+
+        self.console = ConsoleView(self._content)
+        self.console.pack(fill="both", expand=True)
+
+        self.log(f"Pinging {disp_name} [{ip}] dengan 32 bytes data (Continuous ping -t):")
+        self.log("(Tekan 'Kembali ke Daftar Ping' atau 'Kembali' untuk menghentikan)")
+        self.log("")
+
+        runner = PingRunner(ip, on_line=self.log)
+        self.set_runner_stop(runner.stop)
+        runner.start()
+
     def _open_ping_cards_view(self) -> None:
-        """Ping semua host di daftar — kartu compact + bulatan status hijau/merah."""
+        """Ping semua host di daftar — kartu compact + bulatan status hijau/merah. Klik kartu untuk continuous ping -t."""
+        self._stop_runner()
+        self._clear_frame(self._header)
+        self._clear_frame(self._content)
+        self._clear_frame(self._action_bar)
+        try:
+            self._action_bar.pack_forget()
+        except Exception:
+            pass
+
         self.console = None
         self._ping_card_widgets: dict[str, dict[str, Any]] = {}
 
@@ -3423,7 +3529,7 @@ class NetworkToolsApp(ctk.CTk):
         toolbar.pack(fill="x", pady=(0, 6))
         status_lbl = ctk.CTkLabel(
             toolbar,
-            text="Memulai ping ke semua host…",
+            text="Memulai ping ke semua host…  (Klik kartu untuk Ping -t)",
             font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color=COLORS["muted"],
             anchor="w",
@@ -3439,6 +3545,8 @@ class NetworkToolsApp(ctk.CTk):
 
         card_bg = COLORS["panel"]
         card_border = COLORS["border"]
+        card_hover_bg = COLORS.get("tile_hover", "#383838" if COLORS["bg"] != "#F3F3F3" else "#F5F5F5")
+        card_hover_border = COLORS["accent"]
         idle_dot = "#9CA3AF"
         online_dot = COLORS.get("ok", "#12B76A")
         offline_dot = COLORS.get("danger", "#C42B1C")
@@ -3529,6 +3637,29 @@ class NetworkToolsApp(ctk.CTk):
                 "ip_value": ip_show,
             }
 
+            if ip:
+                def _make_click_fn(d=disp_name, target_ip=ip):
+                    return lambda _e=None: self._open_single_ping_terminal_view(d, target_ip)
+
+                def _make_enter_fn(c=card):
+                    return lambda _e=None: c.configure(fg_color=card_hover_bg, border_color=card_hover_border)
+
+                def _make_leave_fn(c=card):
+                    return lambda _e=None: c.configure(fg_color=card_bg, border_color=card_border)
+
+                click_fn = _make_click_fn(disp_name, ip)
+                enter_fn = _make_enter_fn(card)
+                leave_fn = _make_leave_fn(card)
+
+                for w in (card, inner, head, icon_lbl, name_lbl, dot, ip_lbl, st_lbl):
+                    try:
+                        w.configure(cursor="hand2")
+                    except Exception:
+                        pass
+                    w.bind("<Button-1>", click_fn)
+                    w.bind("<Enter>", enter_fn)
+                    w.bind("<Leave>", leave_fn)
+
         online_n = 0
         offline_n = 0
 
@@ -3554,7 +3685,7 @@ class NetworkToolsApp(ctk.CTk):
             else:
                 offline_n += 1
             status_lbl.configure(
-                text=f"Online: {online_n}  ·  Timeout: {offline_n}  ·  Total: {len(self._ping_card_widgets)}"
+                text=f"Online: {online_n}  ·  Timeout: {offline_n}  ·  Total: {len(self._ping_card_widgets)}  (Klik kartu untuk Ping -t)"
             )
 
         def on_status(host_id: str, ok: bool, status: str) -> None:
@@ -3570,7 +3701,7 @@ class NetworkToolsApp(ctk.CTk):
         runner = MultiHostPingRunner(targets, on_status=on_status)
         self.set_runner_stop(runner.stop)
         runner.start()
-        status_lbl.configure(text=f"Ping aktif ke {len(targets)} host…")
+        status_lbl.configure(text=f"Ping aktif ke {len(targets)} host…  (Klik kartu untuk Ping -t)")
 
     def _open_traceroute_topo_view(self) -> None:
         """Traceroute ke 8.8.8.8 → topologi menyamping (wrap), icon per jenis perangkat."""
