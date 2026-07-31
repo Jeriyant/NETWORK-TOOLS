@@ -267,10 +267,22 @@ def reinstall_printer_driver(name: str, inf_path: str = "") -> tuple[bool, str]:
         return False, str(exc) if not notes else "\n".join(notes + [str(exc)])
 
 
+def get_default_printer_name() -> str | None:
+    """Return name of Windows default printer, or None."""
+    try:
+        ps = "(Get-CimInstance Win32_Printer | Where-Object { $_.Default -eq $true } | Select-Object -First 1).Name"
+        code, out = _run_ps(ps, timeout=10)
+        if code == 0 and out.strip():
+            return out.strip()
+    except Exception:
+        pass
+    return None
+
+
 class PrinterDriversRunner:
     def __init__(
         self,
-        on_drivers: Callable[[list[dict[str, str]]], None],
+        on_drivers: Callable[[list[dict[str, str]], str | None], None],
         on_error: Callable[[str], None] | None = None,
     ) -> None:
         self.on_drivers = on_drivers
@@ -282,12 +294,13 @@ class PrinterDriversRunner:
     def _run(self) -> None:
         try:
             rows = list_printer_drivers()
-            self.on_drivers(rows)
+            def_name = get_default_printer_name()
+            self.on_drivers(rows, def_name)
         except Exception as exc:
             if self.on_error:
                 self.on_error(str(exc))
             else:
-                self.on_drivers([])
+                self.on_drivers([], None)
 
 
 class PrinterDriverActionRunner:

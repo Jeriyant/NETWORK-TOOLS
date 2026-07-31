@@ -2997,22 +2997,6 @@ class NetworkToolsApp(ctk.CTk):
         self.console = ConsoleView(log_host)
         self.console.pack(fill="both", expand=True, padx=2, pady=2)
 
-        def get_default_printer_name() -> str | None:
-            import subprocess
-            creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            try:
-                ps = "(Get-CimInstance Win32_Printer | Where-Object { $_.Default -eq $true } | Select-Object -First 1).Name"
-                res = subprocess.run(
-                    ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
-                    capture_output=True, text=True, timeout=8, creationflags=creation
-                )
-                out = (res.stdout or "").strip()
-                if out:
-                    return out
-            except Exception:
-                pass
-            return None
-
         def _fill(rows: list[dict[str, str]], default_name: str | None = None) -> None:
             self._printer_by_iid = {}
             tree.delete(*tree.get_children())
@@ -3022,7 +3006,7 @@ class NetworkToolsApp(ctk.CTk):
             status_lbl.configure(text=t("printer.count", n=len(rows)))
             for idx, row in enumerate(rows):
                 name = row.get("name", "—")
-                if default_name and (name.lower() == default_name.lower() or default_name.lower() in name.lower()):
+                if default_name and (name.lower() in default_name.lower() or default_name.lower() in name.lower()):
                     name = f"⭐  {name}"
                 tag = "even" if idx % 2 == 0 else "odd"
                 iid = tree.insert(
@@ -3038,12 +3022,8 @@ class NetworkToolsApp(ctk.CTk):
                 )
                 self._printer_by_iid[iid] = row
 
-        def on_drivers(rows: list[dict[str, str]]) -> None:
-            def _async_fetch() -> None:
-                def_name = get_default_printer_name()
-                self.after(0, lambda: _fill(rows, def_name))
-            import threading
-            threading.Thread(target=_async_fetch, daemon=True).start()
+        def on_drivers(rows: list[dict[str, str]], default_name: str | None) -> None:
+            self.after(0, lambda: _fill(rows, default_name))
 
         def on_error(msg: str) -> None:
             def ui() -> None:
