@@ -81,6 +81,7 @@ COLORS: dict[str, str] = dict(THEMES["light"])
 
 # (key, icon) — title/desc dari i18n
 TOOL_DEFS: list[tuple[str, str]] = [
+    ("anydesk", "⌨"),
     ("ping", "●"),
     ("traceroute", "↗"),
     ("speedtest", "⚡"),
@@ -92,7 +93,6 @@ TOOL_DEFS: list[tuple[str, str]] = [
     ("printer", "🖨"),
     ("fixrdp", "⧉"),
     ("scp", "⌘"),
-    ("anydesk", "⌨"),
 ]
 
 
