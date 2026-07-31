@@ -109,18 +109,18 @@ TOOLS = TOOL_DEFS
 
 # Warna tile dashboard statis per tool (tiap menu memiliki warna unik yang konsisten)
 TOOL_TILE_COLORS: dict[str, tuple[str, str]] = {
-    "ping":       ("#EF4444", "#DC2626"),  # Merah
-    "traceroute": ("#EAB308", "#CA8A04"),  # Kuning
-    "speedtest":  ("#22C55E", "#16A34A"),  # Hijau
-    "dns":        ("#3B82F6", "#2563EB"),  # Biru
+    "anydesk":    ("#EF4444", "#DC2626"),  # Merah
+    "ping":       ("#38BDF8", "#0EA5E9"),  # Biru Muda
+    "traceroute": ("#FACC15", "#EAB308"),  # Kuning Muda
+    "speedtest":  ("#F97316", "#EA580C"),  # Orange
+    "dns":        ("#EC4899", "#DB2777"),  # Pink
     "ipscan":     ("#A855F7", "#9333EA"),  # Ungu
-    "apps":       ("#F97316", "#EA580C"),  # Orange
-    "security":   ("#EC4899", "#DB2777"),  # Pink
-    "refresh":    ("#B45309", "#92400E"),  # Cokelat
-    "printer":    ("#64748B", "#475569"),  # Abu-abu
-    "fixrdp":     ("#6366F1", "#4F46E5"),  # Nila
-    "scp":        ("#14B8A6", "#0D9488"),  # Toska
-    "anydesk":    ("#D4A373", "#B38252"),  # Krem
+    "apps":       ("#64748B", "#475569"),  # Abu-Abu
+    "refresh":    ("#4ADE80", "#22C55E"),  # Hijau Muda
+    "printer":    ("#1E40AF", "#1E3A8A"),  # Biru Tua
+    "fixrdp":     ("#15803D", "#166534"),  # Hijau Tua
+    "scp":        ("#14B8A6", "#0D9488"),  # Toska (warna saat ini)
+    "security":   ("#6366F1", "#4F46E5"),  # Nila / Indigo
 }
 
 # Warna tile dashboard cadangan (jika ada tool baru)
