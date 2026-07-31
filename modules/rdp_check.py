@@ -47,18 +47,27 @@ class MultiHostRdpRunner:
 
     def _check(self, ip: str) -> tuple[bool, str]:
         sock: socket.socket | None = None
+        target_ip = ip.strip()
+        port = self.port
+        if ":" in target_ip:
+            parts = target_ip.split(":", 1)
+            target_ip = parts[0].strip()
+            try:
+                port = int(parts[1].strip())
+            except ValueError:
+                pass
         try:
-            sock = socket.create_connection((ip, self.port), timeout=self.connect_timeout)
-            return True, f"RDP :{self.port} open"
+            sock = socket.create_connection((target_ip, port), timeout=self.connect_timeout)
+            return True, f"RDP :{port} open"
         except TimeoutError:
-            return False, f"RDP :{self.port} timeout"
+            return False, f"RDP :{port} timeout"
         except OSError as exc:
             err = str(exc).lower()
             if "refused" in err or "10061" in err:
-                return False, f"RDP :{self.port} closed"
-            return False, f"RDP :{self.port} down"
+                return False, f"RDP :{port} closed"
+            return False, f"RDP :{port} down"
         except Exception:
-            return False, f"RDP :{self.port} down"
+            return False, f"RDP :{port} down"
         finally:
             if sock is not None:
                 try:

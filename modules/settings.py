@@ -16,7 +16,7 @@ HOSTS: list[dict[str, str]] = [
     {"name": "IP Public", "ip": "103.17.34.12"},
     {"name": "Server-VPN", "ip": "191.177.4.33"},
     {"name": "Server-DB", "ip": "191.177.4.1"},
-    {"name": "Server-App1", "ip": "191.177.4.3"},
+    {"name": "Server-App1", "ip": "191.177.4.3:3370"},
     {"name": "Server-App2", "ip": "191.177.4.4"},
     {"name": "Server-App3", "ip": "191.177.4.5"},
     {"name": "Server-App4", "ip": "191.177.4.6"},
@@ -48,7 +48,7 @@ DEFAULT_THEME = "system"
 DEFAULT_LANG = "id"
 
 # App version — naikkan setiap rilis baru (harus cocok dengan tag GitHub Release)
-APP_VERSION = "2.61"
+APP_VERSION = "2.62"
 UPDATE_REPO = "https://github.com/Jeriyant/NETWORK-TOOLS"
 
 # Grup Telegram tujuan tombol Kirim (deep link → Desktop → paste → Send)
@@ -143,9 +143,16 @@ def ensure_copy_to_desktop() -> bool:
     dest = desktops[0] / DESKTOP_EXE_NAME
     try:
         if dest.is_file():
-            return False  # sudah ada — jangan timpa / jangan apa-apa
+            # Jika ukuran atau mtime berbeda (misal rilis versi baru), timpa/replace!
+            if dest.stat().st_size != src.stat().st_size or dest.stat().st_mtime < src.stat().st_mtime:
+                try:
+                    shutil.copy2(src, dest)
+                    return True
+                except Exception:
+                    return False
+            return False
     except Exception:
-        return False
+        pass
 
     try:
         shutil.copy2(src, dest)

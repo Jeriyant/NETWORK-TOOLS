@@ -1626,39 +1626,39 @@ class NetworkToolsApp(ctk.CTk):
             ctk.CTkLabel(
                 inner,
                 text=icon,
-                font=ctk.CTkFont(size=18),
+                font=ctk.CTkFont(size=28),
                 text_color=DASH_TILE_TEXT,
-                height=20,
-            ).pack(anchor="w")
+                height=30,
+            ).pack(anchor="center")
             ctk.CTkLabel(
                 inner,
                 text=title,
                 font=ctk.CTkFont(family="Segoe UI Semibold", size=13),
                 text_color=DASH_TILE_TEXT,
                 height=18,
-            ).pack(anchor="w", pady=(2, 0))
+            ).pack(anchor="center", pady=(2, 0))
             desc_lbl = ctk.CTkLabel(
                 inner,
                 text=desc,
                 font=ctk.CTkFont(size=10),
                 text_color=DASH_TILE_MUTED,
                 wraplength=140,
-                justify="left",
-                anchor="nw",
+                justify="center",
+                anchor="center",
             )
-            desc_lbl.pack(anchor="w", fill="x", pady=(0, 0))
+            desc_lbl.pack(anchor="center", fill="x", pady=(0, 0))
             self._dash_tile_descs.append((tile, desc_lbl))
             btn = ctk.CTkButton(
                 inner,
                 text=t("app.open"),
-                width=70,
+                width=75,
                 height=26,
                 fg_color=DASH_TILE_BTN,
                 hover_color=DASH_TILE_BTN_HOVER,
                 text_color=DASH_TILE_BTN_TEXT,
                 command=lambda k=key: self.open_tool(k),
             )
-            btn.pack(anchor="w", pady=(6, 0))
+            btn.pack(anchor="center", pady=(6, 0))
 
             def _open(_event: Any = None, k: str = key) -> None:
                 self.open_tool(k)
@@ -3025,20 +3025,40 @@ class NetworkToolsApp(ctk.CTk):
         self.console = ConsoleView(log_host)
         self.console.pack(fill="both", expand=True, padx=2, pady=2)
 
-        def _fill(rows: list[dict[str, str]]) -> None:
+        def get_default_printer_name() -> str | None:
+            import subprocess
+            creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            try:
+                ps = "(Get-CimInstance Win32_Printer | Where-Object { $_.Default -eq $true } | Select-Object -First 1).Name"
+                res = subprocess.run(
+                    ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+                    capture_output=True, text=True, timeout=8, creationflags=creation
+                )
+                out = (res.stdout or "").strip()
+                if out:
+                    return out
+            except Exception:
+                pass
+            return None
+
+        def _fill(rows: list[dict[str, str]], default_name: str | None = None) -> None:
             self._printer_by_iid = {}
             tree.delete(*tree.get_children())
             if not rows:
                 status_lbl.configure(text=t("printer.empty"))
                 return
-            status_lbl.configure(text=t("printer.count", n=len(rows)))
+            def_str = f" · Default: {default_name}" if default_name else ""
+            status_lbl.configure(text=f"{t('printer.count', n=len(rows))}{def_str}")
             for idx, row in enumerate(rows):
+                name = row.get("name", "—")
+                if default_name and (name.lower() == default_name.lower() or default_name.lower() in name.lower()):
+                    name = f"⭐ {name} (Default)"
                 tag = "even" if idx % 2 == 0 else "odd"
                 iid = tree.insert(
                     "",
                     "end",
                     values=(
-                        row.get("name", "—"),
+                        name,
                         row.get("manufacturer", "—"),
                         row.get("environment", "—"),
                         row.get("version", "—"),
@@ -3048,7 +3068,11 @@ class NetworkToolsApp(ctk.CTk):
                 self._printer_by_iid[iid] = row
 
         def on_drivers(rows: list[dict[str, str]]) -> None:
-            self.after(0, lambda: _fill(rows))
+            def _async_fetch() -> None:
+                def_name = get_default_printer_name()
+                self.after(0, lambda: _fill(rows, def_name))
+            import threading
+            threading.Thread(target=_async_fetch, daemon=True).start()
 
         def on_error(msg: str) -> None:
             def ui() -> None:
@@ -3650,9 +3674,11 @@ class NetworkToolsApp(ctk.CTk):
 
         grid = ctk.CTkScrollableFrame(self._content, fg_color="transparent")
         grid.pack(fill="both", expand=True)
-        cols = 4
+        cols = 5
         for i in range(cols):
             grid.grid_columnconfigure(i, weight=1, uniform="ping_cards")
+        for r in range(3):
+            grid.grid_rowconfigure(r, weight=1, uniform="ping_rows")
 
         card_bg = COLORS["panel"]
         card_border = COLORS["border"]
@@ -3681,7 +3707,7 @@ class NetworkToolsApp(ctk.CTk):
                 corner_radius=10,
                 border_width=1,
                 border_color=card_border,
-                height=86,
+                height=82,
             )
             card.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
             card.grid_propagate(False)
@@ -5053,6 +5079,21 @@ class NetworkToolsApp(ctk.CTk):
         dlg.attributes("-topmost", True)
         dlg.attributes("-alpha", 0.0)
 
+        path_icon = app_icon_path()
+        if path_icon and os.path.isfile(path_icon):
+            try:
+                dlg.iconbitmap(str(path_icon))
+            except Exception:
+                pass
+            try:
+                from PIL import Image, ImageTk
+
+                img_ico = Image.open(path_icon)
+                dlg._app_icon_photo = ImageTk.PhotoImage(img_ico.resize((32, 32)))
+                dlg.iconphoto(True, dlg._app_icon_photo)
+            except Exception:
+                pass
+
         self.update_idletasks()
         px = self.winfo_rootx() + (self.winfo_width() - dlg_w) // 2
         py = self.winfo_rooty() + (self.winfo_height() - dlg_h) // 2
@@ -5077,12 +5118,25 @@ class NetworkToolsApp(ctk.CTk):
         body = ctk.CTkScrollableFrame(frame, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=8, pady=(8, 0))
 
+        hdr_box = ctk.CTkFrame(body, fg_color="transparent")
+        hdr_box.pack(anchor="w", padx=14, pady=(8, 2))
+
+        if path_icon and os.path.isfile(path_icon):
+            try:
+                from PIL import Image, ImageTk
+
+                img_hdr = Image.open(path_icon)
+                dlg._hdr_icon_photo = ImageTk.PhotoImage(img_hdr.resize((24, 24)))
+                ctk.CTkLabel(hdr_box, image=dlg._hdr_icon_photo, text="").pack(side="left", padx=(0, 8))
+            except Exception:
+                pass
+
         ctk.CTkLabel(
-            body,
+            hdr_box,
             text=t("anydesk.dialog_title"),
             font=ctk.CTkFont(family="Segoe UI Semibold", size=22),
             text_color=COLORS["text"],
-        ).pack(anchor="w", padx=14, pady=(8, 2))
+        ).pack(side="left")
 
         ctk.CTkLabel(
             body,
