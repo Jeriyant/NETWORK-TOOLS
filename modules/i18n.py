@@ -50,6 +50,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     # Sysinfo
     "sys.host": {"id": "HOST", "en": "HOST"},
     "sys.ip": {"id": "IP", "en": "IP"},
+    "sys.anydesk_id": {"id": "ID", "en": "ID"},
     "sys.latency": {"id": "LATENSI", "en": "LATENCY"},
     "sys.cpu": {"id": "CPU", "en": "CPU"},
     "sys.ram": {"id": "RAM", "en": "RAM"},

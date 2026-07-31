@@ -14,6 +14,7 @@ from typing import TypedDict
 class SystemInfo(TypedDict):
     hostname: str
     ip: str
+    anydesk_id: str
     latency: str
     cpu: str
     ram: str
@@ -179,10 +180,29 @@ def latency_to_dns(host: str = "8.8.8.8") -> str:
         return "-"
 
 
+def anydesk_id() -> str:
+    """Ambil ID AnyDesk lokal jika ada."""
+    try:
+        from modules.fix_anydesk import read_anydesk_id_from_files, find_anydesk_exe, get_anydesk_id_cli
+
+        aid = read_anydesk_id_from_files()
+        if aid:
+            return aid
+        exe = find_anydesk_exe()
+        if exe:
+            aid = get_anydesk_id_cli(exe)
+            if aid:
+                return aid
+    except Exception:
+        pass
+    return "-"
+
+
 def collect_system_info() -> SystemInfo:
     return {
         "hostname": hostname(),
         "ip": primary_ipv4(),
+        "anydesk_id": anydesk_id(),
         "latency": latency_to_dns("8.8.8.8"),
         "cpu": cpu_name(),
         "ram": ram_summary(),

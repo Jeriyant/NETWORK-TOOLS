@@ -1265,6 +1265,7 @@ class NetworkToolsApp(ctk.CTk):
         metrics = [
             ("hostname", t("sys.host"), "…", True),
             ("ip", t("sys.ip"), "…", True),
+            ("anydesk_id", t("sys.anydesk_id"), "…", True),
             ("latency", t("sys.latency"), "…", True),
             ("cpu", t("sys.cpu"), "…", False),
             ("ram", t("sys.ram"), "…", False),
@@ -1434,6 +1435,7 @@ class NetworkToolsApp(ctk.CTk):
                 info = {
                     "hostname": "-",
                     "ip": "-",
+                    "anydesk_id": "-",
                     "latency": "-",
                     "cpu": "-",
                     "ram": "-",
@@ -1492,6 +1494,7 @@ class NetworkToolsApp(ctk.CTk):
         mapping = {
             "hostname": info.get("hostname", "-"),
             "ip": info.get("ip", "-"),
+            "anydesk_id": info.get("anydesk_id", "-"),
             "latency": info.get("latency", "-"),
             "cpu": info.get("cpu", "-"),
             "ram": info.get("ram", "-"),
