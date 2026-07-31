@@ -163,6 +163,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     },
     "printer.uninstall": {"id": "Uninstall", "en": "Uninstall"},
     "printer.reinstall": {"id": "Reinstall", "en": "Reinstall"},
+    "printer.set_default": {"id": "Atur Default", "en": "Set Default"},
+    "printer.set_default_ctx": {"id": "Set as Default Printer", "en": "Set as Default Printer"},
     "printer.confirm_uninstall": {
         "id": "Uninstall driver printer “{name}”?\nPrinter yang memakai driver ini juga akan dihapus.",
         "en": "Uninstall printer driver “{name}”?\nPrinters using this driver will also be removed.",
@@ -279,7 +281,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "id": "Hubungkan dulu ke host sebelum memakai explorer.",
         "en": "Connect to a host before using the explorer.",
     },
-    "tool.anydesk.title": {"id": "Anydesk", "en": "Anydesk"},
+    "tool.anydesk.title": {"id": "Remote", "en": "Remote"},
     "tool.anydesk.desc": {
         "id": "Taskkill, jalankan AnyDesk (--tray), tampilkan ID",
         "en": "Taskkill, run AnyDesk (--tray), show ID",

@@ -11,7 +11,9 @@ from pathlib import Path
 # Gateway ip="auto" = detect default gateway at runtime
 HOSTS: list[dict[str, str]] = [
     {"name": "Internet", "ip": "8.8.8.8"},
+    {"name": "My IP", "ip": "my_ip"},
     {"name": "Gateway", "ip": "auto"},
+    {"name": "IP Public", "ip": "103.17.34.12"},
     {"name": "Server-VPN", "ip": "191.177.4.33"},
     {"name": "Server-DB", "ip": "191.177.4.1"},
     {"name": "Server-App1", "ip": "191.177.4.3"},
@@ -22,6 +24,7 @@ HOSTS: list[dict[str, str]] = [
     {"name": "Server-App6", "ip": "191.177.4.9"},
     {"name": "Server-App7", "ip": "191.177.4.7"},
     {"name": "Server-App8", "ip": "191.177.4.11"},
+    {"name": "Github", "ip": "github.com"},
 ]
 
 SPEEDTEST_URL = "https://jeriyant.speedtestcustom.com"
@@ -45,7 +48,7 @@ DEFAULT_THEME = "system"
 DEFAULT_LANG = "id"
 
 # App version — naikkan setiap rilis baru (harus cocok dengan tag GitHub Release)
-APP_VERSION = "2.60"
+APP_VERSION = "2.61"
 UPDATE_REPO = "https://github.com/Jeriyant/NETWORK-TOOLS"
 
 # Grup Telegram tujuan tombol Kirim (deep link → Desktop → paste → Send)
@@ -206,6 +209,8 @@ def host_dropdown_values() -> list[str]:
         ip = h["ip"]
         if ip == "auto":
             values.append(f"{name} - (otomatis cek gateway)")
+        elif ip == "my_ip":
+            values.append(f"{name} - (IP perangkat ini)")
         else:
             values.append(f"{name} - {ip}")
     return values
@@ -222,6 +227,13 @@ def resolve_target_ip(name: str, ip_text: str) -> tuple[str, str | None]:
     ip_text = ip_text.replace("\u2014", " ").replace("â€”", " ").strip()
     if ip_text.startswith("("):
         ip_text = ip_text.strip("()").strip()
+    if name.lower() == "my ip" or ip_text == "my_ip" or "perangkat ini" in ip_text.lower():
+        try:
+            from modules.system_info import primary_ipv4
+            my_ip = primary_ipv4()
+            return name or "My IP", my_ip
+        except Exception:
+            return name or "My IP", "-"
     if name.lower() == "gateway" or ip_text == "auto" or "otomatis" in ip_text.lower():
         gw = detect_default_gateway()
         return name or "Gateway", gw

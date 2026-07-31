@@ -287,9 +287,9 @@ class NetworkToolsApp(ctk.CTk):
         # Box animasi 3 lingkaran warna di kiri
         left_box = ctk.CTkFrame(foot_inner, fg_color="transparent")
         left_box.pack(side="left", padx=(16, 8))
-        self._lbl_left_r1 = ctk.CTkLabel(left_box, text="◜", font=ctk.CTkFont(family="Segoe UI Symbol", size=13, weight="bold"), text_color="#00D2FF", width=14)
-        self._lbl_left_r2 = ctk.CTkLabel(left_box, text="☉", font=ctk.CTkFont(family="Segoe UI Symbol", size=13, weight="bold"), text_color="#FF2BD6", width=14)
-        self._lbl_left_r3 = ctk.CTkLabel(left_box, text="•", font=ctk.CTkFont(family="Segoe UI Symbol", size=13, weight="bold"), text_color="#F59E0B", width=14)
+        self._lbl_left_r1 = ctk.CTkLabel(left_box, text="🔴", font=ctk.CTkFont(size=12))
+        self._lbl_left_r2 = ctk.CTkLabel(left_box, text="🟡", font=ctk.CTkFont(size=12))
+        self._lbl_left_r3 = ctk.CTkLabel(left_box, text="🟢", font=ctk.CTkFont(size=12))
         self._lbl_left_r1.pack(side="left")
         self._lbl_left_r2.pack(side="left", padx=2)
         self._lbl_left_r3.pack(side="left")
@@ -303,15 +303,14 @@ class NetworkToolsApp(ctk.CTk):
         )
         self._footer_label.pack(side="left", expand=True)
 
-        # Box animasi 3 lingkaran warna di kanan
         right_box = ctk.CTkFrame(foot_inner, fg_color="transparent")
         right_box.pack(side="right", padx=(8, 16))
-        self._lbl_right_r3 = ctk.CTkLabel(right_box, text="•", font=ctk.CTkFont(family="Segoe UI Symbol", size=13, weight="bold"), text_color="#F59E0B", width=14)
-        self._lbl_right_r2 = ctk.CTkLabel(right_box, text="☉", font=ctk.CTkFont(family="Segoe UI Symbol", size=13, weight="bold"), text_color="#FF2BD6", width=14)
-        self._lbl_right_r1 = ctk.CTkLabel(right_box, text="◟", font=ctk.CTkFont(family="Segoe UI Symbol", size=13, weight="bold"), text_color="#00D2FF", width=14)
-        self._lbl_right_r3.pack(side="left")
-        self._lbl_right_r2.pack(side="left", padx=2)
+        self._lbl_right_r1 = ctk.CTkLabel(right_box, text="🟢", font=ctk.CTkFont(size=12))
+        self._lbl_right_r2 = ctk.CTkLabel(right_box, text="🟡", font=ctk.CTkFont(size=12))
+        self._lbl_right_r3 = ctk.CTkLabel(right_box, text="🔴", font=ctk.CTkFont(size=12))
         self._lbl_right_r1.pack(side="left")
+        self._lbl_right_r2.pack(side="left", padx=2)
+        self._lbl_right_r3.pack(side="left")
 
         self._footer_anim_job: str | None = None
         self.after(300, self._tick_footer_anim)
@@ -416,31 +415,27 @@ class NetworkToolsApp(ctk.CTk):
                 pass
 
     def _tick_footer_anim(self) -> None:
-        """Animasi loading melingkar 3 lingkaran warna di kiri & kanan copyright."""
+        """Animasi 🔴🟡🟢 lampu bertukar-tukar warna di kiri & kanan copyright."""
         try:
-            r1_frames = ["◜", "◝", "◞", "◟"]
-            r2_frames = ["☉", "◓", "◑", "◒"]
-            r3_frames = ["•", "●", "◈", "•"]
-
-            self._footer_anim_i = (getattr(self, "_footer_anim_i", 0) + 1) % 4
-            i = self._footer_anim_i
-
-            t1_left = r1_frames[i]
-            t1_right = r1_frames[(i + 2) % 4]
-            t2 = r2_frames[i]
-            t3 = r3_frames[i]
+            frames = [
+                ("🔴", "🟡", "🟢"),
+                ("🟢", "🔴", "🟡"),
+                ("🟡", "🟢", "🔴"),
+            ]
+            self._footer_anim_i = (getattr(self, "_footer_anim_i", 0) + 1) % len(frames)
+            c1, c2, c3 = frames[self._footer_anim_i]
 
             if hasattr(self, "_lbl_left_r1"):
-                self._lbl_left_r1.configure(text=t1_left)
-                self._lbl_left_r2.configure(text=t2)
-                self._lbl_left_r3.configure(text=t3)
+                self._lbl_left_r1.configure(text=c1)
+                self._lbl_left_r2.configure(text=c2)
+                self._lbl_left_r3.configure(text=c3)
             if hasattr(self, "_lbl_right_r1"):
-                self._lbl_right_r1.configure(text=t1_right)
-                self._lbl_right_r2.configure(text=t2)
-                self._lbl_right_r3.configure(text=t3)
+                self._lbl_right_r1.configure(text=c3)
+                self._lbl_right_r2.configure(text=c2)
+                self._lbl_right_r3.configure(text=c1)
         except Exception:
             pass
-        self._footer_anim_job = self.after(180, self._tick_footer_anim)
+        self._footer_anim_job = self.after(350, self._tick_footer_anim)
 
     def _ensure_footer_visible(self) -> None:
         """Pastikan bar copyright selalu terpasang di bawah jendela."""
@@ -1514,7 +1509,11 @@ class NetworkToolsApp(ctk.CTk):
 
     # ----- navigation -----
     def _clear_frame(self, frame: ctk.CTkFrame) -> None:
-        # Jangan batalkan poll latensi / hapus cache saat ganti menu
+        # Perhalus transisi saat ganti menu: update UI & bersihkan komponen
+        try:
+            self.update_idletasks()
+        except Exception:
+            pass
         for child in frame.winfo_children():
             child.destroy()
 
@@ -2931,6 +2930,17 @@ class NetworkToolsApp(ctk.CTk):
         )
         btn_reinstall.pack(side="right", padx=(8, 0))
 
+        btn_set_default = ctk.CTkButton(
+            toolbar,
+            text=t("printer.set_default"),
+            width=110,
+            height=32,
+            fg_color=COLORS.get("teal", "#14B8A6"),
+            hover_color=COLORS.get("teal_hover", "#0D9488"),
+            text_color="#FFFFFF",
+        )
+        btn_set_default.pack(side="right", padx=(8, 0))
+
         btn_uninstall = ctk.CTkButton(
             toolbar,
             text=t("printer.uninstall"),
@@ -3124,12 +3134,71 @@ class NetworkToolsApp(ctk.CTk):
                 action, drv, on_line=self.log, on_done=done
             ).start()
 
+        def _run_set_default(drv: dict[str, str] | None = None) -> None:
+            if drv is None:
+                drv = _selected_driver()
+            if drv is None:
+                messagebox.showinfo(t("tool.printer.title"), t("printer.select"), parent=self)
+                return
+            name = drv.get("name", "")
+            if not name:
+                return
+            import subprocess
+            creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            status_lbl.configure(text=f"Mengatur '{name}' sebagai default...")
+            self.log(f"Mengatur '{name}' sebagai default printer...")
+
+            def worker() -> None:
+                ok = False
+                msg = ""
+                try:
+                    safe_name = name.replace("'", "''")
+                    ps = f"(Get-CimInstance Win32_Printer -Filter \"Name='{safe_name}'\").SetDefaultPrinter()"
+                    res = subprocess.run(
+                        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+                        capture_output=True, text=True, timeout=10, creationflags=creation
+                    )
+                    if res.returncode == 0:
+                        ok = True
+                        msg = f"Printer '{name}' berhasil dijadikan default."
+                    else:
+                        res2 = subprocess.run(
+                            ["rundll32", "printui.dll,PrintUIEntry", "/y", "/n", name],
+                            capture_output=True, text=True, timeout=10, creationflags=creation
+                        )
+                        if res2.returncode == 0:
+                            ok = True
+                            msg = f"Printer '{name}' berhasil dijadikan default."
+                        else:
+                            msg = f"Gagal mengatur default: {res.stderr or res.stdout}"
+                except Exception as ex:
+                    msg = f"Error: {ex}"
+
+                def ui_done() -> None:
+                    self.log(msg)
+                    if ok:
+                        status_lbl.configure(text=msg)
+                        messagebox.showinfo(t("tool.printer.title"), msg, parent=self)
+                    else:
+                        status_lbl.configure(text="Gagal mengatur default printer.")
+                        messagebox.showerror(t("tool.printer.title"), msg, parent=self)
+
+                self.after(0, ui_done)
+
+            import threading
+            threading.Thread(target=worker, daemon=True).start()
+
         def on_right(event: Any) -> None:
             row = tree.identify_row(event.y)
             if row:
                 tree.selection_set(row)
                 tree.focus(row)
             menu = tk.Menu(tree, tearoff=0)
+            menu.add_command(
+                label=t("printer.set_default_ctx"),
+                command=lambda: _run_set_default(),
+            )
+            menu.add_separator()
             menu.add_command(
                 label=t("printer.uninstall"),
                 command=lambda: _run_driver_action("uninstall"),
@@ -3146,6 +3215,7 @@ class NetworkToolsApp(ctk.CTk):
         tree.bind("<Button-3>", on_right)
         btn_refresh.configure(command=load)
         btn_fix.configure(command=run_fix)
+        btn_set_default.configure(command=lambda: _run_set_default())
         btn_uninstall.configure(command=lambda: _run_driver_action("uninstall"))
         btn_reinstall.configure(command=lambda: _run_driver_action("reinstall"))
 
@@ -5163,6 +5233,22 @@ class NetworkToolsApp(ctk.CTk):
         dlg.attributes("-topmost", True)
         dlg.attributes("-alpha", 0.0)
 
+        # Set logo icon aplikasi pada window dialog modal
+        path_icon = app_icon_path()
+        if path_icon and os.path.isfile(path_icon):
+            try:
+                dlg.iconbitmap(str(path_icon))
+            except Exception:
+                pass
+            try:
+                from PIL import Image, ImageTk
+
+                img_ico = Image.open(path_icon)
+                dlg._app_icon_photo = ImageTk.PhotoImage(img_ico.resize((32, 32)))
+                dlg.iconphoto(True, dlg._app_icon_photo)
+            except Exception:
+                pass
+
         self.update_idletasks()
         px = self.winfo_rootx() + (self.winfo_width() - dlg_w) // 2
         py = self.winfo_rooty() + (self.winfo_height() - dlg_h) // 2
@@ -5187,12 +5273,25 @@ class NetworkToolsApp(ctk.CTk):
         body = ctk.CTkFrame(frame, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=8, pady=(8, 0))
 
+        hdr_box = ctk.CTkFrame(body, fg_color="transparent")
+        hdr_box.pack(anchor="w", padx=14, pady=(8, 2))
+
+        if path_icon and os.path.isfile(path_icon):
+            try:
+                from PIL import Image, ImageTk
+
+                img_hdr = Image.open(path_icon)
+                dlg._hdr_icon_photo = ImageTk.PhotoImage(img_hdr.resize((24, 24)))
+                ctk.CTkLabel(hdr_box, image=dlg._hdr_icon_photo, text="").pack(side="left", padx=(0, 8))
+            except Exception:
+                pass
+
         ctk.CTkLabel(
-            body,
+            hdr_box,
             text=title,
             font=ctk.CTkFont(family="Segoe UI Semibold", size=20),
             text_color=COLORS["text"],
-        ).pack(anchor="w", padx=14, pady=(8, 2))
+        ).pack(side="left")
 
         ctk.CTkLabel(
             body,
