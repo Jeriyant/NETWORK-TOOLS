@@ -2917,39 +2917,11 @@ class NetworkToolsApp(ctk.CTk):
             hover_color=COLORS["accent_dim"],
             text_color=COLORS["on_accent"],
         )
-        btn_fix.pack(side="right", padx=(8, 0))
-
-        btn_reinstall = ctk.CTkButton(
-            toolbar,
-            text=t("printer.reinstall"),
-            width=100,
-            height=32,
-            fg_color=COLORS.get("warn", "#E6B422"),
-            hover_color=COLORS.get("warn_hover", "#C99A12"),
-            text_color=COLORS.get("on_warn", "#1A1400"),
-        )
-        btn_reinstall.pack(side="right", padx=(8, 0))
-
-        btn_set_default = ctk.CTkButton(
-            toolbar,
-            text=t("printer.set_default"),
-            width=110,
-            height=32,
-            fg_color=COLORS.get("teal", "#14B8A6"),
-            hover_color=COLORS.get("teal_hover", "#0D9488"),
-            text_color="#FFFFFF",
-        )
-        btn_set_default.pack(side="right", padx=(8, 0))
-
-        btn_uninstall = ctk.CTkButton(
-            toolbar,
-            text=t("printer.uninstall"),
-            width=100,
-            height=32,
-            fg_color=COLORS["danger"],
-            hover_color=COLORS["danger_hover"],
-        )
+        btn_refresh.pack(side="right", padx=(8, 0))
         btn_uninstall.pack(side="right", padx=(8, 0))
+        btn_reinstall.pack(side="right", padx=(8, 0))
+        btn_fix.pack(side="right", padx=(8, 0))
+        btn_set_default.pack(side="right", padx=(8, 0))
 
         list_wrap = ctk.CTkFrame(
             self._content,
@@ -3047,12 +3019,11 @@ class NetworkToolsApp(ctk.CTk):
             if not rows:
                 status_lbl.configure(text=t("printer.empty"))
                 return
-            def_str = f" · Default: {default_name}" if default_name else ""
-            status_lbl.configure(text=f"{t('printer.count', n=len(rows))}{def_str}")
+            status_lbl.configure(text=t("printer.count", n=len(rows)))
             for idx, row in enumerate(rows):
                 name = row.get("name", "—")
                 if default_name and (name.lower() == default_name.lower() or default_name.lower() in name.lower()):
-                    name = f"⭐ {name} (Default)"
+                    name = f"⭐  {name}"
                 tag = "even" if idx % 2 == 0 else "odd"
                 iid = tree.insert(
                     "",
@@ -3400,15 +3371,16 @@ class NetworkToolsApp(ctk.CTk):
 
         app_hosts = sorted(app_hosts, key=_app_key)
 
-        targets: list[tuple[str, str, str]] = []
+        targets: list[tuple[str, str, str, int]] = []
         for idx, host in enumerate(app_hosts):
             name = str(host.get("name") or f"Server-App{idx + 1}")
             raw_ip = str(host.get("ip") or "")
             disp_name, ip = resolve_target_ip(name, raw_ip)
             host_id = f"{idx}:{disp_name}"
-            ip_show = ip or raw_ip or "—"
+            port = 3370 if disp_name.lower() == "server-app1" else 3389
+            ip_show = f"{ip}:{port}" if ip else raw_ip or "—"
             if ip:
-                targets.append((host_id, disp_name, ip))
+                targets.append((host_id, disp_name, ip, port))
 
             r, c = divmod(idx, cols)
             card = ctk.CTkFrame(

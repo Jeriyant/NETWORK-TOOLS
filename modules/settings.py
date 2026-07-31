@@ -16,7 +16,7 @@ HOSTS: list[dict[str, str]] = [
     {"name": "IP Public", "ip": "103.17.34.12"},
     {"name": "Server-VPN", "ip": "191.177.4.33"},
     {"name": "Server-DB", "ip": "191.177.4.1"},
-    {"name": "Server-App1", "ip": "191.177.4.3:3370"},
+    {"name": "Server-App1", "ip": "191.177.4.3"},
     {"name": "Server-App2", "ip": "191.177.4.4"},
     {"name": "Server-App3", "ip": "191.177.4.5"},
     {"name": "Server-App4", "ip": "191.177.4.6"},
