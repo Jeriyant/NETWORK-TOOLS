@@ -10,13 +10,13 @@ from typing import Callable
 
 class MultiHostRdpRunner:
     """
-    Cek berkala apakah port RDP (default 3389 atau custom port) terbuka di tiap host.
+    Cek berkala apakah port RDP (default 3389) terbuka di tiap host.
     on_status(host_id, ok, status_text)
     """
 
     def __init__(
         self,
-        targets: list[tuple[str, str, str] | tuple[str, str, str, int]],
+        targets: list[tuple[str, str, str]],
         on_status: Callable[[str, bool, str], None],
         *,
         port: int = 3389,
@@ -25,7 +25,7 @@ class MultiHostRdpRunner:
     ) -> None:
         self.targets = list(targets)
         self.on_status = on_status
-        self.default_port = int(port)
+        self.port = int(port)
         self.interval = max(1.0, float(interval))
         self.connect_timeout = max(0.5, float(connect_timeout))
         self._stop = threading.Event()
@@ -34,14 +34,14 @@ class MultiHostRdpRunner:
     def start(self) -> None:
         self._stop.clear()
         for item in self.targets:
-            if len(item) == 4:
-                host_id, _name, ip, item_port = item  # type: ignore
+            if len(item) >= 4:
+                host_id, _name, ip, custom_port = item[0], item[1], item[2], item[3]
             else:
-                host_id, _name, ip = item[:3]  # type: ignore
-                item_port = self.default_port
+                host_id, _name, ip = item[0], item[1], item[2]
+                custom_port = self.port
             th = threading.Thread(
                 target=self._loop,
-                args=(host_id, ip, item_port),
+                args=(host_id, ip, custom_port),
                 daemon=True,
             )
             self._threads.append(th)
@@ -50,9 +50,10 @@ class MultiHostRdpRunner:
     def stop(self) -> None:
         self._stop.set()
 
-    def _check(self, ip: str, port: int) -> tuple[bool, str]:
+    def _check(self, ip: str, override_port: int | None = None) -> tuple[bool, str]:
         sock: socket.socket | None = None
         target_ip = ip.strip()
+        port = override_port if override_port is not None else self.port
         if ":" in target_ip:
             parts = target_ip.split(":", 1)
             target_ip = parts[0].strip()
@@ -79,9 +80,10 @@ class MultiHostRdpRunner:
                 except Exception:
                     pass
 
-    def _loop(self, host_id: str, ip: str, port: int) -> None:
+    def _loop(self, host_id: str, ip: str, port: int | None = None) -> None:
+        p = port if port is not None else self.port
         while not self._stop.is_set():
-            ok, text = self._check(ip, port)
+            ok, text = self._check(ip, p)
             try:
                 self.on_status(host_id, ok, text)
             except Exception:

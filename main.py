@@ -2908,6 +2908,27 @@ class NetworkToolsApp(ctk.CTk):
         )
         btn_refresh.pack(side="right", padx=(8, 0))
 
+        btn_uninstall = ctk.CTkButton(
+            toolbar,
+            text=t("printer.uninstall"),
+            width=100,
+            height=32,
+            fg_color=COLORS["danger"],
+            hover_color=COLORS["danger_hover"],
+        )
+        btn_uninstall.pack(side="right", padx=(8, 0))
+
+        btn_reinstall = ctk.CTkButton(
+            toolbar,
+            text=t("printer.reinstall"),
+            width=100,
+            height=32,
+            fg_color=COLORS.get("warn", "#E6B422"),
+            hover_color=COLORS.get("warn_hover", "#C99A12"),
+            text_color=COLORS.get("on_warn", "#1A1400"),
+        )
+        btn_reinstall.pack(side="right", padx=(8, 0))
+
         btn_fix = ctk.CTkButton(
             toolbar,
             text=t("printer.fix"),
@@ -2917,10 +2938,17 @@ class NetworkToolsApp(ctk.CTk):
             hover_color=COLORS["accent_dim"],
             text_color=COLORS["on_accent"],
         )
-        btn_refresh.pack(side="right", padx=(8, 0))
-        btn_uninstall.pack(side="right", padx=(8, 0))
-        btn_reinstall.pack(side="right", padx=(8, 0))
         btn_fix.pack(side="right", padx=(8, 0))
+
+        btn_set_default = ctk.CTkButton(
+            toolbar,
+            text=t("printer.set_default"),
+            width=110,
+            height=32,
+            fg_color=COLORS.get("teal", "#14B8A6"),
+            hover_color=COLORS.get("teal_hover", "#0D9488"),
+            text_color="#FFFFFF",
+        )
         btn_set_default.pack(side="right", padx=(8, 0))
 
         list_wrap = ctk.CTkFrame(
@@ -2989,25 +3017,57 @@ class NetworkToolsApp(ctk.CTk):
         tree.tag_configure("odd", background=COLORS["bg"])
         tree.tag_configure("even", background=COLORS["panel"])
 
+        default_status_strip = ctk.CTkFrame(self._content, fg_color="transparent", height=24)
+        default_status_strip.pack(fill="x", pady=(4, 0))
+        default_lbl = ctk.CTkLabel(
+            default_status_strip,
+            text="Default Printer: Memuat...",
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=11),
+            text_color=COLORS.get("teal", "#14B8A6"),
+            anchor="w",
+        )
+        default_lbl.pack(side="left", padx=4)
+
         log_host = ctk.CTkFrame(
             self._content, fg_color=COLORS["console_bg"], height=130, corner_radius=8
         )
-        log_host.pack(fill="x", pady=(8, 0))
+        log_host.pack(fill="x", pady=(4, 0))
         log_host.pack_propagate(False)
         self.console = ConsoleView(log_host)
         self.console.pack(fill="both", expand=True, padx=2, pady=2)
+
+        def get_default_printer_name() -> str | None:
+            import subprocess
+            creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            try:
+                ps = "(Get-CimInstance Win32_Printer | Where-Object { $_.Default -eq $true } | Select-Object -First 1).Name"
+                res = subprocess.run(
+                    ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+                    capture_output=True, text=True, timeout=8, creationflags=creation
+                )
+                out = (res.stdout or "").strip()
+                if out:
+                    return out
+            except Exception:
+                pass
+            return None
 
         def _fill(rows: list[dict[str, str]], default_name: str | None = None) -> None:
             self._printer_by_iid = {}
             tree.delete(*tree.get_children())
             if not rows:
                 status_lbl.configure(text=t("printer.empty"))
+                default_lbl.configure(text="Default Printer: —")
                 return
             status_lbl.configure(text=t("printer.count", n=len(rows)))
+            if default_name:
+                default_lbl.configure(text=f"⭐ Default Printer: {default_name}")
+            else:
+                default_lbl.configure(text="Default Printer: tidak terdeteksi")
             for idx, row in enumerate(rows):
                 name = row.get("name", "—")
-                if default_name and (name.lower() in default_name.lower() or default_name.lower() in name.lower()):
-                    name = f"⭐  {name}"
+                if default_name and (name.lower() == default_name.lower() or default_name.lower() in name.lower()):
+                    name = f"⭐ {name} (Default)"
                 tag = "even" if idx % 2 == 0 else "odd"
                 iid = tree.insert(
                     "",
@@ -3022,8 +3082,12 @@ class NetworkToolsApp(ctk.CTk):
                 )
                 self._printer_by_iid[iid] = row
 
-        def on_drivers(rows: list[dict[str, str]], default_name: str | None) -> None:
-            self.after(0, lambda: _fill(rows, default_name))
+        def on_drivers(rows: list[dict[str, str]]) -> None:
+            def _async_fetch() -> None:
+                def_name = get_default_printer_name()
+                self.after(0, lambda: _fill(rows, def_name))
+            import threading
+            threading.Thread(target=_async_fetch, daemon=True).start()
 
         def on_error(msg: str) -> None:
             def ui() -> None:
@@ -3358,7 +3422,7 @@ class NetworkToolsApp(ctk.CTk):
             disp_name, ip = resolve_target_ip(name, raw_ip)
             host_id = f"{idx}:{disp_name}"
             port = 3370 if disp_name.lower() == "server-app1" else 3389
-            ip_show = f"{ip}:{port}" if ip else raw_ip or "—"
+            ip_show = f"{ip}:{port}" if (ip and port != 3389) else (ip or raw_ip or "—")
             if ip:
                 targets.append((host_id, disp_name, ip, port))
 
